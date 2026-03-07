@@ -54,6 +54,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   const storageBreakdown = document.getElementById('storage-breakdown');
   const toastEl = document.getElementById('toast');
 
+  const backToHubBtn = document.getElementById('back-to-hub-btn');
   const refreshBtn = document.getElementById('refresh-btn');
   const blockUserBtn = document.getElementById('block-user-btn');
   const saveFlairBtn = document.getElementById('save-flair-btn');
@@ -377,6 +378,16 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
 
     if (message.type === 'state' && message.payload) {
       state = message.payload;
+      if (approvedSearchRequestId === 0 && Array.isArray(state.approved)) {
+        approvedSearchItems = state.approved.slice();
+        approvedSearchOffset = approvedSearchItems.length;
+        approvedSearchHasMore = Boolean(state.approvedHasMore);
+      }
+      if (auditSearchRequestId === 0 && Array.isArray(state.auditLog)) {
+        auditSearchItems = state.auditLog.slice();
+        auditSearchOffset = auditSearchItems.length;
+        auditSearchHasMore = Boolean(state.auditHasMore);
+      }
       stateInitialized = true;
       setBusy(false);
       if (mainContent) {
@@ -392,9 +403,17 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
         if (activeHistoryView === 'records') {
           runHistoryRecordsSearchWithInputGuard(true);
         } else if (activeHistoryView === 'approved') {
-          runApprovedSearchWithInputGuard(true);
+          if (shouldUseSeededApprovedResults()) {
+            renderApprovedSearchResults();
+          } else {
+            runApprovedSearchWithInputGuard(true);
+          }
         } else if (activeHistoryView === 'audit') {
-          runAuditSearchWithInputGuard(true);
+          if (shouldUseSeededAuditResults()) {
+            renderAuditSearchResults();
+          } else {
+            runAuditSearchWithInputGuard(true);
+          }
         }
       }
       return;
@@ -1790,6 +1809,11 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
     }
   }
 
+  function buildHubPath() {
+    const search = window.location.search || '';
+    return `./hub.html${search}`;
+  }
+
   function runHistoryRecordsSearch(reset) {
     if (reset) {
       historySearchItems = [];
@@ -1881,6 +1905,20 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
     runAuditSearch(reset);
   }
 
+  function shouldUseSeededApprovedResults() {
+    return approvedSearchRequestId === 0 && approvedSearchItems.length > 0;
+  }
+
+  function shouldUseSeededAuditResults() {
+    return auditSearchRequestId === 0 && auditSearchItems.length > 0;
+  }
+
+  if (backToHubBtn) {
+    backToHubBtn.addEventListener('click', () => {
+      window.location.assign(buildHubPath());
+    });
+  }
+
   refreshBtn.addEventListener('click', () => postWithBusy({ type: 'refresh' }));
 
   if (blockUserBtn) {
@@ -1922,10 +1960,18 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
           return;
         }
         if (activeHistoryView === 'approved') {
+          if (shouldUseSeededApprovedResults()) {
+            renderApprovedSearchResults();
+            return;
+          }
           runApprovedSearchWithInputGuard(true);
           return;
         }
         if (activeHistoryView === 'audit') {
+          if (shouldUseSeededAuditResults()) {
+            renderAuditSearchResults();
+            return;
+          }
           runAuditSearchWithInputGuard(true);
         }
       });
@@ -2262,9 +2308,17 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
           if (activeHistoryView === 'records') {
             runHistoryRecordsSearchWithInputGuard(true);
           } else if (activeHistoryView === 'approved') {
-            runApprovedSearchWithInputGuard(true);
+            if (shouldUseSeededApprovedResults()) {
+              renderApprovedSearchResults();
+            } else {
+              runApprovedSearchWithInputGuard(true);
+            }
           } else if (activeHistoryView === 'audit') {
-            runAuditSearchWithInputGuard(true);
+            if (shouldUseSeededAuditResults()) {
+              renderAuditSearchResults();
+            } else {
+              runAuditSearchWithInputGuard(true);
+            }
           }
         }
       }
