@@ -1,4 +1,4 @@
-import { showForm, showToast as devvitShowToast } from '@devvit/web/client';
+import { requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 
 const DENY_REASON_LABEL = {
   photoshop: 'Photoshop',
@@ -339,7 +339,17 @@ export function mountHub(options = {}) {
     void refreshState();
   });
 
-  refs.modPanelBtn.addEventListener('click', () => {
+  refs.modPanelBtn.addEventListener('click', (event) => {
+    if (inline) {
+      try {
+        if (event instanceof MouseEvent) {
+          requestExpandedMode(event, 'modPanel');
+          return;
+        }
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    }
     window.location.assign(modPanelPath || './mod-panel.html');
   });
 
