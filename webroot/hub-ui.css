@@ -222,6 +222,10 @@ button:disabled {
   color: var(--primary);
 }
 
+.legal-link-disabled {
+  opacity: 0.7;
+}
+
 .hidden {
   display: none;
 }

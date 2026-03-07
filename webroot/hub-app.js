@@ -158,17 +158,24 @@ export function mountHub(options = {}) {
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
-  ].filter((item) => item.url);
+  ];
 
-  if (refs.legalLinks && legalLinks.length > 0) {
+  if (refs.legalLinks) {
     refs.legalLinks.classList.remove('hidden');
     for (const item of legalLinks) {
       const link = document.createElement('a');
       link.className = 'legal-link';
-      link.href = item.url;
+      if (!item.url) {
+        link.classList.add('legal-link-disabled');
+      }
+      link.href = item.url || '#';
       link.textContent = item.label;
       link.addEventListener('click', (event) => {
         event.preventDefault();
+        if (!item.url) {
+          showToast(`${item.label} URL is not configured.`, 'error');
+          return;
+        }
         navigateTo(item.url);
       });
       refs.legalLinks.appendChild(link);
