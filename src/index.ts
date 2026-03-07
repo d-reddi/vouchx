@@ -592,6 +592,4 @@ app.post('/api/mod/search/audit', async (req, res) => {
 
 const server = createServer(app);
 
-server.listen(getServerPort(), () => {
-  console.log(`Server running on port ${getServerPort()}`);
-});
+server.listen(getServerPort());
