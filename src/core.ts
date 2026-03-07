@@ -797,7 +797,7 @@ async function submitVerification(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await trackSubreddit(context, subredditName);
   const config = await getRuntimeConfig(context, subredditId);
   if (!config.verificationsEnabled) {
@@ -893,7 +893,7 @@ async function onModeratorPurgeUserData(
     throw new Error('You must be logged in as a moderator.');
   }
 
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await trackSubreddit(context, subredditName);
   await assertCanReview(context, subredditName, moderator);
@@ -945,7 +945,7 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
     throw new Error('No pending verification request found.');
   }
 
-  const currentSubredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const currentSubredditName = await getCurrentSubredditNameCompat(context);
 
   await purgeUserVerificationData(
     context,
@@ -967,7 +967,7 @@ async function deleteCurrentUserVerificationData(context: Devvit.Context): Promi
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditHint = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditHint = await getCurrentSubredditNameCompat(context);
   const result = await purgeUserVerificationData(context, subredditId, subredditHint, username, {
     removeFlair: true,
     removeAuditEntries: true,
@@ -1299,7 +1299,7 @@ async function setPendingClaimState(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
   const record = await getRecord(context, subredditId, verificationId);
@@ -1351,7 +1351,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
   const record = await getRecord(context, subredditId, verificationId);
@@ -1604,7 +1604,7 @@ async function denyVerification(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
   const record = await getRecord(context, subredditId, verificationId);
@@ -1741,7 +1741,7 @@ async function reopenDeniedVerification(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
   const deniedRecord = await getRecord(context, subredditId, verificationId);
@@ -1832,7 +1832,7 @@ async function cancelReopenedVerification(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
   const reopenedRecord = await getRecord(context, subredditId, verificationId);
@@ -1906,7 +1906,7 @@ async function removeApprovedVerificationByModerator(
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const currentSubreddit = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const currentSubreddit = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, currentSubreddit, moderator);
 
   const record = await getRecord(context, subredditId, verificationId);
@@ -2272,7 +2272,7 @@ async function sendUserModmailWithFallback(
 
 async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
   const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
@@ -3727,7 +3727,7 @@ async function onSaveFlairTemplateValues(
     throw new Error('You must be logged in as a moderator.');
   }
 
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanReview(context, subredditName, moderator);
 
@@ -3769,7 +3769,7 @@ async function onSaveModmailTemplatesValues(
     throw new Error('You must be logged in as a moderator.');
   }
 
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanReview(context, subredditName, moderator);
 
@@ -3825,7 +3825,7 @@ async function onSaveThemeValues(values: ThemeSettingsValues, context: Devvit.Co
     throw new Error('You must be logged in as a moderator.');
   }
 
-  const subredditName = sanitizeSubredditName(await context.reddit.getCurrentSubredditName());
+  const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanReview(context, subredditName, moderator);
 
@@ -4293,6 +4293,30 @@ function sanitizeSubredditId(input: string): string {
 
 function sanitizeSubredditName(input: string): string {
   return input.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
+}
+
+async function getCurrentSubredditNameCompat(
+  context: Pick<Devvit.Context, 'reddit'> & { subredditName?: string | null }
+): Promise<string> {
+  const contextSubredditName = sanitizeSubredditName(typeof context.subredditName === 'string' ? context.subredditName : '');
+  if (contextSubredditName) {
+    return contextSubredditName;
+  }
+
+  const redditClient = context.reddit as Devvit.Context['reddit'] & {
+    getCurrentSubredditName?: () => Promise<string>;
+    getCurrentSubreddit: () => Promise<{ name?: string | null }>;
+  };
+
+  if (typeof redditClient.getCurrentSubredditName === 'function') {
+    const subredditName = sanitizeSubredditName(await redditClient.getCurrentSubredditName());
+    if (subredditName) {
+      return subredditName;
+    }
+  }
+
+  const subreddit = await redditClient.getCurrentSubreddit();
+  return sanitizeSubredditName(typeof subreddit?.name === 'string' ? subreddit.name : '');
 }
 
 function normalizeUsername(input: string): string {
@@ -5264,6 +5288,7 @@ export {
   purgeAuditLogOlderThanDays,
   sanitizeSubredditId,
   sanitizeSubredditName,
+  getCurrentSubredditNameCompat,
   trackSubreddit,
   errorText,
   resolveThemePalette,
