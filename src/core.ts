@@ -131,10 +131,12 @@ type DashboardData = {
   userLatest: VerificationRecord | null;
   viewerBlocked: BlockedUserEntry | null;
   pending: VerificationRecord[];
-  approved: VerificationRecord[];
+  approved: ApprovedSearchPanelItem[];
   blocked: BlockedUserEntry[];
-  auditLog: AuditLogEntry[];
+  auditLog: AuditSearchPanelItem[];
   storage: StorageUsage;
+  approvedHasMore: boolean;
+  auditHasMore: boolean;
 };
 
 type FlairVerificationCheck = {
@@ -353,6 +355,10 @@ type ModPanelStatePayload = {
   subredditName: string;
   pendingCount: number;
   pending: PendingPanelItem[];
+  approved: ApprovedSearchPanelItem[];
+  approvedHasMore: boolean;
+  auditLog: AuditSearchPanelItem[];
+  auditHasMore: boolean;
   blocked: BlockedUserEntry[];
   storage: StorageUsage;
   config: RuntimeConfig;
@@ -743,6 +749,10 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
     subredditName: dashboard.subredditName,
     pendingCount: dashboard.pending.length,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
+    approved: dashboard.approved,
+    approvedHasMore: dashboard.approvedHasMore,
+    auditLog: dashboard.auditLog,
+    auditHasMore: dashboard.auditHasMore,
     blocked: dashboard.blocked,
     storage: dashboard.storage,
     config: dashboard.config,
@@ -2292,9 +2302,21 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   }
   const viewerBlocked = viewerUsername ? await getBlockedUser(context, subredditId, viewerUsername) : null;
   const pending = canReviewUser ? await listPendingVerifications(context, subredditId) : [];
-  const approved: VerificationRecord[] = [];
+  const approvedSearch = canReviewUser
+    ? await searchApprovedRecords(context, subredditId, {
+        offset: 0,
+        limit: 25,
+      })
+    : { items: [], hasMore: false };
+  const approved = approvedSearch.items;
   const blocked = canReviewUser ? await listBlockedUsers(context, subredditId) : [];
-  const auditLog: AuditLogEntry[] = [];
+  const auditSearch = canReviewUser
+    ? await searchAuditEntries(context, subredditId, {
+        offset: 0,
+        limit: 25,
+      })
+    : { items: [], hasMore: false };
+  const auditLog = auditSearch.items;
   const storage = canReviewUser ? await estimateSubredditStorageUsage(context, subredditId) : emptyStorageUsage();
   const viewerSnapshot = viewerUsername ? await getViewerSnapshot(context) : { accountAgeDays: null, totalKarma: null };
   let viewerFlairSnapshot = viewerUsername
@@ -2364,6 +2386,8 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     blocked,
     auditLog,
     storage,
+    approvedHasMore: Boolean(approvedSearch.hasMore),
+    auditHasMore: Boolean(auditSearch.hasMore),
   };
 }
 
