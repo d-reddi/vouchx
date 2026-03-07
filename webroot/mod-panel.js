@@ -1,4 +1,4 @@
-import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -1914,7 +1914,15 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   }
 
   if (backToHubBtn) {
-    backToHubBtn.addEventListener('click', () => {
+    backToHubBtn.addEventListener('click', (event) => {
+      if (event instanceof MouseEvent && getWebViewMode() === 'expanded') {
+        try {
+          exitExpandedMode(event);
+          return;
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+        }
+      }
       window.location.assign(buildHubPath());
     });
   }

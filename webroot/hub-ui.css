@@ -151,8 +151,7 @@ h2 {
   margin-top: 14px;
 }
 
-button,
-a.photo-link {
+button {
   font: inherit;
   border-radius: 12px;
   border: 1px solid transparent;
@@ -197,13 +196,6 @@ button:disabled {
 
 .submission-box p:last-child {
   margin-bottom: 0;
-}
-
-.photo-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
 }
 
 .info-msg {
