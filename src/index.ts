@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Devvit } from '@devvit/public-api';
-import { context, createServer, getServerPort, reddit, redis, scheduler, settings } from '@devvit/web/server';
+import { context, createServer, getServerPort, realtime, reddit, redis, scheduler, settings } from '@devvit/web/server';
 
 import {
   blockUserForModerator,
@@ -44,6 +44,7 @@ type HttpError = Error & {
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
+const MOD_REFRESH_SIGNAL = Object.freeze({ type: 'refresh' });
 
 function httpError(status: number, message: string): HttpError {
   const error = new Error(message) as HttpError;
@@ -94,7 +95,29 @@ async function buildModPayload(appContext: Devvit.Context) {
   }
   return {
     state: toModPanelState(dashboard),
+    realtimeChannel: modRealtimeChannel(appContext),
   };
+}
+
+function modRealtimeChannel(appContext: Devvit.Context): string {
+  const normalizeChannelPart = (value: string): string =>
+    String(value || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, '_');
+  const subredditId = sanitizeSubredditId(appContext.subredditId);
+  if (subredditId) {
+    return `vouchx_mod_refresh_${normalizeChannelPart(subredditId)}`;
+  }
+  const subredditName = String(appContext.subredditName ?? '').trim().toLowerCase();
+  return `vouchx_mod_refresh_name_${normalizeChannelPart(subredditName || 'unknown')}`;
+}
+
+async function sendModRefreshSignal(appContext: Devvit.Context): Promise<void> {
+  try {
+    await realtime.send(modRealtimeChannel(appContext), MOD_REFRESH_SIGNAL);
+  } catch (error) {
+    console.log(`Realtime refresh send failed: ${errorText(error)}`);
+  }
 }
 
 function asDenyReason(value: unknown): DenyReason | null {
@@ -139,6 +162,7 @@ app.post('/api/hub/submit', async (req, res) => {
   try {
     const appContext = currentContext();
     const result = await submitVerification(req.body as SubmitVerificationValues, appContext);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildHubPayload(appContext)),
       toast: submitToast(result),
@@ -152,6 +176,7 @@ app.post('/api/hub/withdraw', async (_req, res) => {
   try {
     const appContext = currentContext();
     await withdrawCurrentUserPendingVerification(appContext);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildHubPayload(appContext)),
       toast: { text: 'Pending verification withdrawn.', tone: 'success' },
@@ -168,6 +193,7 @@ app.post('/api/hub/delete', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await deleteCurrentUserVerificationData(appContext);
+    await sendModRefreshSignal(appContext);
     const text =
       result.flairRemovalFailedFor.length > 0
         ? `Data removed, but flair removal failed for: ${result.flairRemovalFailedFor.map((name: string) => `r/${name}`).join(', ')}`
@@ -225,6 +251,7 @@ app.post('/api/mod/approve', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await approveVerification(appContext, verificationId);
+    await sendModRefreshSignal(appContext);
     const approvalFailed = result.flair.status === 'failed';
     const success = !approvalFailed && result.modmail.status !== 'failed' && result.modNote.status !== 'failed';
     const details = [
@@ -260,6 +287,7 @@ app.post('/api/mod/deny', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);
+    await sendModRefreshSignal(appContext);
     const blockText = result.userBlocked
       ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.`
       : '';
@@ -288,6 +316,7 @@ app.post('/api/mod/claim', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await setPendingClaimState(appContext, verificationId, true);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -308,6 +337,7 @@ app.post('/api/mod/unclaim', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await setPendingClaimState(appContext, verificationId, false);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -328,6 +358,7 @@ app.post('/api/mod/reopen', async (req, res) => {
     }
     const appContext = currentContext();
     const reopened = await reopenDeniedVerification(appContext, verificationId);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -348,6 +379,7 @@ app.post('/api/mod/cancel-reopen', async (req, res) => {
     }
     const appContext = currentContext();
     const canceled = await cancelReopenedVerification(appContext, verificationId);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -372,6 +404,7 @@ app.post('/api/mod/remove', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await removeApprovedVerificationByModerator(appContext, verificationId, reason);
+    await sendModRefreshSignal(appContext);
     const tone = result.flair.status === 'failed' || result.modmail.status === 'failed' ? 'error' : 'success';
     res.json({
       ...(await buildModPayload(appContext)),
@@ -415,6 +448,7 @@ app.post('/api/mod/block', async (req, res) => {
       username,
       moderator
     );
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -448,6 +482,7 @@ app.post('/api/mod/unblock', async (req, res) => {
       username,
       moderator
     );
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -464,6 +499,7 @@ app.post('/api/mod/settings/flair', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveFlairTemplateValues(req.body ?? {}, appContext);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: { text: 'Saved verification settings.', tone: 'success' },
@@ -477,6 +513,7 @@ app.post('/api/mod/settings/templates', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveModmailTemplatesValues(req.body ?? {}, appContext);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: { text: 'Saved modmail templates.', tone: 'success' },
@@ -490,6 +527,7 @@ app.post('/api/mod/settings/theme', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveThemeValues(req.body ?? {}, appContext);
+    await sendModRefreshSignal(appContext);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: { text: 'Saved theme settings.', tone: 'success' },
