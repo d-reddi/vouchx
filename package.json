@@ -1,0 +1,28 @@
+{
+  "name": "vouchx",
+  "version": "0.0.2",
+  "private": true,
+  "description": "A Devvit Web verification hub with moderator workflows",
+  "type": "module",
+  "scripts": {
+    "dev": "npx devvit playtest",
+    "build": "vite build",
+    "deploy": "npm run build && npx devvit upload --no-build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@devvit/public-api": "^0.12.13",
+    "@types/node": "^22.10.5",
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@devvit/start": "^0.12.13",
+    "@devvit/web": "^0.12.13",
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
+    "vite": "^7.3.1"
+  }
+}

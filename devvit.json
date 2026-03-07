@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "vouchx",
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "entry": "webroot/index.html",
+        "height": "regular",
+        "inline": true
+      },
+      "hub": {
+        "entry": "webroot/hub.html",
+        "height": "tall"
+      },
+      "modPanel": {
+        "entry": "webroot/mod-panel.html",
+        "height": "tall"
+      }
+    }
+  },
+  "server": {
+    "entry": "dist/server/index.cjs"
+  },
+  "blocks": {
+    "entry": "src/main.tsx"
+  },
+  "permissions": {
+    "reddit": {
+      "enable": true,
+      "scope": "moderator"
+    },
+    "redis": true,
+    "media": true
+  },
+  "dev": {
+    "subreddit": "vouchx_dev"
+  }
+}
