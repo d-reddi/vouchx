@@ -6,7 +6,7 @@
     "entrypoints": {
       "default": {
         "entry": "webroot/index.html",
-        "height": "regular",
+        "height": "tall",
         "inline": true
       },
       "hub": {
@@ -20,7 +20,8 @@
     }
   },
   "server": {
-    "entry": "dist/server/index.cjs"
+    "dir": "dist/server",
+    "entry": "index.cjs"
   },
   "blocks": {
     "entry": "src/main.tsx"

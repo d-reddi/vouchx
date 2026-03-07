@@ -10,6 +10,7 @@ import {
   deleteVerificationDataFormDefinition,
   denyVerification,
   errorText,
+  getCurrentSubredditNameCompat,
   loadDashboard,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
@@ -57,6 +58,7 @@ function currentContext(): Devvit.Context {
     scheduler,
     settings,
     subredditId: context.subredditId ?? '',
+    subredditName: context.subredditName ?? '',
     userId: context.userId ?? '',
     postId: context.postId ?? '',
   } as unknown as Devvit.Context;
@@ -402,7 +404,7 @@ app.post('/api/mod/block', async (req, res) => {
     }
     const appContext = currentContext();
     const moderator = await appContext.reddit.getCurrentUsername();
-    const subredditName = await appContext.reddit.getCurrentSubredditName();
+    const subredditName = await getCurrentSubredditNameCompat(appContext);
     if (!moderator) {
       throw httpError(403, 'You must be logged in as a moderator.');
     }
@@ -435,7 +437,7 @@ app.post('/api/mod/unblock', async (req, res) => {
     }
     const appContext = currentContext();
     const moderator = await appContext.reddit.getCurrentUsername();
-    const subredditName = await appContext.reddit.getCurrentSubredditName();
+    const subredditName = await getCurrentSubredditNameCompat(appContext);
     if (!moderator) {
       throw httpError(403, 'You must be logged in as a moderator.');
     }
