@@ -1,4 +1,7 @@
-import { requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
+import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
+
+const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/';
+const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/privacy-policy/';
 
 const DENY_REASON_LABEL = {
   photoshop: 'Photoshop',
@@ -16,7 +19,6 @@ function createShell(root, inline) {
           <div class="card-header">
             <div>
               <h1>Verification Hub</h1>
-              <p class="meta">Submit photos, check your status, or review pending requests.</p>
               <p data-el="meta-subreddit" class="meta"></p>
               <p data-el="meta-username" class="meta"></p>
               <p data-el="meta-status" class="status-line"></p>
@@ -37,6 +39,8 @@ function createShell(root, inline) {
           <div data-el="action-row" class="row"></div>
           <div data-el="submission-box" class="submission-box hidden"></div>
         </section>
+
+        <footer data-el="legal-links" class="legal-links hidden"></footer>
       </div>
     </div>
   `;
@@ -53,6 +57,7 @@ function createShell(root, inline) {
     infoMsg: root.querySelector('[data-el="info-msg"]'),
     actionRow: root.querySelector('[data-el="action-row"]'),
     submissionBox: root.querySelector('[data-el="submission-box"]'),
+    legalLinks: root.querySelector('[data-el="legal-links"]'),
   };
 }
 
@@ -125,6 +130,19 @@ function makeButton(label, className, onClick) {
   return button;
 }
 
+function normalizeExternalUrl(value) {
+  const candidate = String(value || '').trim();
+  if (!candidate) {
+    return '';
+  }
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
 export function mountHub(options = {}) {
   const { rootId = 'app-root', inline = false } = options;
   const root = document.getElementById(rootId);
@@ -137,6 +155,25 @@ export function mountHub(options = {}) {
   let hubForms = null;
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
+  const legalLinks = [
+    { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
+    { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
+  ].filter((item) => item.url);
+
+  if (refs.legalLinks && legalLinks.length > 0) {
+    refs.legalLinks.classList.remove('hidden');
+    for (const item of legalLinks) {
+      const link = document.createElement('a');
+      link.className = 'legal-link';
+      link.href = item.url;
+      link.textContent = item.label;
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        navigateTo(item.url);
+      });
+      refs.legalLinks.appendChild(link);
+    }
+  }
 
   function setBusy(next) {
     isBusy = Boolean(next);

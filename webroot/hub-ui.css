@@ -203,6 +203,25 @@ button:disabled {
   color: var(--muted);
 }
 
+.legal-links {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 2px 4px 0;
+}
+
+.legal-link {
+  color: var(--muted);
+  font-size: 0.92rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-link:hover {
+  color: var(--primary);
+}
+
 .hidden {
   display: none;
 }

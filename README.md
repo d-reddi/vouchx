@@ -120,13 +120,13 @@ The History tab has 3 views:
 ### Retention rules
 Retention rules are in place to maintain compliance with Reddit Dev Rules
 - History/verification records that are not approved:
-- Retained for 180 days (fixed)
+- Retained for 45 days (fixed)
 
 - Audit entries:
-- Retained for 180 days (fixed)
+- Retained for 45 days (fixed)
 
 - Approved verification records:
-- Retained for 365 days of inactivity (sliding), this allows users who take a break from your sub to still return verified.
+- Retained for 45 days of inactivity (sliding).
 - A verified user opening/rendering the app counts as activity for the purposes of post veririficaiton expiry extension.
 
 ### Additional moderator menu action

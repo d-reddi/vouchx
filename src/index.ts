@@ -3,6 +3,7 @@ import type { Devvit } from '@devvit/public-api';
 import { context, createServer, getServerPort, realtime, reddit, redis, scheduler, settings } from '@devvit/web/server';
 
 import {
+  assertCanReview,
   blockUserForModerator,
   buildSubmitVerificationForm,
   cancelReopenedVerification,
@@ -74,6 +75,43 @@ function getStatus(error: unknown): number {
 function sendError(res: express.Response, error: unknown): void {
   const message = errorText(error);
   res.status(getStatus(error)).json({ error: message });
+}
+
+async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+  const moderator = await appContext.reddit.getCurrentUsername();
+  if (!moderator) {
+    throw httpError(403, 'You must be logged in as a moderator.');
+  }
+
+  const subredditName = await getCurrentSubredditNameCompat(appContext);
+
+  try {
+    const currentUser = await appContext.reddit.getCurrentUser();
+    if (!currentUser) {
+      throw httpError(403, 'You must be logged in as a moderator.');
+    }
+    const permissions = await currentUser.getModPermissionsForSubreddit(subredditName);
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+      throw httpError(403, 'Only moderators can create verification posts.');
+    }
+  } catch (error) {
+    if (getStatus(error) === 403) {
+      throw error;
+    }
+    throw httpError(403, 'Only moderators can create verification posts.');
+  }
+
+  return { moderator, subredditName };
+}
+
+async function requireReviewAccess(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+  const { moderator, subredditName } = await requireModerator(appContext);
+  try {
+    await assertCanReview(appContext, subredditName, moderator);
+  } catch {
+    throw httpError(403, 'Only moderators with Manage Users permission can review verifications.');
+  }
+  return { moderator, subredditName };
 }
 
 async function buildHubPayload(appContext: Devvit.Context) {
@@ -213,8 +251,7 @@ app.post('/api/hub/delete', async (req, res) => {
 app.post('/api/admin/create-post', async (req, res) => {
   try {
     const appContext = currentContext();
-    const subreddit = await reddit.getCurrentSubreddit();
-    const subredditName = subreddit.name;
+    const { subredditName } = await requireModerator(appContext);
     const title = String(req.body?.postTitle ?? '').trim() || 'Photo Verification Hub';
     await trackSubreddit(appContext, subredditName);
     const post = await reddit.submitCustomPost({
@@ -540,6 +577,7 @@ app.post('/api/mod/settings/theme', async (req, res) => {
 app.post('/api/mod/search/history', async (req, res) => {
   try {
     const appContext = currentContext();
+    await requireReviewAccess(appContext);
     res.json(
       await searchHistoryRecords(appContext, sanitizeSubredditId(appContext.subredditId), {
         username: String(req.body?.username ?? '').trim(),
@@ -557,6 +595,7 @@ app.post('/api/mod/search/history', async (req, res) => {
 app.post('/api/mod/search/approved', async (req, res) => {
   try {
     const appContext = currentContext();
+    await requireReviewAccess(appContext);
     res.json(
       await searchApprovedRecords(appContext, sanitizeSubredditId(appContext.subredditId), {
         username: String(req.body?.username ?? '').trim(),
@@ -574,6 +613,7 @@ app.post('/api/mod/search/approved', async (req, res) => {
 app.post('/api/mod/search/audit', async (req, res) => {
   try {
     const appContext = currentContext();
+    await requireReviewAccess(appContext);
     res.json(
       await searchAuditEntries(appContext, sanitizeSubredditId(appContext.subredditId), {
         username: String(req.body?.username ?? '').trim(),
