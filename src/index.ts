@@ -317,10 +317,14 @@ app.post('/api/mod/deny', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
+    const payload = await buildModPayload(appContext);
+    const denyReasonLabel =
+      payload.state.config.denyReasons.find((item) => item.id === reason)?.label?.trim() ||
+      reason.replace(/_/g, ' ');
     res.json({
-      ...(await buildModPayload(appContext)),
+      ...payload,
       toast: {
-        text: `${success ? 'Denied' : 'Denied with issues'} (${reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
+        text: `${success ? 'Denied' : 'Denied with issues'} (${denyReasonLabel}): ${details.join('; ')}.${blockText}`,
         tone: success ? 'success' : 'error',
       },
     });

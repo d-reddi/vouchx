@@ -1070,7 +1070,7 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
     {
       removeFlair: true,
       removeAuditEntries: true,
-      clearModerationRecords: true,
+      clearModerationRecords: false,
     }
   );
 }
@@ -1086,7 +1086,7 @@ async function deleteCurrentUserVerificationData(context: Devvit.Context): Promi
   const result = await purgeUserVerificationData(context, subredditId, subredditHint, username, {
     removeFlair: true,
     removeAuditEntries: true,
-    clearModerationRecords: true,
+    clearModerationRecords: false,
   });
 
   if (result.deletedCount > 0 || result.flairRemovedFrom.includes(subredditHint)) {
@@ -1360,25 +1360,33 @@ async function removeUserFlairWithFallbacks(
     new Set([rawUsernameNoPrefix, rawUsername, normalizedUsername, `u/${rawUsernameNoPrefix}`, `u/${normalizedUsername}`])
   ).filter((value) => value.trim());
   const errors: string[] = [];
+  const verificationUsername = normalizedUsername || rawUsernameNoPrefix;
 
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
       try {
         await context.reddit.removeUserFlair(subredditAttempt, usernameAttempt);
-        return true;
+        if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+          return true;
+        }
       } catch (removeError) {
         try {
           await context.reddit.setUserFlair({
             subredditName: subredditAttempt,
             username: usernameAttempt,
+            flairTemplateId: '',
             text: '',
             cssClass: '',
           });
-          return true;
+          if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+            return true;
+          }
         } catch (setError) {
           try {
             await context.reddit.setUserFlairBatch(subredditAttempt, [{ username: usernameAttempt, text: '', cssClass: '' }]);
-            return true;
+            if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+              return true;
+            }
           } catch (batchError) {
             errors.push(
               `${subredditAttempt}/${usernameAttempt}: remove=${errorText(removeError)} set=${errorText(setError)} batch=${errorText(batchError)}`
@@ -1390,6 +1398,48 @@ async function removeUserFlairWithFallbacks(
   }
 
   console.log(`Flair removal failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errors.join(' | ')}`);
+  return false;
+}
+
+async function isUserFlairCleared(
+  context: Pick<Devvit.Context, 'reddit'>,
+  subredditName: string,
+  username: string
+): Promise<boolean> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  if (!sanitizedSubreddit || !normalizedUsername) {
+    return false;
+  }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const user = await context.reddit.getUserByUsername(normalizedUsername);
+      if (!user) {
+        return false;
+      }
+      const flair = await user.getUserFlairBySubreddit(sanitizedSubreddit);
+      if (!flair) {
+        return true;
+      }
+      const flairTemplateId = normalizeTemplateId(extractTemplateId(flair));
+      const flairText = String(flair.flairText ?? '').trim();
+      const flairCssClass = String(flair.flairCssClass ?? '').trim();
+      if (!flairTemplateId && !flairText && !flairCssClass) {
+        return true;
+      }
+    } catch (error) {
+      console.log(
+        `Flair removal verification failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+      );
+      return false;
+    }
+
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+
   return false;
 }
 
@@ -2424,14 +2474,9 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
   }
 
-  let shouldRunDailyFlairMaintenance = false;
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
   if (viewerUsername && userLatest && userLatest.status === 'approved' && usernamesEqual(userLatest.username, viewerUsername)) {
-    shouldRunDailyFlairMaintenance = isApprovedRetentionBumpDue(userLatest);
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
-    if (shouldRunDailyFlairMaintenance) {
-      config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
-    }
   } else if (viewerUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
   }
@@ -2468,7 +2513,6 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
       };
 
   if (
-    shouldRunDailyFlairMaintenance &&
     viewerUsername &&
     userLatest &&
     shouldReconcileApprovedViewerFlair(userLatest, config, flairCheck, viewerFlairSnapshot)

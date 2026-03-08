@@ -1,5 +1,6 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 
+const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/';
 const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/privacy-policy/';
 const SUBMIT_ACKNOWLEDGEMENTS = [
@@ -9,7 +10,7 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
   {
     key: 'adultOnlySelfPhotosConfirmed',
-    label: 'The uploaded photos are of me and do not depict anyone under the age of 18.',
+    label: 'Any uploaded photo(s) are of me and do not depict anyone under the age of 18.',
   },
   {
     key: 'termsAccepted',
@@ -347,6 +348,7 @@ export function mountHub(options = {}) {
   let hubForms = null;
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
+  let autoRefreshTimerId = 0;
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
@@ -527,18 +529,20 @@ export function mountHub(options = {}) {
       return;
     }
 
+    const isRestricted = Boolean(state.viewerBlocked && !state.viewerVerifiedByFlair);
+
     applyTheme(state.resolvedTheme);
     refs.metaSubreddit.textContent = `Subreddit: r/${state.subredditName || ''}`;
     refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
-    if (state.viewerBlocked) {
-      statusText = 'Blocked';
-      refs.metaStatus.classList.add('status-blocked');
-    } else if (state.viewerVerifiedByFlair) {
+    if (state.viewerVerifiedByFlair) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       refs.metaStatus.classList.add('status-verified');
+    } else if (isRestricted) {
+      statusText = 'Blocked';
+      refs.metaStatus.classList.add('status-blocked');
     } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
       statusText = 'Pending re-review';
       refs.metaStatus.classList.add('status-pending');
@@ -555,13 +559,13 @@ export function mountHub(options = {}) {
     refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
 
     let infoText = '';
-    if (!state.viewerVerifiedByFlair && !state.viewerBlocked && !state.config.verificationsEnabled) {
+    if (!state.viewerVerifiedByFlair && !isRestricted && !state.config.verificationsEnabled) {
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
-    } else if (!state.viewerVerifiedByFlair && !state.viewerBlocked && state.userLatest?.status === 'pending') {
+    } else if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       infoText = state.userLatest.parentVerificationId
         ? 'Your verification is pending moderator re-review.'
         : 'Your verification is pending moderator review.';
-    } else if (!state.viewerVerifiedByFlair && state.viewerBlocked) {
+    } else if (!state.viewerVerifiedByFlair && isRestricted) {
       infoText = 'You cannot submit a verification request.';
     }
     refs.infoMsg.textContent = infoText;
@@ -575,7 +579,7 @@ export function mountHub(options = {}) {
 
     if (
       !state.viewerVerifiedByFlair &&
-      !state.viewerBlocked &&
+      !isRestricted &&
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
@@ -591,7 +595,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!state.viewerVerifiedByFlair && !state.viewerBlocked && state.userLatest?.status === 'pending') {
+    if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw');
@@ -607,7 +611,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!state.viewerBlocked && state.userLatest) {
+    if ((!isRestricted || state.viewerVerifiedByFlair) && state.userLatest) {
       const statusLabel =
         state.userLatest.status === 'removed'
           ? 'REVOKED'
@@ -626,7 +630,7 @@ export function mountHub(options = {}) {
       }
       refs.submissionBox.innerHTML = pieces.join('');
       refs.submissionBox.classList.remove('hidden');
-    } else if (!state.viewerBlocked) {
+    } else if (!isRestricted || state.viewerVerifiedByFlair) {
       refs.submissionBox.innerHTML = '<p>No verification submission yet.</p>';
       refs.submissionBox.classList.remove('hidden');
     } else {
@@ -651,7 +655,8 @@ export function mountHub(options = {}) {
     }
   }
 
-  async function refreshState() {
+  async function refreshState(options = {}) {
+    const { silent = false } = options;
     setBusy(true);
     try {
       applyPayload(await requestJson('/api/hub/state'));
@@ -660,10 +665,24 @@ export function mountHub(options = {}) {
       if (!hubState) {
         refs.loadingScreen.textContent = `Unable to load verification state: ${message}`;
       }
-      showToast(message, 'error');
+      if (!silent) {
+        showToast(message, 'error');
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  function scheduleAutoRefresh() {
+    if (autoRefreshTimerId) {
+      window.clearInterval(autoRefreshTimerId);
+    }
+    autoRefreshTimerId = window.setInterval(() => {
+      if (document.hidden || isBusy) {
+        return;
+      }
+      void refreshState({ silent: true });
+    }, AUTO_REFRESH_INTERVAL_MS);
   }
 
   refs.refreshBtn.addEventListener('click', () => {
@@ -684,5 +703,6 @@ export function mountHub(options = {}) {
     window.location.assign(modPanelPath || './mod-panel.html');
   });
 
+  scheduleAutoRefresh();
   void refreshState();
 }
