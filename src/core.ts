@@ -1,8 +1,23 @@
 import type { Devvit, FormOnSubmitEvent } from '@devvit/public-api';
 
 type VerificationStatus = 'pending' | 'approved' | 'denied' | 'removed';
-type DenyReason = 'photoshop' | 'unclear_image' | 'did_not_follow_instructions' | 'other';
+type DenyReason = 'reason_1' | 'reason_2' | 'reason_3' | 'reason_4';
 type AuditAction = 'approved' | 'denied' | 'reopened' | 'removed_by_mod' | 'self_removed' | 'blocked' | 'unblocked';
+
+type DenyReasonConfig = {
+  id: DenyReason;
+  label: string;
+  template: string;
+  enabled: boolean;
+};
+
+type DenyReasonSlotDefinition = {
+  id: DenyReason;
+  labelSettingName: string;
+  templateConfigFieldName: string;
+  defaultLabel: string;
+  defaultTemplate: string;
+};
 
 type BlockedUserEntry = {
   username: string;
@@ -57,8 +72,10 @@ type AuditLogEntry = {
 
 type RuntimeConfig = {
   verificationsEnabled: boolean;
+  verificationsDisabledMessage: string;
   requiredPhotoCount: number;
   photoInstructions: string;
+  denyReasons: DenyReasonConfig[];
   pendingTurnaroundDays: number;
   modmailSubject: string;
   pendingBody: string;
@@ -71,10 +88,6 @@ type RuntimeConfig = {
   approveHeader: string;
   approveBody: string;
   denyHeader: string;
-  denyBodyPhotoshop: string;
-  denyBodyUnclear: string;
-  denyBodyInstructions: string;
-  denyBodyOther: string;
   removeHeader: string;
   removeBody: string;
   themePreset: ThemePresetName;
@@ -122,6 +135,7 @@ type DashboardData = {
   isModerator: boolean;
   canReview: boolean;
   canManageUsers: boolean;
+  canOpenInstallSettings: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -260,10 +274,7 @@ type ModmailTemplatesFormData = {
   approveHeader?: string;
   approveBody?: string;
   denyHeader?: string;
-  denyBodyPhotoshop?: string;
-  denyBodyUnclear?: string;
-  denyBodyInstructions?: string;
-  denyBodyOther?: string;
+  denyReasonTemplates?: Partial<Record<DenyReason, string>>;
   removeHeader?: string;
   removeBody?: string;
 };
@@ -361,6 +372,7 @@ type HistorySearchResponsePayload = {
 type ModPanelStatePayload = {
   viewerUsername: string | null;
   subredditName: string;
+  canOpenInstallSettings: boolean;
   pendingCount: number;
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
@@ -413,6 +425,45 @@ const VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS = MILLIS_PER_DAY;
 const FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS = MILLIS_PER_DAY;
 const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 0;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
+const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
+const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
+const MAX_DENY_REASON_LABEL_LENGTH = 48;
+const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
+  'Hi u/{{username}},\n\nWe could not approve your verification because of: {{reason}}.\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
+const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
+  {
+    id: 'reason_1',
+    labelSettingName: 'deny_reason_1_label',
+    templateConfigFieldName: 'deny_reason_1_template',
+    defaultLabel: 'Altered or edited image',
+    defaultTemplate:
+      'Hi u/{{username}},\n\nWe could not approve your verification because the image appears edited.\n\nYou can resubmit with unedited photos.\n\nThe moderation team',
+  },
+  {
+    id: 'reason_2',
+    labelSettingName: 'deny_reason_2_label',
+    templateConfigFieldName: 'deny_reason_2_template',
+    defaultLabel: 'Unclear image',
+    defaultTemplate:
+      'Hi u/{{username}},\n\nWe could not approve your verification because the image was unclear.\n\nPlease resubmit with clear, well-lit photos.\n\nThe moderation team',
+  },
+  {
+    id: 'reason_3',
+    labelSettingName: 'deny_reason_3_label',
+    templateConfigFieldName: 'deny_reason_3_template',
+    defaultLabel: 'Did not follow instructions',
+    defaultTemplate:
+      'Hi u/{{username}},\n\nWe could not approve your verification because the submission did not follow the instructions.\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
+  },
+  {
+    id: 'reason_4',
+    labelSettingName: 'deny_reason_4_label',
+    templateConfigFieldName: 'deny_reason_4_template',
+    defaultLabel: 'Other',
+    defaultTemplate:
+      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\nModerator note: {{reason}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
+  },
+] as const;
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const USER_VALIDATION_CRON = '30 3 * * *';
 const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
@@ -427,14 +478,14 @@ const DEFAULT_MODMAIL_SUBJECT = 'Verification update from r/{{subreddit}}';
 const DEFAULT_PENDING_BODY =
   'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time {{days}}\n\nThe moderation team';
 const DEFAULT_APPROVE_HEADER = 'Verification Approved';
-const DEFAULT_REMOVAL_HEADER = 'Verification Removed';
+const DEFAULT_REMOVAL_HEADER = 'Verification Revoked';
 const LEGACY_DEFAULT_APPROVE_BODY =
   'Hi u/{{username}},\n\nYour verification in r/{{subreddit}} was approved and your flair has been updated.\n\nThe moderation team';
 const DEFAULT_APPROVE_BODY =
   'Hi u/{{username}},\n\nYour verification was approved and your flair has been updated.\n\nThe moderation team';
 const DEFAULT_DENY_HEADER = 'Verification Denied';
 const DEFAULT_REMOVAL_BODY =
-  'Hi u/{{username}},\n\nYour verification in r/{{subreddit}} was removed.\n\nReason: {{reason}}\n\nYou can resubmit if you want to be verified again.\n\nThe moderation team';
+  'Hi u/{{username}},\n\nYour verification in r/{{subreddit}} was revoked.\n\nReason: {{reason}}\n\nYou can resubmit if you want to be verified again.\n\nThe moderation team';
 const DEFAULT_THEME_PRESET: ThemePresetName = 'coastal_light';
 
 const THEME_PRESETS: Record<ThemePresetName, ThemePalette> = {
@@ -632,24 +683,6 @@ const THEME_PRESETS: Record<ThemePresetName, ThemePalette> = {
   },
 };
 
-const DENY_REASON_LABEL: Record<DenyReason, string> = {
-  photoshop: 'Photoshop',
-  unclear_image: 'Unclear image',
-  did_not_follow_instructions: 'Did not follow written instructions',
-  other: 'Other',
-};
-
-const DEFAULT_DENY_TEMPLATE: Record<DenyReason, string> = {
-  photoshop:
-    'Hi u/{{username}},\n\nWe could not approve your verification because the image appears edited.\n\nYou can resubmit with unedited photos.\n\nThe moderation team',
-  unclear_image:
-    'Hi u/{{username}},\n\nWe could not approve your verification because the image was unclear.\n\nPlease resubmit with clear, well-lit photos.\n\nThe moderation team',
-  did_not_follow_instructions:
-    'Hi u/{{username}},\n\nWe could not approve your verification because the submission did not follow the instructions.\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
-  other:
-    'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
-};
-
 const CONFIG_FIELD = {
   verificationsEnabled: 'verifications_enabled',
   requiredPhotoCount: 'required_photo_count',
@@ -666,10 +699,6 @@ const CONFIG_FIELD = {
   approveHeader: 'approve_header',
   approveBody: 'approve_body',
   denyHeader: 'deny_header',
-  denyBodyPhotoshop: 'deny_body_photoshop',
-  denyBodyUnclear: 'deny_body_unclear',
-  denyBodyInstructions: 'deny_body_instructions',
-  denyBodyOther: 'deny_body_other',
   removeHeader: 'remove_header',
   removeBody: 'remove_body',
   themePreset: 'theme_preset',
@@ -679,12 +708,70 @@ const CONFIG_FIELD = {
   customBackground: 'theme_custom_background',
 } as const;
 
+const DENY_REASON_TEMPLATE_CONFIG_FIELD: Record<DenyReason, string> = Object.fromEntries(
+  DENY_REASON_INSTALL_SETTINGS.map((setting) => [setting.id, setting.templateConfigFieldName])
+) as Record<DenyReason, string>;
+
 const LEGACY_CONFIG_FIELD = {
   pendingSubject: 'pending_subject',
   approveSubject: 'approve_subject',
   denySubject: 'deny_subject',
   removeSubject: 'remove_subject',
 } as const;
+
+function parseDenyReason(value: string | undefined | null): DenyReason | null {
+  if (!value) {
+    return null;
+  }
+  return DENY_REASON_INSTALL_SETTINGS.some((setting) => setting.id === value) ? (value as DenyReason) : null;
+}
+
+function formatDenyReasonSlotLabel(reason: DenyReason): string {
+  return `Reason ${reason.replace('reason_', '')}`;
+}
+
+function normalizeDenyReasonLabel(value: string | undefined | null): string {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized.slice(0, MAX_DENY_REASON_LABEL_LENGTH);
+}
+
+async function getConfiguredDenyReasons(
+  context: Pick<Devvit.Context, 'settings'>,
+  stored: Record<string, string>
+): Promise<DenyReasonConfig[]> {
+  return await Promise.all(
+    DENY_REASON_INSTALL_SETTINGS.map(async (setting) => {
+      const rawLabel = await context.settings.get<string>(setting.labelSettingName);
+      const label = normalizeDenyReasonLabel(
+        rawLabel === undefined || rawLabel === null ? setting.defaultLabel : String(rawLabel)
+      );
+      const templateSource = firstNonEmpty(stored[setting.templateConfigFieldName]) ?? setting.defaultTemplate;
+      return {
+        id: setting.id,
+        label,
+        template: templateSource.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE,
+        enabled: label.length > 0,
+      };
+    })
+  );
+}
+
+function getConfiguredDenyReason(
+  config: Pick<RuntimeConfig, 'denyReasons'>,
+  reason: DenyReason | null | undefined
+): DenyReasonConfig | null {
+  if (!reason) {
+    return null;
+  }
+  return Array.isArray(config.denyReasons) ? config.denyReasons.find((item) => item.id === reason) ?? null : null;
+}
+
+function getDenyReasonDisplayLabel(config: Pick<RuntimeConfig, 'denyReasons'>, reason: DenyReason): string {
+  const configured = getConfiguredDenyReason(config, reason);
+  return configured?.label.trim() || formatDenyReasonSlotLabel(reason);
+}
 
 function buildSubmitVerificationForm(data: { [key: string]: any }) {
   const formData = data as SubmitVerificationFormData;
@@ -748,6 +835,7 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
   return {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
+    canOpenInstallSettings: dashboard.canOpenInstallSettings,
     pendingCount: dashboard.pending.length,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
     approved: dashboard.approved,
@@ -820,7 +908,7 @@ async function submitVerification(
   await trackSubreddit(context, subredditName);
   const config = await getRuntimeConfig(context, subredditId);
   if (!config.verificationsEnabled) {
-    throw new Error(VERIFICATIONS_DISABLED_MESSAGE);
+    throw new Error(config.verificationsDisabledMessage);
   }
 
   const photoOneUrl = normalizePhotoInput((values as { photoOneUrl?: unknown }).photoOneUrl);
@@ -901,6 +989,13 @@ async function submitVerification(
 
   await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
   const pendingModmail = await sendPendingSubmissionModmail(context, record, config);
+  try {
+    await addPendingSubmissionModNote(context, record);
+  } catch (error) {
+    console.log(
+      `Pending submission mod note write failed for r/${sanitizeSubredditName(subredditName)} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+  }
   return { pendingModmail };
 }
 
@@ -1614,10 +1709,6 @@ async function denyVerification(
   reason: DenyReason,
   moderatorNotes?: string
 ): Promise<ActionResult> {
-  if (reason === 'other' && !moderatorNotes?.trim()) {
-    throw new Error('Moderator notes are required when denial reason is Other.');
-  }
-
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
     throw new Error('You must be logged in as a moderator.');
@@ -1626,6 +1717,11 @@ async function denyVerification(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const config = await getRuntimeConfig(context, subredditId);
+  const configuredReason = getConfiguredDenyReason(config, reason);
+  if (!configuredReason?.enabled) {
+    throw new Error('Selected denial reason is not enabled for this subreddit.');
+  }
 
   const record = await getRecord(context, subredditId, verificationId);
   if (!record) {
@@ -1686,10 +1782,10 @@ async function denyVerification(
   await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
 
   const [modmail, modNote] = await Promise.all([
-    sendDenialModmail(context, subredditId, reviewedRecord),
+    sendDenialModmail(context, subredditId, reviewedRecord, config),
     (async (): Promise<ModNoteStepResult> => {
       try {
-        await addDenialModNote(context, reviewedRecord, moderator);
+        await addDenialModNote(context, reviewedRecord, moderator, config);
         return { status: 'success' };
       } catch (error) {
         return { status: 'failed', reason: errorText(error) };
@@ -1734,7 +1830,7 @@ async function denyVerification(
       actor: moderator,
       action: 'denied',
       verificationId: reviewedRecord.id,
-      notes: `${DENY_REASON_LABEL[reason]}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
+      notes: `${getDenyReasonDisplayLabel(config, reason)}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
         userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
       }`,
     });
@@ -2014,7 +2110,7 @@ async function sendApprovalModmail(
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
     reason: '',
-    days: `${config.pendingTurnaroundDays}`,
+    days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const body = prependModmailHeader(fillTemplate(config.approveBody, values), config.approveHeader, values);
@@ -2042,17 +2138,29 @@ async function addApprovalModNote(
   });
 }
 
+async function addPendingSubmissionModNote(context: Devvit.Context, record: VerificationRecord): Promise<void> {
+  const subredditName = sanitizeSubredditName(record.subredditName);
+  const acknowledgedAt = formatTimestamp(record.ageAcknowledgedAt || record.submittedAt);
+  await context.reddit.addModNote({
+    subreddit: subredditName,
+    user: record.username,
+    note: `Verification request submitted. Acceptance of Terms and 18+ certification recorded on: ${acknowledgedAt}`,
+  });
+}
+
 async function addDenialModNote(
   context: Devvit.Context,
   record: VerificationRecord,
-  moderatorName: string
+  moderatorName: string,
+  config: RuntimeConfig
 ): Promise<void> {
   const subredditName = sanitizeSubredditName(record.subredditName);
-  const reason: DenyReason = record.denyReason ?? 'other';
+  const reason = parseDenyReason(record.denyReason ?? undefined) ?? 'reason_4';
+  const label = getDenyReasonDisplayLabel(config, reason);
   const notes = record.denyNotes?.trim();
   const details = notes
-    ? `Denied. Verifying mod: ${moderatorName}. Reason: ${DENY_REASON_LABEL[reason]}. Notes: ${notes}`
-    : `Denied. Verifying mod: ${moderatorName}. Reason: ${DENY_REASON_LABEL[reason]}.`;
+    ? `Denied. Verifying mod: ${moderatorName}. Reason: ${label}. Notes: ${notes}`
+    : `Denied. Verifying mod: ${moderatorName}. Reason: ${label}.`;
 
   await context.reddit.addModNote({
     subreddit: subredditName,
@@ -2087,7 +2195,7 @@ async function sendModeratorRemovalModmail(
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
     reason: removalReason,
-    days: `${config.pendingTurnaroundDays}`,
+    days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const body = prependModmailHeader(fillTemplate(config.removeBody, values), config.removeHeader, values);
@@ -2105,33 +2213,25 @@ async function sendModeratorRemovalModmail(
 async function sendDenialModmail(
   context: Devvit.Context,
   subredditId: string,
-  record: VerificationRecord
+  record: VerificationRecord,
+  config: RuntimeConfig
 ): Promise<ModmailStepResult> {
-  const reason: DenyReason = record.denyReason ?? 'other';
+  const reason = parseDenyReason(record.denyReason ?? undefined) ?? 'reason_4';
   const subredditName = sanitizeSubredditName(record.subredditName);
-  const config = await getRuntimeConfig(context, subredditId);
-  const templateByReason: Record<DenyReason, string> = {
-    photoshop: config.denyBodyPhotoshop,
-    unclear_image: config.denyBodyUnclear,
-    did_not_follow_instructions: config.denyBodyInstructions,
-    other: config.denyBodyOther,
-  };
-  const template = templateByReason[reason];
-
-  const noteText = record.denyNotes?.trim()
-    ? `\n\nModerator notes:\n${record.denyNotes.trim()}`
-    : `\n\nModerator notes:\nNone provided.`;
+  const configuredReason = getConfiguredDenyReason(config, reason);
+  const template = configuredReason?.template.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE;
+  const moderatorNotes = record.denyNotes?.trim() ?? '';
 
   const values = {
     username: record.username,
     mod: record.moderator ?? '',
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
-    reason: DENY_REASON_LABEL[reason],
-    days: `${config.pendingTurnaroundDays}`,
+    reason: moderatorNotes,
+    days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
-  const body = `${prependModmailHeader(fillTemplate(template, values), config.denyHeader, values)}${noteText}`;
+  const body = prependModmailHeader(fillTemplate(template, values), config.denyHeader, values);
 
   return await sendUserModmailWithFallback(context, {
     subredditId,
@@ -2157,10 +2257,12 @@ async function sendPendingSubmissionModmail(
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
     reason: '',
-    days: `${resolvedConfig.pendingTurnaroundDays}`,
+    days: formatPendingTurnaroundDays(resolvedConfig.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(resolvedConfig.modmailSubject, values);
-  const body = fillTemplate(resolvedConfig.pendingBody, values);
+  const acknowledgementAt = formatTimestamp(record.ageAcknowledgedAt || record.submittedAt);
+  const auditFooter = `Acceptance of Terms and 18+ certification recorded on: ${acknowledgementAt}`;
+  const body = `${fillTemplate(resolvedConfig.pendingBody, values).trimEnd()}\n\n${auditFooter}`;
   return await sendUserModmailWithFallback(context, {
     subredditId,
     subredditName,
@@ -2243,6 +2345,7 @@ async function sendUserModmailWithFallback(
             expiration: new Date(Date.now() + MODMAIL_DEDUPE_TTL_SECONDS * 1000),
           });
         }
+        await archiveModmailConversationBestEffort(context, subredditName, username, existingConversationId);
         return { status: 'replied', conversationId: existingConversationId };
       } catch (error) {
         console.log(
@@ -2272,6 +2375,7 @@ async function sendUserModmailWithFallback(
             expiration: new Date(Date.now() + MODMAIL_DEDUPE_TTL_SECONDS * 1000),
           });
         }
+        await archiveModmailConversationBestEffort(context, subredditName, username, conversationId);
         return { status: 'created', conversationId };
       } catch (error) {
         lastError = errorText(error);
@@ -2290,12 +2394,30 @@ async function sendUserModmailWithFallback(
   }
 }
 
+async function archiveModmailConversationBestEffort(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string,
+  conversationId: string
+): Promise<void> {
+  try {
+    await context.reddit.modMail.archiveConversation(conversationId);
+  } catch (error) {
+    console.log(
+      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${errorText(error)}`
+    );
+  }
+}
+
 async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
   const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
+  const canOpenInstallSettings = viewerUsername
+    ? await hasAllModeratorPermission(context, subredditName, viewerUsername)
+    : false;
   const canReviewUser = isModeratorUser && canManageUsers;
   let config = await getRuntimeConfig(context, subredditId);
   if (viewerUsername && config.flairTemplateId.trim()) {
@@ -2383,6 +2505,7 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     isModerator: isModeratorUser,
     canReview: canReviewUser,
     canManageUsers,
+    canOpenInstallSettings,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,
@@ -2826,15 +2949,15 @@ async function searchHistoryRecords(
     if (usernameFilter && !normalizeUsername(parsed.username).startsWith(usernameFilter)) {
       continue;
     }
-      items.push({
-        id: parsed.id,
-        username: parsed.username,
-        status: parsed.status,
-        submittedAt: parsed.submittedAt,
-        acknowledgedAt: parsed.ageAcknowledgedAt,
-        reviewedAt: parsed.reviewedAt ?? null,
-        moderator: parsed.moderator ?? null,
-        denyReason: parsed.denyReason ?? null,
+    items.push({
+      id: parsed.id,
+      username: parsed.username,
+      status: parsed.status,
+      submittedAt: parsed.submittedAt,
+      acknowledgedAt: parsed.ageAcknowledgedAt,
+      reviewedAt: parsed.reviewedAt ?? null,
+      moderator: parsed.moderator ?? null,
+      denyReason: parseDenyReason(parsed.denyReason) ?? null,
       parentVerificationId: parsed.parentVerificationId ?? null,
       reopenedChildId: null,
       reopenedState: 'none',
@@ -3756,6 +3879,33 @@ async function hasManageUsersPermission(
   }
 }
 
+async function hasAllModeratorPermission(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<boolean> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username);
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+    return false;
+  }
+
+  try {
+    const currentUser = await context.reddit.getCurrentUser();
+    if (!currentUser) {
+      return false;
+    }
+    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+    return hasAllModeratorPermissionInList(permissions);
+  } catch (error) {
+    console.log(
+      `All moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+    return false;
+  }
+}
+
 function hasManageUsersPermissionInList(permissions: string[]): boolean {
   const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
   return (
@@ -3765,6 +3915,11 @@ function hasManageUsersPermissionInList(permissions: string[]): boolean {
     normalized.includes('manageusers') ||
     normalized.includes('users')
   );
+}
+
+function hasAllModeratorPermissionInList(permissions: string[]): boolean {
+  const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
+  return normalized.includes('all');
 }
 
 async function onSaveFlairTemplateValues(
@@ -3829,12 +3984,17 @@ async function onSaveModmailTemplatesValues(
   const approveHeader = values.approveHeader?.trim();
   const approveBody = values.approveBody?.trim();
   const denyHeader = values.denyHeader?.trim();
-  const denyBodyPhotoshop = values.denyBodyPhotoshop?.trim();
-  const denyBodyUnclear = values.denyBodyUnclear?.trim();
-  const denyBodyInstructions = values.denyBodyInstructions?.trim();
-  const denyBodyOther = values.denyBodyOther?.trim();
+  const denyReasonTemplates = values.denyReasonTemplates ?? {};
   const removeHeader = values.removeHeader?.trim();
   const removeBody = values.removeBody?.trim();
+  const existingConfig = await getRuntimeConfig(context, subredditId);
+  const denyReasonTemplateValues = Object.fromEntries(
+    existingConfig.denyReasons.map((reason) => {
+      const submittedValue = typeof denyReasonTemplates[reason.id] === 'string' ? denyReasonTemplates[reason.id] : undefined;
+      const nextTemplate = submittedValue === undefined ? reason.template : submittedValue.trim();
+      return [reason.id, nextTemplate];
+    })
+  ) as Record<DenyReason, string>;
 
   if (
     pendingTurnaroundDays === null ||
@@ -3843,14 +4003,16 @@ async function onSaveModmailTemplatesValues(
     !approveHeader ||
     !approveBody ||
     !denyHeader ||
-    !denyBodyPhotoshop ||
-    !denyBodyUnclear ||
-    !denyBodyInstructions ||
-    !denyBodyOther ||
     !removeHeader ||
     !removeBody
   ) {
     throw new Error('All modmail fields are required.');
+  }
+
+  for (const reason of existingConfig.denyReasons) {
+    if (reason.enabled && !denyReasonTemplateValues[reason.id]) {
+      throw new Error(`Denial template is required for ${reason.label}.`);
+    }
   }
 
   await context.redis.hSet(subredditConfigKey(subredditId), {
@@ -3860,12 +4022,14 @@ async function onSaveModmailTemplatesValues(
     [CONFIG_FIELD.approveHeader]: approveHeader,
     [CONFIG_FIELD.approveBody]: approveBody,
     [CONFIG_FIELD.denyHeader]: denyHeader,
-    [CONFIG_FIELD.denyBodyPhotoshop]: denyBodyPhotoshop,
-    [CONFIG_FIELD.denyBodyUnclear]: denyBodyUnclear,
-    [CONFIG_FIELD.denyBodyInstructions]: denyBodyInstructions,
-    [CONFIG_FIELD.denyBodyOther]: denyBodyOther,
     [CONFIG_FIELD.removeHeader]: removeHeader,
     [CONFIG_FIELD.removeBody]: removeBody,
+    ...Object.fromEntries(
+      Object.entries(denyReasonTemplateValues).map(([reasonId, template]) => [
+        DENY_REASON_TEMPLATE_CONFIG_FIELD[reasonId as DenyReason],
+        template,
+      ])
+    ),
   });
 }
 
@@ -3901,6 +4065,12 @@ async function onSaveThemeValues(values: ThemeSettingsValues, context: Devvit.Co
 async function getRuntimeConfig(context: Devvit.Context, subredditId: string): Promise<RuntimeConfig> {
   const key = subredditConfigKey(subredditId);
   const stored = await context.redis.hGetAll(key);
+  const rawVerificationsDisabledMessage = await context.settings.get<string>(INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE);
+  const verificationsDisabledMessage = normalizeInstallSettingMessage(
+    rawVerificationsDisabledMessage,
+    VERIFICATIONS_DISABLED_MESSAGE,
+    MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH
+  );
   const pendingTurnaroundRaw = firstNonEmpty(stored[CONFIG_FIELD.pendingTurnaroundDays]);
   const pendingTurnaroundDays = parsePositiveInt(pendingTurnaroundRaw, DEFAULT_PENDING_TURNAROUND_DAYS);
   const approveBodyRaw = firstNonEmpty(stored[CONFIG_FIELD.approveBody]) ?? DEFAULT_APPROVE_BODY;
@@ -3914,11 +4084,14 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const flairTemplateCacheText = (stored[CONFIG_FIELD.flairTemplateCacheText] ?? '').trim();
   const flairTemplateCacheCheckedAt = parseNonNegativeInt(stored[CONFIG_FIELD.flairTemplateCacheCheckedAt], 0) ?? 0;
   const useCustomColors = parseBooleanString(stored[CONFIG_FIELD.useCustomColors], false);
+  const denyReasons = await getConfiguredDenyReasons(context, stored);
 
   return {
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
+    verificationsDisabledMessage,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
+    denyReasons,
     pendingTurnaroundDays: pendingTurnaroundDays ?? DEFAULT_PENDING_TURNAROUND_DAYS,
     modmailSubject:
       firstNonEmpty(stored[CONFIG_FIELD.modmailSubject], stored[LEGACY_CONFIG_FIELD.pendingSubject]) ??
@@ -3936,11 +4109,6 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     approveBody,
     denyHeader:
       firstNonEmpty(stored[CONFIG_FIELD.denyHeader], stored[LEGACY_CONFIG_FIELD.denySubject]) ?? DEFAULT_DENY_HEADER,
-    denyBodyPhotoshop: firstNonEmpty(stored[CONFIG_FIELD.denyBodyPhotoshop]) ?? DEFAULT_DENY_TEMPLATE.photoshop,
-    denyBodyUnclear: firstNonEmpty(stored[CONFIG_FIELD.denyBodyUnclear]) ?? DEFAULT_DENY_TEMPLATE.unclear_image,
-    denyBodyInstructions:
-      firstNonEmpty(stored[CONFIG_FIELD.denyBodyInstructions]) ?? DEFAULT_DENY_TEMPLATE.did_not_follow_instructions,
-    denyBodyOther: firstNonEmpty(stored[CONFIG_FIELD.denyBodyOther]) ?? DEFAULT_DENY_TEMPLATE.other,
     removeHeader:
       firstNonEmpty(stored[CONFIG_FIELD.removeHeader], stored[LEGACY_CONFIG_FIELD.removeSubject]) ??
       DEFAULT_REMOVAL_HEADER,
@@ -4102,13 +4270,7 @@ function parseRecord(payload: string): VerificationRecord | null {
       status: parsed.status,
       moderator: typeof parsed.moderator === 'string' ? parsed.moderator : null,
       reviewedAt: typeof parsed.reviewedAt === 'string' ? parsed.reviewedAt : null,
-      denyReason:
-        parsed.denyReason === 'photoshop' ||
-        parsed.denyReason === 'unclear_image' ||
-        parsed.denyReason === 'did_not_follow_instructions' ||
-        parsed.denyReason === 'other'
-          ? parsed.denyReason
-          : null,
+      denyReason: parseDenyReason(typeof parsed.denyReason === 'string' ? parsed.denyReason : undefined),
       denyNotes: typeof parsed.denyNotes === 'string' ? parsed.denyNotes : null,
       claimedBy: typeof parsed.claimedBy === 'string' ? parsed.claimedBy : null,
       claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
@@ -4801,18 +4963,6 @@ function resolveThemePalette(config: RuntimeConfig): ThemePalette {
   };
 }
 
-function asDenyReason(value: string | undefined): DenyReason | null {
-  if (!value) {
-    return null;
-  }
-  return value === 'photoshop' ||
-    value === 'unclear_image' ||
-    value === 'did_not_follow_instructions' ||
-    value === 'other'
-    ? value
-    : null;
-}
-
 function asAuditAction(value: string | undefined): AuditAction | null {
   if (!value) {
     return null;
@@ -4850,7 +5000,7 @@ function prependModmailHeader(body: string, headerTemplate: string, values: Reco
   if (!header) {
     return body;
   }
-  return `**${header}**\n\n---\n\n${body}`;
+  return `---\n\n**${header}**\n\n${body}`;
 }
 
 function fillTemplate(template: string, values: Record<string, string>): string {
@@ -4865,6 +5015,23 @@ function fillTemplate(template: string, values: Record<string, string>): string 
 
 function normalizePlaceholderKey(rawKey: string): string {
   return rawKey.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function normalizeInstallSettingMessage(
+  value: string | undefined | null,
+  fallback: string,
+  maxLength: number
+): string {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+  return normalized || fallback;
+}
+
+function formatPendingTurnaroundDays(days: number): string {
+  const normalizedDays = Number.isFinite(days) ? Math.max(0, Math.trunc(days)) : 0;
+  return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
 }
 
 function errorText(error: unknown): string {
@@ -5297,8 +5464,12 @@ async function purgeAuditLogOlderThanDays(
 
 export {
   assertCanReview,
+  DENY_REASON_INSTALL_SETTINGS,
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
+  INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
+  MAX_DENY_REASON_LABEL_LENGTH,
+  MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,
   THEME_PRESETS,
   USER_VALIDATION_JOB_NAME,
   buildSubmitVerificationForm,
@@ -5331,6 +5502,7 @@ export {
   sanitizeSubredditId,
   sanitizeSubredditName,
   getCurrentSubredditNameCompat,
+  parseDenyReason,
   trackSubreddit,
   errorText,
   resolveThemePalette,

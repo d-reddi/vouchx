@@ -17,13 +17,6 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
 ];
 
-const DENY_REASON_LABEL = {
-  photoshop: 'Photoshop',
-  unclear_image: 'Unclear image',
-  did_not_follow_instructions: 'Did not follow written instructions',
-  other: 'Other',
-};
-
 function createShell(root, inline) {
   root.innerHTML = `
     <div class="shell">
@@ -219,6 +212,20 @@ function createExternalLink(item, extraClassName = '') {
     navigateTo(item.url);
   });
   return link;
+}
+
+function formatDenyReasonSlot(reasonId) {
+  const match = String(reasonId || '').match(/^reason_(\d+)$/);
+  return match ? `Reason ${match[1]}` : String(reasonId || '').replaceAll('_', ' ');
+}
+
+function getDenyReasonLabel(state, reasonId) {
+  if (!state || !state.config || !Array.isArray(state.config.denyReasons)) {
+    return formatDenyReasonSlot(reasonId);
+  }
+  const match = state.config.denyReasons.find((item) => item && item.id === reasonId);
+  const label = match && typeof match.label === 'string' ? match.label.trim() : '';
+  return label || formatDenyReasonSlot(reasonId);
 }
 
 function renderInlineMarkdown(value) {
@@ -549,7 +556,7 @@ export function mountHub(options = {}) {
 
     let infoText = '';
     if (!state.viewerVerifiedByFlair && !state.viewerBlocked && !state.config.verificationsEnabled) {
-      infoText = 'Verifications are temporarily disabled. Please check back soon.';
+      infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
     } else if (!state.viewerVerifiedByFlair && !state.viewerBlocked && state.userLatest?.status === 'pending') {
       infoText = state.userLatest.parentVerificationId
         ? 'Your verification is pending moderator re-review.'
@@ -615,7 +622,7 @@ export function mountHub(options = {}) {
         pieces.push(`<p>Reviewed: ${formatTimestamp(state.userLatest.reviewedAt)}</p>`);
       }
       if (state.userLatest.status === 'denied' && state.userLatest.denyReason) {
-        pieces.push(`<p>Reason: ${DENY_REASON_LABEL[state.userLatest.denyReason] || state.userLatest.denyReason}</p>`);
+        pieces.push(`<p>Reason: ${escapeHtml(getDenyReasonLabel(state, state.userLatest.denyReason))}</p>`);
       }
       refs.submissionBox.innerHTML = pieces.join('');
       refs.submissionBox.classList.remove('hidden');

@@ -30,7 +30,7 @@ import {
   toModPanelState,
   unblockUserForModerator,
   withdrawCurrentUserPendingVerification,
-  type DenyReason,
+  parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
 
@@ -155,19 +155,6 @@ async function sendModRefreshSignal(appContext: Devvit.Context): Promise<void> {
     await realtime.send(modRealtimeChannel(appContext), MOD_REFRESH_SIGNAL);
   } catch (error) {
     console.log(`Realtime refresh send failed: ${errorText(error)}`);
-  }
-}
-
-function asDenyReason(value: unknown): DenyReason | null {
-  const normalized = String(value ?? '').trim();
-  switch (normalized) {
-    case 'photoshop':
-    case 'unclear_image':
-    case 'did_not_follow_instructions':
-    case 'other':
-      return normalized;
-    default:
-      return null;
   }
 }
 
@@ -311,16 +298,13 @@ app.post('/api/mod/approve', async (req, res) => {
 app.post('/api/mod/deny', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
-    const reason = asDenyReason(req.body?.reason);
+    const reason = parseDenyReason(String(req.body?.reason ?? '').trim());
     const moderatorNotes = String(req.body?.moderatorNotes ?? '').trim();
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     if (!reason) {
       throw httpError(400, 'Select a valid denial reason.');
-    }
-    if (reason === 'other' && !moderatorNotes) {
-      throw httpError(400, 'Moderator notes are required when denial reason is Other.');
     }
     const appContext = currentContext();
     const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);

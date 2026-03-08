@@ -66,6 +66,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairCssClassInput = document.getElementById('flair-css-class');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
+  const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
+  const installSettingsRow = document.getElementById('install-settings-row');
+  const installSettingsLink = document.getElementById('install-settings-link');
   const requiredPhotoCountInput = document.getElementById('required-photo-count');
   const photoInstructionsInput = document.getElementById('photo-instructions');
 
@@ -75,10 +78,6 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const approveHeaderInput = document.getElementById('approve-header');
   const approveBodyInput = document.getElementById('approve-body');
   const denyHeaderInput = document.getElementById('deny-header');
-  const denyBodyPhotoshopInput = document.getElementById('deny-body-photoshop');
-  const denyBodyUnclearInput = document.getElementById('deny-body-unclear');
-  const denyBodyInstructionsInput = document.getElementById('deny-body-instructions');
-  const denyBodyOtherInput = document.getElementById('deny-body-other');
   const removeHeaderInput = document.getElementById('remove-header');
   const removeBodyInput = document.getElementById('remove-body');
   const themePresetList = document.getElementById('theme-preset-list');
@@ -90,6 +89,32 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const customBackgroundInput = document.getElementById('custom-background');
   const customBackgroundHexInput = document.getElementById('custom-background-hex');
   const themePreview = document.getElementById('theme-preview');
+  const denyReasonTemplateControls = [
+    {
+      id: 'reason_1',
+      wrapper: document.getElementById('deny-template-reason-1-wrap'),
+      label: document.getElementById('deny-body-reason-1-label'),
+      input: document.getElementById('deny-body-reason-1'),
+    },
+    {
+      id: 'reason_2',
+      wrapper: document.getElementById('deny-template-reason-2-wrap'),
+      label: document.getElementById('deny-body-reason-2-label'),
+      input: document.getElementById('deny-body-reason-2'),
+    },
+    {
+      id: 'reason_3',
+      wrapper: document.getElementById('deny-template-reason-3-wrap'),
+      label: document.getElementById('deny-body-reason-3-label'),
+      input: document.getElementById('deny-body-reason-3'),
+    },
+    {
+      id: 'reason_4',
+      wrapper: document.getElementById('deny-template-reason-4-wrap'),
+      label: document.getElementById('deny-body-reason-4-label'),
+      input: document.getElementById('deny-body-reason-4'),
+    },
+  ];
 
   const imageModal = document.getElementById('image-modal');
   const imagePreview = document.getElementById('image-preview');
@@ -314,6 +339,48 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     return Boolean(input && input.checked);
   }
 
+  function formatDenyReasonSlot(reasonId) {
+    const match = String(reasonId || '').match(/^reason_(\d+)$/);
+    return match ? `Reason ${match[1]}` : String(reasonId || '').replaceAll('_', ' ');
+  }
+
+  function normalizeSubredditName(value) {
+    return String(value || '').trim().replace(/^r\//i, '');
+  }
+
+  function buildInstallSettingsUrl() {
+    if (!state) {
+      return '';
+    }
+    const subredditName = normalizeSubredditName(state.subredditName);
+    if (!subredditName) {
+      return '';
+    }
+    return `https://developers.reddit.com/r/${encodeURIComponent(subredditName)}/apps/vouchx`;
+  }
+
+  function getConfiguredDenyReasons() {
+    if (!state || !state.config || !Array.isArray(state.config.denyReasons)) {
+      return [];
+    }
+    return state.config.denyReasons.filter((item) => item && typeof item.id === 'string');
+  }
+
+  function getEnabledDenyReasons() {
+    return getConfiguredDenyReasons().filter((item) => item.enabled && String(item.label || '').trim());
+  }
+
+  function getDenyReasonLabel(reasonId) {
+    const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
+    const label = match && typeof match.label === 'string' ? match.label.trim() : '';
+    return label || formatDenyReasonSlot(reasonId);
+  }
+
+  function getDenyReasonTemplate(reasonId) {
+    const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
+    return match && typeof match.template === 'string' ? match.template : '';
+  }
+
   function capturePendingReviewDrafts() {
     const drafts = [];
     for (const card of document.querySelectorAll('[data-pending-id]')) {
@@ -365,10 +432,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       approveHeader: stringInputValue(approveHeaderInput),
       approveBody: stringInputValue(approveBodyInput),
       denyHeader: stringInputValue(denyHeaderInput),
-      denyBodyPhotoshop: stringInputValue(denyBodyPhotoshopInput),
-      denyBodyUnclear: stringInputValue(denyBodyUnclearInput),
-      denyBodyInstructions: stringInputValue(denyBodyInstructionsInput),
-      denyBodyOther: stringInputValue(denyBodyOtherInput),
+      denyReasonTemplates: Object.fromEntries(
+        denyReasonTemplateControls.map((control) => [control.id, stringInputValue(control.input)])
+      ),
       removeHeader: stringInputValue(removeHeaderInput),
       removeBody: stringInputValue(removeBodyInput),
     };
@@ -379,10 +445,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       draft.approveHeader !== String(state.config.approveHeader || '') ||
       draft.approveBody !== String(state.config.approveBody || '') ||
       draft.denyHeader !== String(state.config.denyHeader || '') ||
-      draft.denyBodyPhotoshop !== String(state.config.denyBodyPhotoshop || '') ||
-      draft.denyBodyUnclear !== String(state.config.denyBodyUnclear || '') ||
-      draft.denyBodyInstructions !== String(state.config.denyBodyInstructions || '') ||
-      draft.denyBodyOther !== String(state.config.denyBodyOther || '') ||
+      denyReasonTemplateControls.some(
+        (control) => draft.denyReasonTemplates[control.id] !== String(getDenyReasonTemplate(control.id) || '')
+      ) ||
       draft.removeHeader !== String(state.config.removeHeader || '') ||
       draft.removeBody !== String(state.config.removeBody || '');
     return dirty ? draft : null;
@@ -497,10 +562,11 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     if (approveHeaderInput) approveHeaderInput.value = draft.approveHeader;
     if (approveBodyInput) approveBodyInput.value = draft.approveBody;
     if (denyHeaderInput) denyHeaderInput.value = draft.denyHeader;
-    if (denyBodyPhotoshopInput) denyBodyPhotoshopInput.value = draft.denyBodyPhotoshop;
-    if (denyBodyUnclearInput) denyBodyUnclearInput.value = draft.denyBodyUnclear;
-    if (denyBodyInstructionsInput) denyBodyInstructionsInput.value = draft.denyBodyInstructions;
-    if (denyBodyOtherInput) denyBodyOtherInput.value = draft.denyBodyOther;
+    for (const control of denyReasonTemplateControls) {
+      if (control.input && draft.denyReasonTemplates && typeof draft.denyReasonTemplates[control.id] === 'string') {
+        control.input.value = draft.denyReasonTemplates[control.id];
+      }
+    }
     if (removeHeaderInput) removeHeaderInput.value = draft.removeHeader;
     if (removeBodyInput) removeBodyInput.value = draft.removeBody;
   }
@@ -1078,21 +1144,36 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     let denyReason = null;
     let denyNotes = null;
     if (!isClaimedByOther && !isReReview) {
+      const configuredReasons = getEnabledDenyReasons();
       denyReason = document.createElement('select');
       denyReason.className = 'field-select';
-      denyReason.innerHTML = [
-        '<option value="" selected>-- No denial reason selected --</option>',
-        '<option value="photoshop">Photoshop</option>',
-        '<option value="unclear_image">Unclear image</option>',
-        '<option value="did_not_follow_instructions">Did not follow written instructions</option>',
-        '<option value="other">Other</option>',
-      ].join('');
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.selected = true;
+      placeholderOption.textContent = configuredReasons.length
+        ? '-- No denial reason selected --'
+        : '-- No denial reasons configured --';
+      denyReason.appendChild(placeholderOption);
+      for (const reason of configuredReasons) {
+        const option = document.createElement('option');
+        option.value = reason.id;
+        option.textContent = reason.label;
+        denyReason.appendChild(option);
+      }
+      denyReason.disabled = configuredReasons.length === 0;
       card.appendChild(denyReason);
+
+      if (configuredReasons.length === 0) {
+        const noReasonsMeta = document.createElement('p');
+        noReasonsMeta.className = 'item-meta';
+        noReasonsMeta.textContent = 'Enable at least one denial reason in install settings to deny requests.';
+        card.appendChild(noReasonsMeta);
+      }
 
       denyNotes = document.createElement('textarea');
       denyNotes.className = 'field-textarea';
       denyNotes.rows = 3;
-      denyNotes.placeholder = 'Moderator notes for denial modmail and mod notes (required for Other)';
+      denyNotes.placeholder = 'Optional moderator notes for mod notes and any denial template that uses {{reason}}';
       card.appendChild(denyNotes);
     }
 
@@ -1117,12 +1198,12 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
         denyBtn.className = 'btn btn-danger';
         denyBtn.textContent = 'Deny';
         denyBtn.addEventListener('click', () => {
-          if (!denyReason || !denyReason.value) {
-            showToast('Select a denial reason before denying.', 'error');
+          if (!getEnabledDenyReasons().length) {
+            showToast('No denial reasons are enabled in install settings.', 'error');
             return;
           }
-          if (denyReason.value === 'other' && (!denyNotes || !denyNotes.value.trim())) {
-            showToast('Notes are required when denial reason is Other.', 'error');
+          if (!denyReason || !denyReason.value) {
+            showToast('Select a denial reason before denying.', 'error');
             return;
           }
           postWithBusy({
@@ -1275,10 +1356,6 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
           item.status === 'pending' && item.parentVerificationId
             ? 'PENDING RE-REVIEW'
             : String(item.status || '').toUpperCase();
-        const denyReasonMeta =
-          item.status === 'denied' && item.denyReason
-            ? `<p class="item-meta">Reason: ${String(item.denyReason || '').replaceAll('_', ' ')}</p>`
-            : '';
         const reopenedMeta =
           item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none'
             ? `<p class="item-meta reopened-warning">Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}</p>`
@@ -1289,9 +1366,14 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
           <p class="item-meta">Submitted: ${formatTime(item.submittedAt)}</p>
           <p class="item-meta">Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}</p>
           <p class="item-meta">Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}</p>
-          ${denyReasonMeta}
           ${reopenedMeta}
         `;
+        if (item.status === 'denied' && item.denyReason) {
+          const reasonMeta = document.createElement('p');
+          reasonMeta.className = 'item-meta';
+          reasonMeta.textContent = `Reason: ${getDenyReasonLabel(item.denyReason)}`;
+          card.appendChild(reasonMeta);
+        }
         appendSubmissionAcknowledgementMeta(card, item);
         if (item.status === 'denied' && !item.reopenedChildId) {
           const row = document.createElement('div');
@@ -1345,7 +1427,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
         const removeReason = document.createElement('textarea');
         removeReason.className = 'field-textarea';
         removeReason.rows = 2;
-        removeReason.placeholder = 'Reason for removal (sent to user)';
+        removeReason.placeholder = 'Reason for revocation (sent to user)';
         card.appendChild(removeReason);
 
         const row = document.createElement('div');
@@ -1353,11 +1435,11 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'btn btn-danger';
-        removeBtn.textContent = 'Remove Verification';
+        removeBtn.textContent = 'Revoke Verification';
         removeBtn.addEventListener('click', () => {
           const trimmedReason = removeReason.value.trim();
           if (!trimmedReason) {
-            showToast('Removal reason is required.', 'error');
+            showToast('Revocation reason is required.', 'error');
             return;
           }
           postWithBusy({ type: 'removeVerification', verificationId: item.id, reason: trimmedReason });
@@ -1448,6 +1530,18 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = state.config.verificationsEnabled !== false;
     }
+    if (verificationsDisabledMessageHint) {
+      const message = String(state.config.verificationsDisabledMessage || '').trim();
+      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" Configurable in install settings for this subreddit.`;
+    }
+    if (installSettingsRow) {
+      installSettingsRow.classList.toggle('hidden', !(state.canOpenInstallSettings === true));
+    }
+    if (installSettingsLink) {
+      const installSettingsUrl = buildInstallSettingsUrl();
+      installSettingsLink.setAttribute('href', installSettingsUrl || '#');
+      installSettingsLink.setAttribute('aria-disabled', installSettingsUrl ? 'false' : 'true');
+    }
     flairTemplateInput.value = state.config.flairTemplateId || '';
     if (flairCssClassInput) {
       flairCssClassInput.value = state.config.flairCssClass || '';
@@ -1477,10 +1571,19 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     approveHeaderInput.value = state.config.approveHeader || '';
     approveBodyInput.value = state.config.approveBody || '';
     denyHeaderInput.value = state.config.denyHeader || '';
-    denyBodyPhotoshopInput.value = state.config.denyBodyPhotoshop || '';
-    denyBodyUnclearInput.value = state.config.denyBodyUnclear || '';
-    denyBodyInstructionsInput.value = state.config.denyBodyInstructions || '';
-    denyBodyOtherInput.value = state.config.denyBodyOther || '';
+    for (const control of denyReasonTemplateControls) {
+      const label = getDenyReasonLabel(control.id);
+      const enabled = getEnabledDenyReasons().some((item) => item.id === control.id);
+      if (control.wrapper) {
+        control.wrapper.classList.toggle('hidden', !enabled);
+      }
+      if (control.label) {
+        control.label.textContent = `Denial body: ${label}`;
+      }
+      if (control.input) {
+        control.input.value = getDenyReasonTemplate(control.id) || '';
+      }
+    }
     removeHeaderInput.value = state.config.removeHeader || '';
     removeBodyInput.value = state.config.removeBody || '';
   }
@@ -2204,6 +2307,18 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     });
   }
 
+  if (installSettingsLink) {
+    installSettingsLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      const url = buildInstallSettingsUrl();
+      if (!url) {
+        showToast('Unable to resolve the install settings URL.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url });
+    });
+  }
+
   refreshBtn.addEventListener('click', () => postWithBusy({ type: 'refresh' }));
 
   if (blockUserBtn) {
@@ -2465,10 +2580,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       approveHeader: approveHeaderInput.value,
       approveBody: approveBodyInput.value,
       denyHeader: denyHeaderInput.value,
-      denyBodyPhotoshop: denyBodyPhotoshopInput.value,
-      denyBodyUnclear: denyBodyUnclearInput.value,
-      denyBodyInstructions: denyBodyInstructionsInput.value,
-      denyBodyOther: denyBodyOtherInput.value,
+      denyReasonTemplates: Object.fromEntries(
+        denyReasonTemplateControls.map((control) => [control.id, control.input ? control.input.value : ''])
+      ),
       removeHeader: removeHeaderInput.value,
       removeBody: removeBodyInput.value,
     });
