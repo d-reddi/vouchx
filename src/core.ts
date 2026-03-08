@@ -207,6 +207,7 @@ type RetentionReconcileSummary = {
   nonApprovedPurged: number;
   nonApprovedRetried: number;
   auditPurged: number;
+  staleIndexEntriesPurged: number;
   skipped: boolean;
 };
 
@@ -417,6 +418,7 @@ const VALIDATION_HARD_EXPIRY_DAYS = 45;
 const VALIDATION_BATCH_SIZE = 50;
 const NON_APPROVED_VALIDATION_BATCH_SIZE = 25;
 const NON_APPROVED_VALIDATION_SCAN_MULTIPLIER = 4;
+const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
 const APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER = 4;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const HISTORY_RETENTION_DAYS = 45;
@@ -3691,10 +3693,80 @@ async function findLatestExistingRecordIdForUser(
   return null;
 }
 
+async function removeRecordIdsFromGlobalIndexes(
+  context: RedisContext,
+  subredditId: string,
+  recordIds: string[]
+): Promise<void> {
+  const uniqueIds = Array.from(new Set(recordIds.map((recordId) => recordId.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return;
+  }
+
+  await context.redis.zRem(historyDateIndexKey(subredditId), uniqueIds);
+  await context.redis.zRem(pendingIndexKey(subredditId), uniqueIds);
+  await context.redis.zRem(approvedIndexKey(subredditId), uniqueIds);
+  await removeValidationTrackingForRecordIds(context, subredditId, uniqueIds);
+}
+
+async function sweepStaleRecordIndexEntries(
+  context: RedisContext,
+  subredditId: string,
+  batchSize = STALE_RECORD_INDEX_SWEEP_BATCH_SIZE
+): Promise<number> {
+  const cursorKey = staleRecordIndexSweepCursorKey(subredditId);
+  const cursorRaw = await context.redis.get(cursorKey);
+  const cursor = Math.max(0, Number.parseInt(cursorRaw ?? '0', 10) || 0);
+  const members = await context.redis.zRange(historyDateIndexKey(subredditId), cursor, cursor + batchSize - 1, {
+    by: 'rank',
+  });
+
+  if (members.length === 0) {
+    await context.redis.del(cursorKey);
+    return 0;
+  }
+
+  const candidateIds = members.map((entry) => entry.member);
+  const payloads = await mGetStringValuesInChunks(
+    context,
+    candidateIds.map((recordId) => verificationRecordKey(subredditId, recordId))
+  );
+
+  const staleIds: string[] = [];
+  let liveCount = 0;
+  for (let index = 0; index < payloads.length; index++) {
+    const payload = payloads[index];
+    if (!payload) {
+      staleIds.push(candidateIds[index]);
+      continue;
+    }
+    if (!parseRecord(payload)) {
+      staleIds.push(candidateIds[index]);
+      continue;
+    }
+    liveCount += 1;
+  }
+
+  if (staleIds.length > 0) {
+    await removeRecordIdsFromGlobalIndexes(context, subredditId, staleIds);
+  }
+
+  const totalRecords = await context.redis.zCard(historyDateIndexKey(subredditId));
+  const nextCursor = cursor + liveCount;
+  if (nextCursor >= totalRecords) {
+    await context.redis.del(cursorKey);
+  } else {
+    await context.redis.set(cursorKey, `${nextCursor}`);
+  }
+
+  return staleIds.length;
+}
+
 async function estimateSubredditStorageUsage(
   context: Devvit.Context,
   subredditId: string
 ): Promise<StorageUsage> {
+  await sweepStaleRecordIndexEntries(context, subredditId);
   await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
   const recordCount = await context.redis.zCard(historyDateIndexKey(subredditId));
   const auditCount = await context.redis.zCard(auditDateIndexKey(subredditId));
@@ -4520,6 +4592,10 @@ function validationNonApprovedFailureCountKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:validation:non-approved-failures`;
 }
 
+function staleRecordIndexSweepCursorKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:cleanup:stale-record-index-cursor`;
+}
+
 function modmailThreadByUserKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:modmail:thread-by-user`;
 }
@@ -5194,11 +5270,13 @@ async function reconcileApprovedUsersForRetention(
       nonApprovedPurged: 0,
       nonApprovedRetried: 0,
       auditPurged: 0,
+      staleIndexEntriesPurged: 0,
       skipped: true,
     };
   }
 
   try {
+    const staleIndexEntriesPurged = await sweepStaleRecordIndexEntries(context, subredditId);
     await backfillValidationTracking(context, subredditId, VALIDATION_BATCH_SIZE);
     const nowMs = Date.now();
     const hardExpired = await context.redis.zRange(validationHardExpireIndexKey(subredditId), 0, nowMs, {
@@ -5297,6 +5375,7 @@ async function reconcileApprovedUsersForRetention(
       nonApprovedPurged: nonApprovedSummary.purged,
       nonApprovedRetried: nonApprovedSummary.retried,
       auditPurged,
+      staleIndexEntriesPurged,
       skipped: false,
     };
   } finally {

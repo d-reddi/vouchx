@@ -234,7 +234,7 @@ Devvit.addSchedulerJob<AuditRetentionJobData>({
       const summary = await reconcileApprovedUsersForRetention(context, subredditId, subredditName);
       if (!summary.skipped) {
         console.log(
-          `[user-validation] r/${subredditName}: approved_processed=${summary.processed} approved_validated=${summary.validated} approved_purged=${summary.purged} approved_retries=${summary.retried} non_approved_processed=${summary.nonApprovedProcessed} non_approved_validated=${summary.nonApprovedValidated} non_approved_purged=${summary.nonApprovedPurged} non_approved_retries=${summary.nonApprovedRetried} audit_purged=${summary.auditPurged}`
+          `[user-validation] r/${subredditName}: approved_processed=${summary.processed} approved_validated=${summary.validated} approved_purged=${summary.purged} approved_retries=${summary.retried} non_approved_processed=${summary.nonApprovedProcessed} non_approved_validated=${summary.nonApprovedValidated} non_approved_purged=${summary.nonApprovedPurged} non_approved_retries=${summary.nonApprovedRetried} audit_purged=${summary.auditPurged} stale_index_entries_purged=${summary.staleIndexEntriesPurged}`
         );
       }
     } catch (error) {
