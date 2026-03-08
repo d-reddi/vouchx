@@ -38,6 +38,16 @@ type ToastPayload = {
   tone: 'success' | 'error' | 'info';
 };
 
+type SettingsValidationRequest<ValueType> = {
+  value: ValueType | undefined;
+  isEditing: boolean;
+};
+
+type SettingsValidationResponse = {
+  success: boolean;
+  error?: string;
+};
+
 type HttpError = Error & {
   status?: number;
 };
@@ -74,6 +84,37 @@ function getStatus(error: unknown): number {
 function sendError(res: express.Response, error: unknown): void {
   const message = errorText(error);
   res.status(getStatus(error)).json({ error: message });
+}
+
+function toSettingsValidationResponse(error?: string): SettingsValidationResponse {
+  return error ? { success: false, error } : { success: true };
+}
+
+function validateAuditPurgeDays(value: unknown): string | undefined {
+  if (value === undefined) {
+    return;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    return 'Enter a whole number of days (0 or greater).';
+  }
+}
+
+function validateVerificationsDisabledMessage(value: unknown): string | undefined {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length > 200) {
+    return 'Keep the disabled message at 200 characters or fewer.';
+  }
+}
+
+function validateDenyReasonLabel(value: unknown): string | undefined {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length > 48) {
+    return 'Keep the reason label at 48 characters or fewer.';
+  }
 }
 
 async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
@@ -180,6 +221,21 @@ app.get('/api/hub/state', async (_req, res) => {
   } catch (error) {
     sendError(res, error);
   }
+});
+
+app.post('/internal/settings/validate/mod-menu-audit-purge-days', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<number>>;
+  res.json(toSettingsValidationResponse(validateAuditPurgeDays(body.value)));
+});
+
+app.post('/internal/settings/validate/verifications-disabled-message', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+  res.json(toSettingsValidationResponse(validateVerificationsDisabledMessage(body.value)));
+});
+
+app.post('/internal/settings/validate/deny-reason-label', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+  res.json(toSettingsValidationResponse(validateDenyReasonLabel(body.value)));
 });
 
 app.post('/api/hub/submit', async (req, res) => {

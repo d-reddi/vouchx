@@ -1,12 +1,6 @@
-import { Devvit, SettingScope, fetchDevvitWeb, type FormOnSubmitEvent } from '@devvit/public-api';
+import { Devvit, fetchDevvitWeb, type FormOnSubmitEvent } from '@devvit/public-api';
 
 import {
-  DENY_REASON_INSTALL_SETTINGS,
-  DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
-  INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
-  INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
-  MAX_DENY_REASON_LABEL_LENGTH,
-  MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,
   USER_VALIDATION_JOB_NAME,
   ensureUserValidationSchedule,
   errorText,
@@ -83,59 +77,6 @@ async function onRemoveVerificationPost(
   }
 }
 
-Devvit.addSettings([
-  {
-    type: 'number',
-    name: INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
-    label: 'Purge Audit Log days',
-    helpText: 'Days used by subreddit menu "Purge Audit Log". Use 0 to purge all entries.',
-    scope: SettingScope.Installation,
-    defaultValue: DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
-    onValidate: ({ value }) => {
-      if (value === undefined) {
-        return;
-      }
-      if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
-        return 'Enter a whole number of days (0 or greater).';
-      }
-    },
-  },
-  {
-    type: 'string',
-    name: INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
-    label: 'Verifications disabled message',
-    helpText: 'Shown to users in this subreddit when submissions are turned off. Leave blank to use the default message.',
-    scope: SettingScope.Installation,
-    defaultValue: '',
-    onValidate: ({ value }: { value?: string }) => {
-      const normalized = String(value ?? '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (normalized.length > MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH) {
-        return `Keep the disabled message at ${MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH} characters or fewer.`;
-      }
-    },
-  },
-  ...DENY_REASON_INSTALL_SETTINGS.flatMap((setting, index) => [
-    {
-      type: 'string' as const,
-      name: setting.labelSettingName,
-      label: `Denial Reason ${index + 1} Label`,
-      helpText: `Friendly name for this subreddit install. Leave blank to hide this reason and its mod-panel template field. Max ${MAX_DENY_REASON_LABEL_LENGTH} characters.`,
-      scope: SettingScope.Installation,
-      defaultValue: setting.defaultLabel,
-      onValidate: ({ value }: { value?: string }) => {
-        const normalized = String(value ?? '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (normalized.length > MAX_DENY_REASON_LABEL_LENGTH) {
-          return `Keep the reason label at ${MAX_DENY_REASON_LABEL_LENGTH} characters or fewer.`;
-        }
-      },
-    },
-  ]),
-]);
-
 const createVerificationPostForm = Devvit.createForm(
   {
     title: 'Create verification hub post',
@@ -193,7 +134,7 @@ const removeVerificationPostForm = Devvit.createForm(
 );
 
 Devvit.addMenuItem({
-  label: 'Create Verification Hub (NSFW)',
+  label: 'Create Verification Hub (VouchX)',
   location: 'subreddit',
   forUserType: 'moderator',
   onPress: (_, context) => {
