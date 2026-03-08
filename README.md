@@ -1,133 +1,239 @@
-# NSFW Verify (Devvit)
+# VouchX
 
-NSFW Verify is a Reddit verification app for communities that need a moderator-reviewed photo verification process.
-It now uses the current Devvit Web post model: an inline launch screen, an expanded verification hub entrypoint, and a web-backed moderator panel.
+VouchX is a Devvit Web verification app for subreddits that need moderator-reviewed photo verification.
 
-It includes:
-- A Devvit Web verification post with an inline launch card and expanded hub
-- A user-facing verification hub (submit, track status, withdraw pending, remove verification)
-- A moderator panel (review queue, history, blocked users, settings, templates, themes)
-- Flair + modmail automation
-- Account validation checks for approved users
-- Automatic data retention
+The app ships as:
+- an inline verification post surface
+- an expanded verification hub
+- an expanded moderator panel
+- a Devvit Web server backed by Redis, realtime refresh signals, and a scheduled retention job
 
-## For Community Members
+## What The App Does
 
-### What users can do
-- Submit verification photos from the verification post
-- Confirm they are 18+ before submitting
-- Upload the number of required photos set by moderators (`1`, `2`, or `3`)
-- See current status in the post:
+### Member experience
+- Users open the post and see the verification panel directly in the post body.
+- Users can submit or resubmit verification photos.
+- Before the Devvit upload form opens, the user must accept the submission acknowledgements shown in the warning modal.
+- Moderators can require `1`, `2`, or `3` photos.
+- Users can open `Photo Instructions` before submitting.
+- Users can withdraw a pending request.
+- Verified users can remove their own verification.
+- The hub auto-refreshes every 2 minutes while open.
+
+### Moderator experience
+- Moderators can review pending submissions in the expanded moderator panel.
+- The moderator panel includes tabs for:
+  - Pending
+  - Blocked
+  - History
+  - Settings
+  - Templates
+  - Themes
+- Moderator panel updates are driven by Devvit Realtime refresh signals.
+- Pending requests support claim locking so multiple moderators do not action the same item at once.
+- Denied requests can be reopened for re-review.
+- Users can be manually blocked or unblocked.
+- Users are auto-blocked after `3` denials.
+
+### Moderator menu actions
+- `Create Verification Hub (NSFW)` creates the app post.
+- `Purge Audit Log` removes audit entries older than the installation-configured number of days.
+- `Remove Verification Hub Post` removes an app-created verification post.
+
+## User-Facing Status Rules
+
+The hub can show:
 - `Verified`
+- `Verified (Manual)`
 - `Pending review`
 - `Pending re-review`
+- `Blocked`
 - `Not verified`
-- Withdraw a pending submission
-- Remove their own verification (self-removal)
 
-### What users see when submission is unavailable
-- If submissions are disabled by moderators:
-- `Verifications are temporarily disabled. Please check back soon.`
-- If the user is blocked:
-- `You cannot submit a verification request.`
+Important behavior:
+- Verified status is based on live flair detection, not just stored record state.
+- A blocked user who still has a valid verified flair continues to see `Verified` until the flair is removed or the verification is revoked.
+- If submissions are disabled, users see the installation-configured disabled message.
 
-### What happens after submission
-- Moderators review the submission
-- User receives update modmail from the subreddit
-- On approval, user flair is applied based on moderator settings
+## Flair Behavior
 
-## For Moderators
+Approval applies the configured flair template ID.
 
-### Getting started
-- Create the verification post from subreddit menu:
-- `Create Verification Hub (NSFW)`
-- This creates a Devvit Web custom post that opens from an inline launch screen into the full verification hub
-- Open moderator tools from the post:
-- `Open Moderator Panel`
-- Access is limited to moderators with Manage Users style permissions
+Verified-state detection currently uses:
+- flair template ID match
+- OR configured CSS wildcard match
 
-### Moderator panel tabs
+If Reddit omits the user’s live flair template ID, the app can also compare the user’s current flair text against the cached text of the configured flair template.
 
-#### Pending
-- Live filter by username
-- SLA quick filters (`All`, `<24h`, `24-72h`, `>72h`)
-- Lock/unlock claims to coordinate reviews
-- Approve or deny submissions
-- Denials support a reason and optional notes
+The app also performs flair reconciliation on load for approved users when the current flair looks like a stale app-applied flair that should be updated to the current configured template. It does not overwrite unrelated/manual flair just because the user has an approved record.
 
-#### Blocked
-- Search blocked users
-- Manually block users
-- Unblock users
-- Auto-block occurs after repeated denials (threshold: `3`)
+## Configuration Model
 
-#### History
-The History tab has 3 views:
+### Install settings
+Install settings are per subreddit installation.
 
-- `Records`:
-- Search by username prefix and date range
-- Reopen denied records for re-review
+Current install settings:
+- `Purge Audit Log days`
+- `Verifications disabled message`
+- `Denial Reason 1 Label`
+- `Denial Reason 2 Label`
+- `Denial Reason 3 Label`
+- `Denial Reason 4 Label`
 
-- `Approved`:
-- Empty username query shows recent approved records (default date range: last 30 days)
-- Username query rules:
-- `0 chars`: show recent approved records
-- `1-2 chars`: no backend search; UI shows hint: `Type at least 3 characters to search.`
-- `3+ chars`: fast prefix search (`startsWith`, not contains)
-- Supports paging with `Load More`
+Notes:
+- Denial reason labels are friendly names only.
+- Leaving a denial reason label blank hides that reason in the moderator UI for that subreddit.
 
-- `Audit`:
-- Search audit events by username, actor, and date range
-- Supports paging with `Load More`
+### Moderator panel settings
+Moderator panel settings are also subreddit-specific.
 
-#### Settings
-- Enable/disable verifications
-- Set required photo count (`1-3`)
-- Configure flair template ID
-- Approvals require a valid flair template ID
-- Optional CSS matcher for verified-state detection
-- View storage usage estimate
+Verification Settings tab:
+- enable or disable submissions
+- flair template ID
+- optional flair CSS matcher
+- required photo count
+- photo instructions markdown
+- estimated storage usage
 
-#### Templates
-- Manage modmail subject/body templates for:
-- Pending
-- Approved
-- Denied (per reason)
-- Removal
-- Supports placeholders like `{{username}}`, `{{mod}}`, `{{subreddit}}`, `{{date submitted}}`, `{{reason}}`, `{{days}}`
+Templates tab:
+- modmail subject
+- pending turnaround days
+- pending body
+- approval header/body
+- denial header and denial body templates for enabled denial reasons
+- revoked verification header/body
 
-#### Themes
-- Choose preset themes
-- Optional custom primary/accent colors
-- Live preview before saving
+Themes tab:
+- preset themes
+- optional custom primary, accent, and background colors
 
-## Verification and Moderation Behavior
+### Legal links
+The dashboard footer and submit-warning modal show:
+- Terms and Conditions
+- Privacy Policy
 
-- Approved users are periodically revalidated (about every 30 days)
-- Validation is batched and due-based to avoid scanning all users
-- If a user is confirmed deleted/suspended, verification data is removed from active indexes
-- Approved username search uses prefix matching only (`startsWith`)
+Those URLs are currently hardcoded in `webroot/hub-app.js`. If they change, rebuild and redeploy/upload the app.
 
-## Data and Retention
+## Template And Instruction Placeholders
 
-### What is stored
-- Verification records
-- Pending/approved/history/audit indexes
-- Per-user latest/pending pointers
-- Block list + denial counters
-- Subreddit configuration
+### Photo Instructions
+Photo instructions support markdown plus:
+- `{{subreddit}}`
+- `{{days}}`
 
-### Retention rules
-Retention rules are in place to maintain compliance with Reddit Dev Rules
-- History/verification records that are not approved:
-- Retained for 45 days (fixed)
+### Modmail templates
+Supported placeholders:
+- `{{username}}`
+- `{{mod}}`
+- `{{subreddit}}`
+- `{{date submitted}}`
+- `{{reason}}`
+- `{{days}}`
 
-- Audit entries:
-- Retained for 45 days (fixed)
+`{{days}}` renders with the unit included, for example `3 days`.
 
-- Approved verification records:
-- Retained for 45 days of inactivity (sliding).
-- A verified user opening/rendering the app counts as activity for the purposes of post veririficaiton expiry extension.
+## Submission Flow
 
-### Additional moderator menu action
-- `Purge Audit Log` (subreddit menu item) - this will remove all "audit" trails through the # of days set in the install settings.  Reccomended days: 3 to avoid abuse of this function. 
+When a user submits:
+1. The user opens the acknowledgement modal.
+2. The user must confirm the submission statements.
+3. The Devvit image form opens.
+4. The app stores the returned media URLs on the verification record.
+5. A pending modmail is sent.
+6. A submission mod note is written.
+7. The pending request appears in the moderator queue.
+
+The pending submission records the acknowledgement timestamp for audit purposes.
+
+## Review Flow
+
+### Approve
+- Applies flair
+- Sends approval modmail
+- Writes an approval mod note
+- Moves the record into the approved index
+- Schedules validation tracking
+
+### Deny
+- Stores the selected denial reason slot and optional moderator notes
+- Sends denial modmail using the current configured denial template for that subreddit
+- Writes a denial mod note
+- Leaves the record in history
+- Can trigger automatic blocking after repeated denials
+
+### Revoke
+- Removes the approved record from the approved index
+- Attempts to remove flair
+- Sends revoked verification modmail
+- Writes a moderator note
+
+## Realtime And Refresh Behavior
+
+- The moderator panel subscribes to a subreddit-scoped realtime channel.
+- Realtime messages do not contain user data; they only signal the client to refresh.
+- Unsaved moderator drafts are preserved across realtime refreshes.
+- The user hub auto-refreshes every 2 minutes while open.
+
+## Data Stored
+
+The app stores:
+- verification records
+- pending, approved, and history indexes
+- audit log entries
+- per-user latest and pending pointers
+- blocked users and denial counters
+- subreddit configuration
+- validation-tracking indexes for approved users
+
+The app also writes Reddit-side moderation artifacts such as modmail and mod notes.
+
+## Retention And Cleanup
+
+### Verification records
+- Non-approved verification records are retained for `45 days`.
+- Approved verification records are retained for `45 days` on a sliding TTL.
+
+Approved sliding retention details:
+- Approved records store `lastTtlBumpAt`.
+- Loading the app for an approved verified user can bump retention.
+- The bump is intentionally rate-limited to at most once every `24 hours` per approved record.
+
+### Audit log
+- Audit entries are retained for `45 days`.
+- Moderators can purge audit entries earlier with the subreddit menu action.
+
+### Cleanup jobs
+The app has a daily scheduled cleanup/validation job that:
+- revalidates approved users in batches
+- purges verification data for users confirmed deleted or suspended
+- scans non-approved history in batches
+- purges expired audit entries
+- sweeps stale TTL-expired record IDs out of shared indexes
+
+### User self-removal and withdraw
+- Withdrawing a pending request deletes the user’s verification records and app audit entries for that verification history.
+- Self-removal deletes the user’s verification records and app audit entries for that verification history.
+- These flows preserve the subreddit block record and denial counter.
+
+## Development
+
+Requirements:
+- Node `>=22`
+
+Scripts:
+- `npm run dev` - Devvit playtest
+- `npm run build` - Vite build
+- `npm run check` - TypeScript typecheck
+- `npm run deploy` - build then upload without rebuilding in upload step
+
+Current app config:
+- app name: `vouchx`
+- dev subreddit: `vouchx_dev`
+
+## Project Notes
+
+- This app already uses the Devvit Web post model.
+- The post UI lives under `webroot/`.
+- The server entrypoint is `src/index.ts`.
+- Shared app logic lives in `src/core.ts`.
+- Legacy stale helpers like the old subreddit tracker have been removed.
