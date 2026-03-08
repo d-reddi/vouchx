@@ -160,6 +160,14 @@ h2 {
   gap: 8px;
 }
 
+.pending-badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .username-link {
   border: 0;
   background: transparent;
@@ -214,6 +222,13 @@ h2 {
 .pending-age-stale {
   border-color: color-mix(in srgb, var(--danger) 65%, transparent);
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.pending-age-resubmitted {
+  border-color: color-mix(in srgb, var(--primary) 65%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
   background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 

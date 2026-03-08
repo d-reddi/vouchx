@@ -48,7 +48,7 @@ Users can:
 
 - submit photos for moderator review
 - review photo instructions before submitting
-- resubmit verification if denied
+- resubmit verification if denied (Moderators see "resubmitted" on the pending card if the user is resubitting)
 - withdraw a pending request
 - remove their own verification if they choose
 

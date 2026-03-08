@@ -1075,11 +1075,20 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     return badge;
   }
 
+  function createPendingResubmitBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge pending-age-resubmitted';
+    badge.textContent = 'Resubmitted';
+    badge.title = 'This pending request is a reopened resubmission';
+    return badge;
+  }
+
   function buildPendingCard(item) {
     const card = document.createElement('article');
     card.className = 'item';
     card.dataset.pendingId = String(item.id || '');
     const isReReview = Boolean(item.parentVerificationId);
+    const isResubmission = Boolean(item.isResubmission);
 
     const viewerUsername = normalizeUsernameForCompare(state ? state.viewerUsername : '');
     const claimedByNormalized = normalizeUsernameForCompare(item.claimedBy);
@@ -1089,9 +1098,17 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const titleRow = document.createElement('div');
     titleRow.className = 'pending-title-row';
     titleRow.appendChild(createUsernameHeading(item.username));
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'pending-badge-row';
     const ageBadge = createPendingAgeBadge(item.submittedAt);
     if (ageBadge) {
-      titleRow.appendChild(ageBadge);
+      badgeRow.appendChild(ageBadge);
+    }
+    if (isResubmission) {
+      badgeRow.appendChild(createPendingResubmitBadge());
+    }
+    if (badgeRow.childNodes.length > 0) {
+      titleRow.appendChild(badgeRow);
     }
     card.appendChild(titleRow);
 

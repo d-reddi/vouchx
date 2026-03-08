@@ -47,6 +47,7 @@ type VerificationRecord = {
   claimedBy?: string | null;
   claimedAt?: string | null;
   parentVerificationId?: string | null;
+  isResubmission?: boolean;
   removedAt?: string | null;
   removedBy?: string | null;
   lastValidatedAt?: string | null;
@@ -317,6 +318,7 @@ type PendingPanelItem = {
   claimedBy?: string | null;
   claimedAt?: string | null;
   parentVerificationId?: string | null;
+  isResubmission?: boolean;
 };
 
 type ApprovedSearchPanelItem = {
@@ -882,6 +884,7 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     claimedBy: record.claimedBy ?? null,
     claimedAt: record.claimedAt ?? null,
     parentVerificationId: record.parentVerificationId ?? null,
+    isResubmission: Boolean(record.isResubmission),
   };
 }
 
@@ -940,6 +943,8 @@ async function submitVerification(
   }
 
   const normalizedUsername = normalizeUsername(username);
+  const priorLatestRecord = await getLatestRecordForUser(context, subredditId, normalizedUsername);
+  const isResubmission = Boolean(priorLatestRecord && priorLatestRecord.status !== 'pending');
   const userId = context.userId;
   const now = new Date();
   await removeAllVerificationRecordsForUser(context, subredditId, normalizedUsername);
@@ -966,6 +971,7 @@ async function submitVerification(
     claimedBy: null,
     claimedAt: null,
     parentVerificationId: null,
+    isResubmission,
     removedAt: null,
     removedBy: null,
     lastValidatedAt: null,
@@ -1712,11 +1718,7 @@ async function applyApprovalFlairWithFallbacks(
     return { applied: false, error: 'Configured flair template ID format is invalid.' };
   }
 
-  const configuredText = config.flairText.trim() || DEFAULT_FLAIR_TEXT;
-  const attempts: Array<{ flairTemplateId: string; text?: string }> = [
-    { flairTemplateId: configuredTemplateId },
-    { flairTemplateId: configuredTemplateId, text: configuredText },
-  ];
+  const attempts: Array<{ flairTemplateId: string }> = [{ flairTemplateId: configuredTemplateId }];
 
   let lastError: string | undefined;
   const errorLines: string[] = [];
@@ -1728,14 +1730,11 @@ async function applyApprovalFlairWithFallbacks(
             subredditName: subredditAttempt,
             username: usernameAttempt,
             flairTemplateId: attempt.flairTemplateId,
-            text: attempt.text,
           });
           return { applied: true };
         } catch (error) {
           lastError = errorText(error);
-          errorLines.push(
-            `${subredditAttempt}/${usernameAttempt}/${attempt.text ? 'template+text' : 'template-only'}=${lastError}`
-          );
+          errorLines.push(`${subredditAttempt}/${usernameAttempt}/template-only=${lastError}`);
         }
       }
     }
@@ -2513,10 +2512,33 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     userLatest &&
     shouldReconcileApprovedViewerFlair(userLatest, config, flairCheck, viewerFlairSnapshot)
   ) {
+    const previousAppliedTemplateId = normalizeTemplateId(userLatest.lastAppliedFlairTemplateId ?? '');
+    const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
+    const detectedTemplateIdBeforeReconcile = normalizeTemplateId(
+      viewerFlairSnapshot.flairTemplateId || flairCheck.detectedTemplateId
+    );
+    if (
+      previousAppliedTemplateId &&
+      configuredTemplateId &&
+      previousAppliedTemplateId !== configuredTemplateId &&
+      detectedTemplateIdBeforeReconcile === previousAppliedTemplateId
+    ) {
+      const cleared = await removeUserFlairWithFallbacks(context, subredditName, viewerUsername);
+      if (!cleared) {
+        console.log(
+          `Viewer stale flair clear before reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}`
+        );
+      }
+    }
     const reconcileResult = await applyApprovalFlairWithFallbacks(context, userLatest, config);
     if (reconcileResult.applied) {
+      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName, viewerUsername);
+      flairCheck = await checkVerificationFlair(context, subredditName, viewerUsername, config, viewerFlairSnapshot);
       const updatedTemplateId = normalizeTemplateId(config.flairTemplateId);
-      if (updatedTemplateId) {
+      const reconcileConfirmed =
+        flairCheck.verified &&
+        (flairCheck.source.includes('template-match') || flairCheck.source.includes('cached-text-match'));
+      if (updatedTemplateId && reconcileConfirmed) {
         try {
           const refreshedUserLatest: VerificationRecord = {
             ...userLatest,
@@ -2529,9 +2551,11 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
             `Viewer flair reconcile record update failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${errorText(error)}`
           );
         }
+      } else if (updatedTemplateId) {
+        console.log(
+          `Viewer flair reconcile did not confirm updated template for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}; preserving prior record template ID`
+        );
       }
-      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName, viewerUsername);
-      flairCheck = await checkVerificationFlair(context, subredditName, viewerUsername, config, viewerFlairSnapshot);
     } else if (reconcileResult.error) {
       console.log(
         `Viewer flair reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${reconcileResult.error}`
@@ -2749,12 +2773,7 @@ function shouldReconcileApprovedViewerFlair(
   const detectedText = viewerFlairSnapshot.flairText.trim().toLowerCase();
   const detectedCss = normalizeCssClass(viewerFlairSnapshot.flairCssClass);
   if (!detectedText && !detectedCss) {
-    return false;
-  }
-
-  const cachedTemplateText = config.flairTemplateCacheText.trim().toLowerCase();
-  if (!cachedTemplateText || detectedText !== cachedTemplateText) {
-    return false;
+    return true;
   }
 
   return lastAppliedTemplateId !== configuredTemplateId;
@@ -4407,6 +4426,7 @@ function parseRecord(payload: string): VerificationRecord | null {
       claimedBy: typeof parsed.claimedBy === 'string' ? parsed.claimedBy : null,
       claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
       parentVerificationId: typeof parsed.parentVerificationId === 'string' ? parsed.parentVerificationId : null,
+      isResubmission: parsed.isResubmission === true,
       removedAt: typeof parsed.removedAt === 'string' ? parsed.removedAt : null,
       removedBy: typeof parsed.removedBy === 'string' ? parsed.removedBy : null,
       lastValidatedAt: typeof parsed.lastValidatedAt === 'string' ? parsed.lastValidatedAt : null,
