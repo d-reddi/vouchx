@@ -71,6 +71,19 @@ function createShell(root, inline) {
           </div>
         </div>
       </div>
+
+      <div data-el="photo-instructions-modal" class="hub-modal hidden">
+        <div class="hub-modal-card">
+          <h2>Photo Instructions</h2>
+          <p class="meta">
+            Review these instructions before opening the upload form.
+          </p>
+          <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+          <div class="row">
+            <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -92,6 +105,9 @@ function createShell(root, inline) {
     submitWarningLinks: root.querySelector('[data-el="submit-warning-links"]'),
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
+    photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
+    photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
   };
 }
 
@@ -164,6 +180,15 @@ function makeButton(label, className, onClick) {
   return button;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeExternalUrl(value) {
   const candidate = String(value || '').trim();
   if (!candidate) {
@@ -194,6 +219,113 @@ function createExternalLink(item, extraClassName = '') {
     navigateTo(item.url);
   });
   return link;
+}
+
+function renderInlineMarkdown(value) {
+  const replacements = [];
+  const storeReplacement = (html) => {
+    const token = `%%MDTOKEN${replacements.length}%%`;
+    replacements.push(html);
+    return token;
+  };
+
+  let source = String(value ?? '');
+  source = source.replace(/`([^`]+)`/g, (_match, code) => storeReplacement(`<code>${escapeHtml(code)}</code>`));
+  source = source.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, url) => {
+    const normalized = normalizeExternalUrl(url);
+    if (!normalized) {
+      return label;
+    }
+    return storeReplacement(
+      `<a href="${escapeHtml(normalized)}" data-external-url="${escapeHtml(normalized)}">${escapeHtml(label)}</a>`
+    );
+  });
+
+  let html = escapeHtml(source);
+  html = html.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[\s(])\*([^*\n][\s\S]*?)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
+  html = html.replace(/(^|[\s(])_([^_\n][\s\S]*?)_(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
+
+  return html.replace(/%%MDTOKEN(\d+)%%/g, (_match, index) => replacements[Number(index)] ?? '');
+}
+
+function renderMarkdown(value) {
+  const source = String(value ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!source) {
+    return '<p class="markdown-empty">No photo instructions have been configured yet.</p>';
+  }
+
+  const html = [];
+  const lines = source.split('\n');
+  let paragraphLines = [];
+  let listType = '';
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) {
+      return;
+    }
+    html.push(`<p>${renderInlineMarkdown(paragraphLines.join('\n')).replace(/\n/g, '<br />')}</p>`);
+    paragraphLines = [];
+  };
+
+  const closeList = () => {
+    if (!listType) {
+      return;
+    }
+    html.push(listType === 'ol' ? '</ol>' : '</ul>');
+    listType = '';
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+    if (headingMatch) {
+      flushParagraph();
+      closeList();
+      const level = Math.min(6, headingMatch[1].length + 2);
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*]\s+(.*)$/);
+    if (unorderedMatch) {
+      flushParagraph();
+      if (listType !== 'ul') {
+        closeList();
+        html.push('<ul>');
+        listType = 'ul';
+      }
+      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\d+\.\s+(.*)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      if (listType !== 'ol') {
+        closeList();
+        html.push('<ol>');
+        listType = 'ol';
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+      continue;
+    }
+
+    if (listType) {
+      closeList();
+    }
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join('');
 }
 
 export function mountHub(options = {}) {
@@ -240,6 +372,35 @@ export function mountHub(options = {}) {
     for (const item of legalLinks) {
       refs.submitWarningLinks.appendChild(createExternalLink(item));
     }
+  }
+
+  if (refs.photoInstructionsBody) {
+    refs.photoInstructionsBody.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const link = event.target.closest('a[data-external-url]');
+      if (!link) {
+        return;
+      }
+      event.preventDefault();
+      const url = String(link.getAttribute('data-external-url') || '').trim();
+      if (!url) {
+        return;
+      }
+      navigateTo(url);
+    });
+  }
+
+  if (refs.photoInstructionsClose && refs.photoInstructionsModal) {
+    refs.photoInstructionsClose.addEventListener('click', () => {
+      refs.photoInstructionsModal.classList.add('hidden');
+    });
+    refs.photoInstructionsModal.addEventListener('click', (event) => {
+      if (event.target === refs.photoInstructionsModal) {
+        refs.photoInstructionsModal.classList.add('hidden');
+      }
+    });
   }
 
   function setBusy(next) {
@@ -346,6 +507,14 @@ export function mountHub(options = {}) {
     });
   }
 
+  function openPhotoInstructionsModal() {
+    if (!refs.photoInstructionsModal || !refs.photoInstructionsBody) {
+      return;
+    }
+    refs.photoInstructionsBody.innerHTML = renderMarkdown(hubState?.config?.photoInstructions || '');
+    refs.photoInstructionsModal.classList.remove('hidden');
+  }
+
   function renderState(state) {
     if (!state) {
       return;
@@ -403,6 +572,11 @@ export function mountHub(options = {}) {
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
+      refs.actionRow.appendChild(
+        makeButton('Photo Instructions', 'btn-secondary', () => {
+          openPhotoInstructionsModal();
+        })
+      );
       refs.actionRow.appendChild(
         makeButton(submitLabel, 'btn-primary', () => {
           void openSubmitForm();

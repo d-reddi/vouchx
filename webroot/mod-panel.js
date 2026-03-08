@@ -67,6 +67,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const flairCssClassInput = document.getElementById('flair-css-class');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const requiredPhotoCountInput = document.getElementById('required-photo-count');
+  const photoInstructionsInput = document.getElementById('photo-instructions');
 
   const pendingTurnaroundDaysInput = document.getElementById('pending-turnaround-days');
   const modmailSubjectInput = document.getElementById('modmail-subject');
@@ -341,13 +342,15 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       flairCssClass: stringInputValue(flairCssClassInput),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
       requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
+      photoInstructions: stringInputValue(photoInstructionsInput),
     };
     const savedRequiredPhotoCount = `${Number(state.config.requiredPhotoCount || 2)}`;
     const dirty =
       draft.flairTemplateId !== String(state.config.flairTemplateId || '') ||
       draft.flairCssClass !== String(state.config.flairCssClass || '') ||
       draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
-      draft.requiredPhotoCount !== savedRequiredPhotoCount;
+      draft.requiredPhotoCount !== savedRequiredPhotoCount ||
+      draft.photoInstructions !== String(state.config.photoInstructions || '');
     return dirty ? draft : null;
   }
 
@@ -472,6 +475,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (requiredPhotoCountInput) {
       requiredPhotoCountInput.value = draft.requiredPhotoCount;
+    }
+    if (photoInstructionsInput) {
+      photoInstructionsInput.value = draft.photoInstructions;
     }
   }
 
@@ -1037,9 +1043,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     card.appendChild(submitted);
 
-    appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
-    appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
-    appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
+    appendSubmissionAcknowledgementMeta(card, item);
 
     if (isClaimed && !isClaimedByOther) {
       const claimMeta = document.createElement('p');
@@ -1288,9 +1292,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
           ${denyReasonMeta}
           ${reopenedMeta}
         `;
-        appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
-        appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
-        appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
+        appendSubmissionAcknowledgementMeta(card, item);
         if (item.status === 'denied' && !item.reopenedChildId) {
           const row = document.createElement('div');
           row.className = 'row';
@@ -1338,9 +1340,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
         by.textContent = `Approved by: u/${item.approvedBy}`;
         card.appendChild(by);
 
-        appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
-        appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
-        appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
+        appendSubmissionAcknowledgementMeta(card, item);
 
         const removeReason = document.createElement('textarea');
         removeReason.className = 'field-textarea';
@@ -1455,6 +1455,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     if (requiredPhotoCountInput) {
       const count = Number(state.config.requiredPhotoCount || 2);
       requiredPhotoCountInput.value = `${count >= 1 && count <= 3 ? count : 2}`;
+    }
+    if (photoInstructionsInput) {
+      photoInstructionsInput.value = state.config.photoInstructions || '';
     }
   }
 
@@ -2014,6 +2017,14 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     container.appendChild(meta);
   }
 
+  function appendSubmissionAcknowledgementMeta(container, item) {
+    appendAcknowledgementMeta(
+      container,
+      'Age gate and terms and conditions accepted at',
+      item.acknowledgedAt || null
+    );
+  }
+
   function buildHistorySearchMessage(offset, requestId) {
     return {
       type: 'searchHistory',
@@ -2441,6 +2452,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
       verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
       requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+      photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
     });
   });
 

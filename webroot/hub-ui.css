@@ -246,6 +246,13 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.hub-modal-copy {
+  margin-top: 16px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .warning-checklist {
   display: grid;
   gap: 12px;
@@ -266,6 +273,46 @@ button:disabled {
 .legal-links-modal {
   justify-content: flex-start;
   padding-top: 12px;
+}
+
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5 {
+  margin: 0 0 10px;
+  color: var(--primary);
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0 0 12px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 20px;
+}
+
+.markdown-body li + li {
+  margin-top: 6px;
+}
+
+.markdown-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: color-mix(in srgb, var(--card) 76%, var(--bg) 24%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.markdown-body a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-empty {
+  color: var(--muted);
 }
 
 .hidden {

@@ -58,6 +58,7 @@ type AuditLogEntry = {
 type RuntimeConfig = {
   verificationsEnabled: boolean;
   requiredPhotoCount: number;
+  photoInstructions: string;
   pendingTurnaroundDays: number;
   modmailSubject: string;
   pendingBody: string;
@@ -247,6 +248,7 @@ type DeleteDataConfirmValues = {
 type FlairTemplateFormValues = {
   verificationsEnabled?: boolean;
   requiredPhotoCount?: number;
+  photoInstructions?: string;
   flairTemplateId?: string;
   flairCssClass?: string;
 };
@@ -295,9 +297,7 @@ type PendingPanelItem = {
   id: string;
   username: string;
   submittedAt: string;
-  ageAcknowledgedAt: string;
-  adultOnlySelfPhotosConfirmedAt?: string | null;
-  termsAcceptedAt?: string | null;
+  acknowledgedAt: string;
   photoOneUrl: string;
   photoTwoUrl: string;
   photoThreeUrl?: string;
@@ -311,9 +311,7 @@ type ApprovedSearchPanelItem = {
   username: string;
   approvedAt: string;
   approvedBy: string;
-  ageAcknowledgedAt: string;
-  adultOnlySelfPhotosConfirmedAt?: string | null;
-  termsAcceptedAt?: string | null;
+  acknowledgedAt: string;
 };
 
 type ApprovedSearchResponsePayload = {
@@ -344,9 +342,7 @@ type HistorySearchPanelItem = {
   username: string;
   status: VerificationStatus;
   submittedAt: string;
-  ageAcknowledgedAt: string;
-  adultOnlySelfPhotosConfirmedAt?: string | null;
-  termsAcceptedAt?: string | null;
+  acknowledgedAt: string;
   reviewedAt: string | null;
   moderator: string | null;
   denyReason?: DenyReason | null;
@@ -657,6 +653,7 @@ const DEFAULT_DENY_TEMPLATE: Record<DenyReason, string> = {
 const CONFIG_FIELD = {
   verificationsEnabled: 'verifications_enabled',
   requiredPhotoCount: 'required_photo_count',
+  photoInstructions: 'photo_instructions',
   pendingTurnaroundDays: 'pending_turnaround_days',
   modmailSubject: 'modmail_subject',
   pendingBody: 'pending_body',
@@ -787,9 +784,7 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     id: record.id,
     username: record.username,
     submittedAt: record.submittedAt,
-    ageAcknowledgedAt: record.ageAcknowledgedAt,
-    adultOnlySelfPhotosConfirmedAt: record.adultOnlySelfPhotosConfirmedAt ?? null,
-    termsAcceptedAt: record.termsAcceptedAt ?? null,
+    acknowledgedAt: record.ageAcknowledgedAt,
     photoOneUrl: record.photoOneUrl,
     photoTwoUrl: record.photoTwoUrl,
     photoThreeUrl: record.photoThreeUrl ?? '',
@@ -869,8 +864,6 @@ async function submitVerification(
     subredditId,
     subredditName,
     ageAcknowledgedAt: acknowledgedAt,
-    adultOnlySelfPhotosConfirmedAt: acknowledgedAt,
-    termsAcceptedAt: acknowledgedAt,
     submittedAt: acknowledgedAt,
     photoOneUrl: photoOneUrl ?? '',
     photoTwoUrl: photoTwoUrl ?? '',
@@ -2838,9 +2831,7 @@ async function searchHistoryRecords(
         username: parsed.username,
         status: parsed.status,
         submittedAt: parsed.submittedAt,
-        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
-        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
-        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
+        acknowledgedAt: parsed.ageAcknowledgedAt,
         reviewedAt: parsed.reviewedAt ?? null,
         moderator: parsed.moderator ?? null,
         denyReason: parsed.denyReason ?? null,
@@ -2978,9 +2969,7 @@ async function searchApprovedRecords(
         username: parsed.username,
         approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
         approvedBy: parsed.moderator ?? 'unknown',
-        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
-        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
-        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
+        acknowledgedAt: parsed.ageAcknowledgedAt,
       });
       if (items.length >= limit) {
         break;
@@ -3050,9 +3039,7 @@ async function searchApprovedRecords(
         username: parsed.username,
         approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
         approvedBy: parsed.moderator ?? 'unknown',
-        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
-        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
-        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
+        acknowledgedAt: parsed.ageAcknowledgedAt,
       });
     }
   }
@@ -3811,6 +3798,7 @@ async function onSaveFlairTemplateValues(
   await context.redis.hSet(subredditConfigKey(subredditId), {
     [CONFIG_FIELD.verificationsEnabled]: `${verificationsEnabled}`,
     [CONFIG_FIELD.requiredPhotoCount]: `${requiredPhotoCount}`,
+    [CONFIG_FIELD.photoInstructions]: values.photoInstructions?.trim() ?? '',
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
     [CONFIG_FIELD.flairCssClass]: values.flairCssClass?.trim() ?? '',
     [CONFIG_FIELD.flairTemplateCacheTemplateId]: normalizedTemplateId,
@@ -3930,6 +3918,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   return {
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     requiredPhotoCount,
+    photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
     pendingTurnaroundDays: pendingTurnaroundDays ?? DEFAULT_PENDING_TURNAROUND_DAYS,
     modmailSubject:
       firstNonEmpty(stored[CONFIG_FIELD.modmailSubject], stored[LEGACY_CONFIG_FIELD.pendingSubject]) ??
