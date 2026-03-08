@@ -206,6 +206,7 @@ type RetentionReconcileSummary = {
   nonApprovedValidated: number;
   nonApprovedPurged: number;
   nonApprovedRetried: number;
+  auditPurged: number;
   skipped: boolean;
 };
 
@@ -905,7 +906,6 @@ async function submitVerification(
 
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
-  await trackSubreddit(context, subredditName);
   const config = await getRuntimeConfig(context, subredditId);
   if (!config.verificationsEnabled) {
     throw new Error(config.verificationsDisabledMessage);
@@ -1010,7 +1010,6 @@ async function onModeratorPurgeUserData(
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await trackSubreddit(context, subredditName);
   await assertCanReview(context, subredditName, moderator);
 
   const confirmationText = event.values.confirmationText?.trim().toLowerCase();
@@ -1020,12 +1019,7 @@ async function onModeratorPurgeUserData(
   }
 
   const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context);
-  const deletedAuditCount = await purgeAuditLogOlderThanDays(
-    context,
-    subredditId,
-    subredditName,
-    purgeMinAgeDays
-  );
+  const deletedAuditCount = await purgeAuditLogOlderThanDays(context, subredditId, purgeMinAgeDays);
 
   const ageFilterDescription =
     purgeMinAgeDays <= 0 ? 'all audit log entries' : `audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} older than ${purgeMinAgeDays} days`;
@@ -3563,6 +3557,7 @@ async function pruneHistoryOlderThanDays(
   }
 
   const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
   const staleCandidates = await context.redis.zRange(historyDateIndexKey(subredditId), 0, cutoffMs, { by: 'score' });
   if (staleCandidates.length === 0) {
     return 0;
@@ -3590,6 +3585,13 @@ async function pruneHistoryOlderThanDays(
     const parsed = parseRecord(payload);
     if (!parsed) {
       missingIds.add(recordId);
+      continue;
+    }
+
+    if (
+      parsed.status === 'approved' &&
+      getApprovedRecordRetentionAnchorMs(parsed, nowMs) + VERIFIED_RECORD_RETENTION_DAYS * MILLIS_PER_DAY > nowMs
+    ) {
       continue;
     }
 
@@ -3693,6 +3695,7 @@ async function estimateSubredditStorageUsage(
   context: Devvit.Context,
   subredditId: string
 ): Promise<StorageUsage> {
+  await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
   const recordCount = await context.redis.zCard(historyDateIndexKey(subredditId));
   const auditCount = await context.redis.zCard(auditDateIndexKey(subredditId));
   const blockedCount = await context.redis.hLen(blockedUsersKey(subredditId));
@@ -3771,13 +3774,14 @@ async function appendAuditLog(
     verificationId: input.verificationId,
     notes: input.notes,
   };
+  const entryAtMs = getFiniteTimestampMs(entry.at, Date.now());
 
   await context.redis.set(auditEntryKey(entry.subredditId, id), JSON.stringify(entry), {
-    expiration: new Date(Date.now() + AUDIT_RETENTION_DAYS * MILLIS_PER_DAY),
+    expiration: new Date(entryAtMs + AUDIT_RETENTION_DAYS * MILLIS_PER_DAY),
   });
   await context.redis.zAdd(auditDateIndexKey(entry.subredditId), {
     member: id,
-    score: new Date(entry.at).getTime() || Date.now(),
+    score: entryAtMs,
   });
   return id;
 }
@@ -3818,24 +3822,36 @@ async function getRecord(context: RedisContext, subredditId: string, verificatio
   return parsed;
 }
 
+function getFiniteTimestampMs(input: string | null | undefined, fallbackMs: number): number {
+  const parsedMs = typeof input === 'string' ? new Date(input).getTime() : Number.NaN;
+  return Number.isFinite(parsedMs) ? parsedMs : fallbackMs;
+}
+
+function getApprovedRecordRetentionAnchorMs(
+  record: Pick<VerificationRecord, 'submittedAt' | 'reviewedAt' | 'lastTtlBumpAt'>,
+  fallbackMs = Date.now()
+): number {
+  if (typeof record.lastTtlBumpAt === 'number' && Number.isFinite(record.lastTtlBumpAt)) {
+    return Math.max(0, Math.floor(record.lastTtlBumpAt));
+  }
+
+  const reviewedMs = getFiniteTimestampMs(record.reviewedAt, Number.NaN);
+  if (Number.isFinite(reviewedMs)) {
+    return reviewedMs;
+  }
+
+  return getFiniteTimestampMs(record.submittedAt, fallbackMs);
+}
+
 async function setRecord(context: RedisContext, subredditId: string, record: VerificationRecord): Promise<void> {
   const recordToStore: VerificationRecord = {
     ...record,
     subredditId,
   };
-  let expirationMs = Date.now() + HISTORY_RETENTION_DAYS * MILLIS_PER_DAY;
+  const nowMs = Date.now();
+  let expirationMs = nowMs + HISTORY_RETENTION_DAYS * MILLIS_PER_DAY;
   if (recordToStore.status === 'approved') {
-    const reviewedMs = recordToStore.reviewedAt ? new Date(recordToStore.reviewedAt).getTime() : Number.NaN;
-    const submittedMs = new Date(recordToStore.submittedAt).getTime();
-    const fallbackBumpAt = Number.isFinite(reviewedMs)
-      ? reviewedMs
-      : Number.isFinite(submittedMs)
-        ? submittedMs
-        : Date.now();
-    const lastTtlBumpAt =
-      typeof recordToStore.lastTtlBumpAt === 'number' && Number.isFinite(recordToStore.lastTtlBumpAt)
-        ? Math.max(0, Math.floor(recordToStore.lastTtlBumpAt))
-        : fallbackBumpAt;
+    const lastTtlBumpAt = getApprovedRecordRetentionAnchorMs(recordToStore, nowMs);
     recordToStore.lastTtlBumpAt = lastTtlBumpAt;
     expirationMs = lastTtlBumpAt + VERIFIED_RECORD_RETENTION_DAYS * MILLIS_PER_DAY;
   }
@@ -4532,8 +4548,6 @@ function modmailLockKey(subredditId: string, eventId: string): string {
   return `${subredditScopePrefix(subredditId)}:modmail:lock:${eventId}`;
 }
 
-async function trackSubreddit(_context: RedisContext, _subredditName: string): Promise<void> {}
-
 function sanitizeSubredditId(input: string): string {
   return input.trim().toLowerCase();
 }
@@ -5179,6 +5193,7 @@ async function reconcileApprovedUsersForRetention(
       nonApprovedValidated: 0,
       nonApprovedPurged: 0,
       nonApprovedRetried: 0,
+      auditPurged: 0,
       skipped: true,
     };
   }
@@ -5270,6 +5285,7 @@ async function reconcileApprovedUsersForRetention(
     }
 
     const nonApprovedSummary = await reconcileNonApprovedUsersForRetention(context, subredditId, subredditName);
+    const auditPurged = await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
 
     return {
       processed,
@@ -5280,6 +5296,7 @@ async function reconcileApprovedUsersForRetention(
       nonApprovedValidated: nonApprovedSummary.validated,
       nonApprovedPurged: nonApprovedSummary.purged,
       nonApprovedRetried: nonApprovedSummary.retried,
+      auditPurged,
       skipped: false,
     };
   } finally {
@@ -5445,12 +5462,10 @@ function looksLikeDeletedOrSuspendedError(message: string): boolean {
 async function purgeAuditLogOlderThanDays(
   context: RedisContext,
   subredditId: string,
-  subredditName: string,
   retentionDays: number
 ): Promise<number> {
   const normalizedSubredditId = sanitizeSubredditId(subredditId);
-  const normalizedSubreddit = sanitizeSubredditName(subredditName);
-  if (!normalizedSubredditId || !normalizedSubreddit) {
+  if (!normalizedSubredditId) {
     return 0;
   }
 
@@ -5547,7 +5562,6 @@ export {
   sanitizeSubredditName,
   getCurrentSubredditNameCompat,
   parseDenyReason,
-  trackSubreddit,
   errorText,
   resolveThemePalette,
 };

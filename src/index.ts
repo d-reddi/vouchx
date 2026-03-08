@@ -25,7 +25,6 @@ import {
   searchHistoryRecords,
   setPendingClaimState,
   submitVerification,
-  trackSubreddit,
   toHubState,
   toModPanelState,
   unblockUserForModerator,
@@ -240,7 +239,6 @@ app.post('/api/admin/create-post', async (req, res) => {
     const appContext = currentContext();
     const { subredditName } = await requireModerator(appContext);
     const title = String(req.body?.postTitle ?? '').trim() || 'Photo Verification Hub';
-    await trackSubreddit(appContext, subredditName);
     const post = await reddit.submitCustomPost({
       subredditName,
       title,
