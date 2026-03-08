@@ -336,6 +336,26 @@ function renderMarkdown(value) {
   return html.join('');
 }
 
+function formatPendingTurnaroundDays(days) {
+  const normalizedDays = Number.isFinite(Number(days)) ? Math.max(0, Math.trunc(Number(days))) : 0;
+  return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
+}
+
+function renderInstructionTemplate(value, state) {
+  const replacements = {
+    subreddit: String(state?.subredditName || '').trim(),
+    days: formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays),
+  };
+
+  return String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey) => {
+    const normalizedKey = String(rawKey || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    return replacements[normalizedKey] ?? '';
+  });
+}
+
 export function mountHub(options = {}) {
   const { rootId = 'app-root', inline = false } = options;
   const root = document.getElementById(rootId);
@@ -520,7 +540,9 @@ export function mountHub(options = {}) {
     if (!refs.photoInstructionsModal || !refs.photoInstructionsBody) {
       return;
     }
-    refs.photoInstructionsBody.innerHTML = renderMarkdown(hubState?.config?.photoInstructions || '');
+    refs.photoInstructionsBody.innerHTML = renderMarkdown(
+      renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
+    );
     refs.photoInstructionsModal.classList.remove('hidden');
   }
 
