@@ -1,8 +1,8 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
-const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/';
-const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/privacy-policy/';
+const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
+const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx/wiki/privacy-policy/';
 const SUBMIT_ACKNOWLEDGEMENTS = [
   {
     key: 'is18Confirmed',
