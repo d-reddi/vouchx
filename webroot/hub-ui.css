@@ -226,6 +226,48 @@ button:disabled {
   opacity: 0.7;
 }
 
+.hub-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.hub-modal-card {
+  width: min(560px, 100%);
+  background: color-mix(in srgb, var(--card) 92%, var(--bg) 8%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.warning-checklist {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.warning-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text);
+}
+
+.warning-check input {
+  margin: 3px 0 0;
+}
+
+.legal-links-modal {
+  justify-content: flex-start;
+  padding-top: 12px;
+}
+
 .hidden {
   display: none;
 }

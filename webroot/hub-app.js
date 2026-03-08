@@ -2,6 +2,20 @@ import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast
 
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/';
 const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/privacy-policy/';
+const SUBMIT_ACKNOWLEDGEMENTS = [
+  {
+    key: 'is18Confirmed',
+    label: 'I am at least 18 years old.',
+  },
+  {
+    key: 'adultOnlySelfPhotosConfirmed',
+    label: 'The uploaded photos are of me and do not depict anyone under the age of 18.',
+  },
+  {
+    key: 'termsAccepted',
+    label: 'I have read and accept the Terms and Conditions of the VouchX app.',
+  },
+];
 
 const DENY_REASON_LABEL = {
   photoshop: 'Photoshop',
@@ -42,6 +56,21 @@ function createShell(root, inline) {
 
         <footer data-el="legal-links" class="legal-links hidden"></footer>
       </div>
+
+      <div data-el="submit-warning-modal" class="hub-modal hidden">
+        <div class="hub-modal-card">
+          <h2>Before You Submit</h2>
+          <p class="meta">
+            You must agree to each statement below before the upload form will open.
+          </p>
+          <div data-el="submit-warning-list" class="warning-checklist"></div>
+          <div data-el="submit-warning-links" class="legal-links legal-links-modal hidden"></div>
+          <div class="row">
+            <button data-el="submit-warning-cancel" class="btn-secondary" type="button">Cancel</button>
+            <button data-el="submit-warning-continue" class="btn-primary" type="button">Continue to Upload</button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -58,6 +87,11 @@ function createShell(root, inline) {
     actionRow: root.querySelector('[data-el="action-row"]'),
     submissionBox: root.querySelector('[data-el="submission-box"]'),
     legalLinks: root.querySelector('[data-el="legal-links"]'),
+    submitWarningModal: root.querySelector('[data-el="submit-warning-modal"]'),
+    submitWarningList: root.querySelector('[data-el="submit-warning-list"]'),
+    submitWarningLinks: root.querySelector('[data-el="submit-warning-links"]'),
+    submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
+    submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
   };
 }
 
@@ -143,6 +177,25 @@ function normalizeExternalUrl(value) {
   }
 }
 
+function createExternalLink(item, extraClassName = '') {
+  const link = document.createElement('a');
+  link.className = ['legal-link', extraClassName].filter(Boolean).join(' ');
+  if (!item.url) {
+    link.classList.add('legal-link-disabled');
+  }
+  link.href = item.url || '#';
+  link.textContent = item.label;
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (!item.url) {
+      showToast(`${item.label} URL is not configured.`, 'error');
+      return;
+    }
+    navigateTo(item.url);
+  });
+  return link;
+}
+
 export function mountHub(options = {}) {
   const { rootId = 'app-root', inline = false } = options;
   const root = document.getElementById(rootId);
@@ -163,22 +216,29 @@ export function mountHub(options = {}) {
   if (refs.legalLinks) {
     refs.legalLinks.classList.remove('hidden');
     for (const item of legalLinks) {
-      const link = document.createElement('a');
-      link.className = 'legal-link';
-      if (!item.url) {
-        link.classList.add('legal-link-disabled');
-      }
-      link.href = item.url || '#';
-      link.textContent = item.label;
-      link.addEventListener('click', (event) => {
-        event.preventDefault();
-        if (!item.url) {
-          showToast(`${item.label} URL is not configured.`, 'error');
-          return;
-        }
-        navigateTo(item.url);
-      });
-      refs.legalLinks.appendChild(link);
+      refs.legalLinks.appendChild(createExternalLink(item));
+    }
+  }
+
+  if (refs.submitWarningList) {
+    for (const acknowledgement of SUBMIT_ACKNOWLEDGEMENTS) {
+      const label = document.createElement('label');
+      label.className = 'warning-check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.ackKey = acknowledgement.key;
+      const text = document.createElement('span');
+      text.textContent = acknowledgement.label;
+      label.appendChild(input);
+      label.appendChild(text);
+      refs.submitWarningList.appendChild(label);
+    }
+  }
+
+  if (refs.submitWarningLinks) {
+    refs.submitWarningLinks.classList.remove('hidden');
+    for (const item of legalLinks) {
+      refs.submitWarningLinks.appendChild(createExternalLink(item));
     }
   }
 
@@ -192,7 +252,7 @@ export function mountHub(options = {}) {
     }
   }
 
-  async function performAction(path, body) {
+  async function performAction(path, body = {}) {
     setBusy(true);
     try {
       applyPayload(await requestJson(path, body));
@@ -207,11 +267,18 @@ export function mountHub(options = {}) {
     if (!hubForms?.submit) {
       return;
     }
+    const acknowledgements = await requestSubmitAcknowledgements();
+    if (!acknowledgements) {
+      return;
+    }
     const result = await showForm(hubForms.submit);
     if (!result || result.action !== 'SUBMITTED') {
       return;
     }
-    await performAction('/api/hub/submit', result.values);
+    await performAction('/api/hub/submit', {
+      ...result.values,
+      ...acknowledgements,
+    });
   }
 
   async function openDeleteForm() {
@@ -223,6 +290,60 @@ export function mountHub(options = {}) {
       return;
     }
     await performAction('/api/hub/delete', result.values);
+  }
+
+  function requestSubmitAcknowledgements() {
+    return new Promise((resolve) => {
+      if (
+        !refs.submitWarningModal ||
+        !refs.submitWarningCancel ||
+        !refs.submitWarningContinue ||
+        !refs.submitWarningList
+      ) {
+        resolve(null);
+        return;
+      }
+
+      const inputs = Array.from(refs.submitWarningList.querySelectorAll('input[type="checkbox"][data-ack-key]'));
+      for (const input of inputs) {
+        input.checked = false;
+      }
+
+      const close = (result) => {
+        refs.submitWarningModal.classList.add('hidden');
+        refs.submitWarningCancel.removeEventListener('click', onCancel);
+        refs.submitWarningContinue.removeEventListener('click', onContinue);
+        refs.submitWarningModal.removeEventListener('click', onBackdrop);
+        resolve(result);
+      };
+
+      const onCancel = () => {
+        close(null);
+      };
+
+      const onContinue = () => {
+        const acknowledgementValues = {};
+        for (const input of inputs) {
+          acknowledgementValues[input.dataset.ackKey] = input.checked;
+        }
+        if (Object.values(acknowledgementValues).some((value) => !value)) {
+          showToast('You must agree to each submission statement before continuing.', 'error');
+          return;
+        }
+        close(acknowledgementValues);
+      };
+
+      const onBackdrop = (event) => {
+        if (event.target === refs.submitWarningModal) {
+          close(null);
+        }
+      };
+
+      refs.submitWarningCancel.addEventListener('click', onCancel);
+      refs.submitWarningContinue.addEventListener('click', onContinue);
+      refs.submitWarningModal.addEventListener('click', onBackdrop);
+      refs.submitWarningModal.classList.remove('hidden');
+    });
   }
 
   function renderState(state) {

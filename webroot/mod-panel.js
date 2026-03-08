@@ -1037,10 +1037,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     card.appendChild(submitted);
 
-    const ack = document.createElement('p');
-    ack.className = 'item-meta';
-    ack.textContent = `18+ acknowledged: ${formatTime(item.ageAcknowledgedAt)}`;
-    card.appendChild(ack);
+    appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
+    appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
+    appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
 
     if (isClaimed && !isClaimedByOther) {
       const claimMeta = document.createElement('p');
@@ -1289,6 +1288,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
           ${denyReasonMeta}
           ${reopenedMeta}
         `;
+        appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
+        appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
+        appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
         if (item.status === 'denied' && !item.reopenedChildId) {
           const row = document.createElement('div');
           row.className = 'row';
@@ -1335,6 +1337,10 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
         by.className = 'item-meta';
         by.textContent = `Approved by: u/${item.approvedBy}`;
         card.appendChild(by);
+
+        appendAcknowledgementMeta(card, '18+ confirmed', item.ageAcknowledgedAt);
+        appendAcknowledgementMeta(card, 'Self/adult-only photos confirmed', item.adultOnlySelfPhotosConfirmedAt);
+        appendAcknowledgementMeta(card, 'Terms accepted', item.termsAcceptedAt);
 
         const removeReason = document.createElement('textarea');
         removeReason.className = 'field-textarea';
@@ -1999,6 +2005,13 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       return iso;
     }
     return date.toLocaleString();
+  }
+
+  function appendAcknowledgementMeta(container, label, iso) {
+    const meta = document.createElement('p');
+    meta.className = 'item-meta';
+    meta.textContent = `${label}: ${iso ? formatTime(iso) : 'Not recorded'}`;
+    container.appendChild(meta);
   }
 
   function buildHistorySearchMessage(offset, requestId) {

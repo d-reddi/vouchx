@@ -18,6 +18,8 @@ type VerificationRecord = {
   subredditId: string;
   subredditName: string;
   ageAcknowledgedAt: string;
+  adultOnlySelfPhotosConfirmedAt?: string | null;
+  termsAcceptedAt?: string | null;
   submittedAt: string;
   photoOneUrl: string;
   photoTwoUrl: string;
@@ -156,6 +158,8 @@ type ViewerFlairSnapshot = {
 
 type SubmitVerificationValues = {
   is18Confirmed: boolean;
+  adultOnlySelfPhotosConfirmed: boolean;
+  termsAccepted: boolean;
   photoOneUrl: string;
   photoTwoUrl: string;
   photoThreeUrl?: string;
@@ -292,6 +296,8 @@ type PendingPanelItem = {
   username: string;
   submittedAt: string;
   ageAcknowledgedAt: string;
+  adultOnlySelfPhotosConfirmedAt?: string | null;
+  termsAcceptedAt?: string | null;
   photoOneUrl: string;
   photoTwoUrl: string;
   photoThreeUrl?: string;
@@ -305,6 +311,9 @@ type ApprovedSearchPanelItem = {
   username: string;
   approvedAt: string;
   approvedBy: string;
+  ageAcknowledgedAt: string;
+  adultOnlySelfPhotosConfirmedAt?: string | null;
+  termsAcceptedAt?: string | null;
 };
 
 type ApprovedSearchResponsePayload = {
@@ -335,6 +344,9 @@ type HistorySearchPanelItem = {
   username: string;
   status: VerificationStatus;
   submittedAt: string;
+  ageAcknowledgedAt: string;
+  adultOnlySelfPhotosConfirmedAt?: string | null;
+  termsAcceptedAt?: string | null;
   reviewedAt: string | null;
   moderator: string | null;
   denyReason?: DenyReason | null;
@@ -714,15 +726,8 @@ function buildSubmitVerificationForm(data: { [key: string]: any }) {
     title: 'Submit verification photos',
     description: `You are submitting your photos for review by the moderators to receive the "Verified" Flair. Please upload ${requiredPhotoCount} image${
       requiredPhotoCount === 1 ? '' : 's'
-    } below to submit and certify your age.`,
-    fields: [
-      ...photoFields,
-      {
-        type: 'boolean' as const,
-        name: 'is18Confirmed',
-        label: 'I confirm I am at least 18 years old.',
-      },
-    ],
+    } below to submit.`,
+    fields: [...photoFields],
     acceptLabel: 'Submit',
     cancelLabel: 'Cancel',
   };
@@ -783,6 +788,8 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     username: record.username,
     submittedAt: record.submittedAt,
     ageAcknowledgedAt: record.ageAcknowledgedAt,
+    adultOnlySelfPhotosConfirmedAt: record.adultOnlySelfPhotosConfirmedAt ?? null,
+    termsAcceptedAt: record.termsAcceptedAt ?? null,
     photoOneUrl: record.photoOneUrl,
     photoTwoUrl: record.photoTwoUrl,
     photoThreeUrl: record.photoThreeUrl ?? '',
@@ -802,7 +809,15 @@ async function submitVerification(
   }
 
   if (!values.is18Confirmed) {
-    throw new Error('Submission failed. You must acknowledge you are at least 18 years old.');
+    throw new Error('Submission failed. You must confirm that you are at least 18 years old.');
+  }
+  if (!values.adultOnlySelfPhotosConfirmed) {
+    throw new Error(
+      'Submission failed. You must confirm that the uploaded photos are of you and do not depict anyone under the age of 18.'
+    );
+  }
+  if (!values.termsAccepted) {
+    throw new Error('Submission failed. You must read and accept the Terms and Conditions of the VouchX app.');
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
@@ -845,6 +860,7 @@ async function submitVerification(
   await removeAllVerificationRecordsForUser(context, subredditId, normalizedUsername);
 
   const verificationId = makeVerificationId(now);
+  const acknowledgedAt = now.toISOString();
 
   const record: VerificationRecord = {
     id: verificationId,
@@ -852,8 +868,10 @@ async function submitVerification(
     userId: userId ?? '',
     subredditId,
     subredditName,
-    ageAcknowledgedAt: now.toISOString(),
-    submittedAt: now.toISOString(),
+    ageAcknowledgedAt: acknowledgedAt,
+    adultOnlySelfPhotosConfirmedAt: acknowledgedAt,
+    termsAcceptedAt: acknowledgedAt,
+    submittedAt: acknowledgedAt,
     photoOneUrl: photoOneUrl ?? '',
     photoTwoUrl: photoTwoUrl ?? '',
     photoThreeUrl: photoThreeUrl ?? '',
@@ -2815,14 +2833,17 @@ async function searchHistoryRecords(
     if (usernameFilter && !normalizeUsername(parsed.username).startsWith(usernameFilter)) {
       continue;
     }
-    items.push({
-      id: parsed.id,
-      username: parsed.username,
-      status: parsed.status,
-      submittedAt: parsed.submittedAt,
-      reviewedAt: parsed.reviewedAt ?? null,
-      moderator: parsed.moderator ?? null,
-      denyReason: parsed.denyReason ?? null,
+      items.push({
+        id: parsed.id,
+        username: parsed.username,
+        status: parsed.status,
+        submittedAt: parsed.submittedAt,
+        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
+        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
+        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
+        reviewedAt: parsed.reviewedAt ?? null,
+        moderator: parsed.moderator ?? null,
+        denyReason: parsed.denyReason ?? null,
       parentVerificationId: parsed.parentVerificationId ?? null,
       reopenedChildId: null,
       reopenedState: 'none',
@@ -2957,6 +2978,9 @@ async function searchApprovedRecords(
         username: parsed.username,
         approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
         approvedBy: parsed.moderator ?? 'unknown',
+        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
+        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
+        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
       });
       if (items.length >= limit) {
         break;
@@ -3026,6 +3050,9 @@ async function searchApprovedRecords(
         username: parsed.username,
         approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
         approvedBy: parsed.moderator ?? 'unknown',
+        ageAcknowledgedAt: parsed.ageAcknowledgedAt,
+        adultOnlySelfPhotosConfirmedAt: parsed.adultOnlySelfPhotosConfirmedAt ?? null,
+        termsAcceptedAt: parsed.termsAcceptedAt ?? null,
       });
     }
   }
@@ -4076,6 +4103,9 @@ function parseRecord(payload: string): VerificationRecord | null {
           : '',
       subredditName: parsed.subredditName,
       ageAcknowledgedAt: parsed.ageAcknowledgedAt,
+      adultOnlySelfPhotosConfirmedAt:
+        typeof parsed.adultOnlySelfPhotosConfirmedAt === 'string' ? parsed.adultOnlySelfPhotosConfirmedAt : null,
+      termsAcceptedAt: typeof parsed.termsAcceptedAt === 'string' ? parsed.termsAcceptedAt : null,
       submittedAt: parsed.submittedAt,
       photoOneUrl: parsed.photoOneUrl,
       photoTwoUrl: parsed.photoTwoUrl,
