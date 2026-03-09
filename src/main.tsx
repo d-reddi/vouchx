@@ -15,6 +15,10 @@ import {
   type PurgeUserDataFormValues,
 } from './core.js';
 
+type RemoveVerificationPostFormValues = {
+  confirmationText?: string;
+};
+
 async function onCreateVerificationPost(
   event: FormOnSubmitEvent<CreatePostValues>,
   context: Devvit.Context
@@ -46,6 +50,32 @@ async function onCreateVerificationPost(
   });
   if (payload.postUrl) {
     context.ui.navigateTo(payload.postUrl);
+  }
+}
+
+async function onRemoveVerificationPost(
+  event: FormOnSubmitEvent<RemoveVerificationPostFormValues>,
+  context: Devvit.Context
+): Promise<void> {
+  if (String(event.values.confirmationText ?? '').trim().toLowerCase() !== 'remove') {
+    context.ui.showToast('Removal cancelled. Type "remove" to confirm.');
+    return;
+  }
+
+  if (!context.postId) {
+    context.ui.showToast('No post context available for removal.');
+    return;
+  }
+
+  try {
+    const post = await context.reddit.getPostById(context.postId);
+    await post.remove(false);
+    context.ui.showToast({
+      text: 'Removed verification hub post.',
+      appearance: 'success',
+    });
+  } catch (error) {
+    context.ui.showToast(`Failed to remove post: ${errorText(error)}`);
   }
 }
 
@@ -104,6 +134,24 @@ const purgeUserDataForm = Devvit.createForm(
   onModeratorPurgeUserData
 );
 
+const removeVerificationPostForm = Devvit.createForm(
+  {
+    title: 'Remove verification hub post',
+    description: 'Removes this app-created verification post from the subreddit.',
+    fields: [
+      {
+        type: 'string',
+        name: 'confirmationText',
+        label: 'Type "remove" to confirm',
+        required: true,
+      },
+    ],
+    acceptLabel: 'Remove post',
+    cancelLabel: 'Cancel',
+  },
+  onRemoveVerificationPost
+);
+
 Devvit.addMenuItem({
   label: 'Create Verification Hub (NSFW)',
   location: 'subreddit',
@@ -119,6 +167,17 @@ Devvit.addMenuItem({
   forUserType: 'moderator',
   onPress: (_, context) => {
     context.ui.showForm(purgeUserDataForm);
+  },
+});
+
+Devvit.addMenuItem({
+  label: 'Remove Verification Hub Post',
+  description: 'Removes this verification post from the subreddit.',
+  location: 'post',
+  postFilter: 'currentApp',
+  forUserType: 'moderator',
+  onPress: (_, context) => {
+    context.ui.showForm(removeVerificationPostForm);
   },
 });
 

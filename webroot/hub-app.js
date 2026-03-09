@@ -278,21 +278,6 @@ export function mountHub(options = {}) {
       if (state.userLatest.status === 'denied' && state.userLatest.denyReason) {
         pieces.push(`<p>Reason: ${DENY_REASON_LABEL[state.userLatest.denyReason] || state.userLatest.denyReason}</p>`);
       }
-      const photos = [
-        state.userLatest.photoOneUrl,
-        state.userLatest.photoTwoUrl,
-        state.userLatest.photoThreeUrl,
-      ].filter((value) => typeof value === 'string' && value.trim());
-      if (photos.length > 0) {
-        pieces.push(
-          `<div class="photo-row">${photos
-            .map(
-              (url, index) =>
-                `<a class="photo-link btn-secondary" href="${url}" target="_blank" rel="noreferrer">Photo ${index + 1}</a>`
-            )
-            .join('')}</div>`
-        );
-      }
       refs.submissionBox.innerHTML = pieces.join('');
       refs.submissionBox.classList.remove('hidden');
     } else if (!state.viewerBlocked) {

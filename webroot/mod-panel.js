@@ -1,4 +1,5 @@
-import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
+import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -101,7 +102,6 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   let stateInitialized = false;
   let readyRetries = 0;
   let readyTimerId = 0;
-  let pendingSyncTimerId = 0;
   let isBusy = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
@@ -123,6 +123,11 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   let approvedSearchRequestId = 0;
   let auditSearchRequestId = 0;
   let selectedAuditActionFilter = 'all';
+  let realtimeChannel = '';
+  let realtimeConnectedChannel = '';
+  let realtimeReconnectTimerId = 0;
+  let realtimeRefreshInFlight = false;
+  let realtimeRefreshQueued = false;
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
@@ -184,6 +189,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   }
 
   function applyApiState(payload) {
+    syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
     if (payload && payload.state) {
       handleMessage({ type: 'state', payload: payload.state });
     } else {
@@ -192,6 +198,375 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
     if (payload && payload.toast) {
       handleMessage({ type: 'toast', payload: payload.toast });
     }
+  }
+
+  function scheduleRealtimeReconnect(channel) {
+    if (!channel || channel !== realtimeChannel || realtimeReconnectTimerId) {
+      return;
+    }
+    realtimeReconnectTimerId = window.setTimeout(() => {
+      realtimeReconnectTimerId = 0;
+      if (channel === realtimeChannel && realtimeConnectedChannel !== channel) {
+        connectToRealtimeChannel(channel);
+      }
+    }, 1500);
+  }
+
+  function closeRealtimeSubscription() {
+    if (realtimeReconnectTimerId) {
+      window.clearTimeout(realtimeReconnectTimerId);
+      realtimeReconnectTimerId = 0;
+    }
+    const connectedChannel = realtimeConnectedChannel;
+    realtimeChannel = '';
+    realtimeConnectedChannel = '';
+    if (connectedChannel) {
+      disconnectRealtime(connectedChannel);
+    }
+  }
+
+  function connectToRealtimeChannel(channel) {
+    if (!channel || realtimeConnectedChannel === channel) {
+      return;
+    }
+    try {
+      connectRealtime({
+        channel,
+        onConnect(connectedChannel) {
+          realtimeConnectedChannel = connectedChannel;
+        },
+        onDisconnect(disconnectedChannel) {
+          if (disconnectedChannel === realtimeConnectedChannel) {
+            realtimeConnectedChannel = '';
+          }
+          if (disconnectedChannel === realtimeChannel) {
+            scheduleRealtimeReconnect(disconnectedChannel);
+          }
+        },
+        onMessage(message) {
+          if (!message || typeof message !== 'object' || message.type !== 'refresh') {
+            return;
+          }
+          void refreshFromRealtimeSignal();
+        },
+      });
+      realtimeConnectedChannel = channel;
+    } catch (error) {
+      console.log(`Realtime subscribe failed: ${error instanceof Error ? error.message : String(error)}`);
+      scheduleRealtimeReconnect(channel);
+    }
+  }
+
+  function syncRealtimeSubscription(nextChannel) {
+    const normalized = String(nextChannel || '').trim();
+    if (!normalized) {
+      closeRealtimeSubscription();
+      return;
+    }
+    if (realtimeReconnectTimerId) {
+      window.clearTimeout(realtimeReconnectTimerId);
+      realtimeReconnectTimerId = 0;
+    }
+    if (normalized === realtimeChannel && realtimeConnectedChannel === normalized) {
+      return;
+    }
+    const previousChannel = realtimeConnectedChannel;
+    realtimeChannel = normalized;
+    realtimeConnectedChannel = '';
+    if (previousChannel) {
+      disconnectRealtime(previousChannel);
+    }
+    connectToRealtimeChannel(normalized);
+  }
+
+  async function refreshFromRealtimeSignal() {
+    if (!realtimeChannel) {
+      return;
+    }
+    if (isBusy) {
+      realtimeRefreshQueued = true;
+      return;
+    }
+    if (realtimeRefreshInFlight) {
+      realtimeRefreshQueued = true;
+      return;
+    }
+    realtimeRefreshInFlight = true;
+    try {
+      applyApiState(await requestJson('/api/mod/state'));
+    } catch (error) {
+      console.log(`Realtime refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      realtimeRefreshInFlight = false;
+      if (realtimeRefreshQueued && !isBusy) {
+        realtimeRefreshQueued = false;
+        void refreshFromRealtimeSignal();
+      }
+    }
+  }
+
+  function stringInputValue(input) {
+    return input ? String(input.value ?? '') : '';
+  }
+
+  function boolInputValue(input) {
+    return Boolean(input && input.checked);
+  }
+
+  function capturePendingReviewDrafts() {
+    const drafts = [];
+    for (const card of document.querySelectorAll('[data-pending-id]')) {
+      const verificationId = String(card.getAttribute('data-pending-id') || '');
+      if (!verificationId) {
+        continue;
+      }
+      const denyReason = card.querySelector('select.field-select');
+      const denyNotes = card.querySelector('textarea.field-textarea');
+      const reason = denyReason ? String(denyReason.value || '') : '';
+      const notes = denyNotes ? String(denyNotes.value || '') : '';
+      if (!reason && !notes.trim()) {
+        continue;
+      }
+      drafts.push({ verificationId, reason, notes });
+    }
+    return drafts;
+  }
+
+  function captureSettingsDraft() {
+    if (!state) {
+      return null;
+    }
+    const draft = {
+      flairTemplateId: stringInputValue(flairTemplateInput),
+      flairCssClass: stringInputValue(flairCssClassInput),
+      verificationsEnabled: boolInputValue(verificationsEnabledInput),
+      requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
+    };
+    const savedRequiredPhotoCount = `${Number(state.config.requiredPhotoCount || 2)}`;
+    const dirty =
+      draft.flairTemplateId !== String(state.config.flairTemplateId || '') ||
+      draft.flairCssClass !== String(state.config.flairCssClass || '') ||
+      draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
+      draft.requiredPhotoCount !== savedRequiredPhotoCount;
+    return dirty ? draft : null;
+  }
+
+  function captureTemplatesDraft() {
+    if (!state) {
+      return null;
+    }
+    const draft = {
+      pendingTurnaroundDays: stringInputValue(pendingTurnaroundDaysInput),
+      modmailSubject: stringInputValue(modmailSubjectInput),
+      pendingBody: stringInputValue(pendingBodyInput),
+      approveHeader: stringInputValue(approveHeaderInput),
+      approveBody: stringInputValue(approveBodyInput),
+      denyHeader: stringInputValue(denyHeaderInput),
+      denyBodyPhotoshop: stringInputValue(denyBodyPhotoshopInput),
+      denyBodyUnclear: stringInputValue(denyBodyUnclearInput),
+      denyBodyInstructions: stringInputValue(denyBodyInstructionsInput),
+      denyBodyOther: stringInputValue(denyBodyOtherInput),
+      removeHeader: stringInputValue(removeHeaderInput),
+      removeBody: stringInputValue(removeBodyInput),
+    };
+    const dirty =
+      draft.pendingTurnaroundDays !== `${state.config.pendingTurnaroundDays ?? ''}` ||
+      draft.modmailSubject !== String(state.config.modmailSubject || '') ||
+      draft.pendingBody !== String(state.config.pendingBody || '') ||
+      draft.approveHeader !== String(state.config.approveHeader || '') ||
+      draft.approveBody !== String(state.config.approveBody || '') ||
+      draft.denyHeader !== String(state.config.denyHeader || '') ||
+      draft.denyBodyPhotoshop !== String(state.config.denyBodyPhotoshop || '') ||
+      draft.denyBodyUnclear !== String(state.config.denyBodyUnclear || '') ||
+      draft.denyBodyInstructions !== String(state.config.denyBodyInstructions || '') ||
+      draft.denyBodyOther !== String(state.config.denyBodyOther || '') ||
+      draft.removeHeader !== String(state.config.removeHeader || '') ||
+      draft.removeBody !== String(state.config.removeBody || '');
+    return dirty ? draft : null;
+  }
+
+  function captureThemeDraft() {
+    if (!state) {
+      return null;
+    }
+    const presetTheme = state.themePresets[selectedThemePreset] || state.resolvedTheme;
+    const lightTheme = themeLightTokens(presetTheme);
+    const fallbackPrimary = (lightTheme ? normalizeHex(lightTheme.primary) : null) || '#0e91b6';
+    const fallbackAccent = (lightTheme ? normalizeHex(lightTheme.accent) : null) || '#ff7a45';
+    const fallbackBackground = (lightTheme ? normalizeHex(lightTheme.bg) : null) || '#f3fbff';
+    const draft = {
+      selectedThemePreset,
+      useCustomColors: boolInputValue(useCustomColorsInput),
+      customPrimary: stringInputValue(customPrimaryInput),
+      customPrimaryHex: stringInputValue(customPrimaryHexInput),
+      customAccent: stringInputValue(customAccentInput),
+      customAccentHex: stringInputValue(customAccentHexInput),
+      customBackground: stringInputValue(customBackgroundInput),
+      customBackgroundHex: stringInputValue(customBackgroundHexInput),
+    };
+    const savedThemePreset = String(state.config.themePreset || 'coastal_light');
+    const savedUseCustomColors = state.config.useCustomColors === true;
+    const savedPrimary = savedUseCustomColors
+      ? normalizeHex(state.config.customPrimary || '') || fallbackPrimary
+      : fallbackPrimary;
+    const savedAccent = savedUseCustomColors
+      ? normalizeHex(state.config.customAccent || '') || fallbackAccent
+      : fallbackAccent;
+    const savedBackground = savedUseCustomColors
+      ? normalizeHex(state.config.customBackground || '') || fallbackBackground
+      : fallbackBackground;
+    const dirty =
+      draft.selectedThemePreset !== savedThemePreset ||
+      draft.useCustomColors !== savedUseCustomColors ||
+      draft.customPrimary !== savedPrimary ||
+      draft.customPrimaryHex !== savedPrimary ||
+      draft.customAccent !== savedAccent ||
+      draft.customAccentHex !== savedAccent ||
+      draft.customBackground !== savedBackground ||
+      draft.customBackgroundHex !== savedBackground;
+    return dirty ? draft : null;
+  }
+
+  function captureUiDrafts() {
+    return {
+      pendingReviewDrafts: capturePendingReviewDrafts(),
+      settings: captureSettingsDraft(),
+      templates: captureTemplatesDraft(),
+      theme: captureThemeDraft(),
+    };
+  }
+
+  function restorePendingReviewDrafts(drafts) {
+    for (const draft of Array.isArray(drafts) ? drafts : []) {
+      const verificationId = String(draft && draft.verificationId ? draft.verificationId : '');
+      if (!verificationId) {
+        continue;
+      }
+      const card = document.querySelector(`[data-pending-id="${CSS.escape(verificationId)}"]`);
+      if (!card) {
+        continue;
+      }
+      const denyReason = card.querySelector('select.field-select');
+      const denyNotes = card.querySelector('textarea.field-textarea');
+      if (denyReason && typeof draft.reason === 'string') {
+        denyReason.value = draft.reason;
+      }
+      if (denyNotes && typeof draft.notes === 'string') {
+        denyNotes.value = draft.notes;
+      }
+    }
+  }
+
+  function restoreSettingsDraft(draft) {
+    if (!draft) {
+      return;
+    }
+    if (flairTemplateInput) {
+      flairTemplateInput.value = draft.flairTemplateId;
+    }
+    if (flairCssClassInput) {
+      flairCssClassInput.value = draft.flairCssClass;
+    }
+    if (verificationsEnabledInput) {
+      verificationsEnabledInput.checked = draft.verificationsEnabled;
+    }
+    if (requiredPhotoCountInput) {
+      requiredPhotoCountInput.value = draft.requiredPhotoCount;
+    }
+  }
+
+  function restoreTemplatesDraft(draft) {
+    if (!draft) {
+      return;
+    }
+    if (pendingTurnaroundDaysInput) {
+      pendingTurnaroundDaysInput.value = draft.pendingTurnaroundDays;
+    }
+    if (modmailSubjectInput) {
+      modmailSubjectInput.value = draft.modmailSubject;
+    }
+    if (pendingBodyInput) {
+      pendingBodyInput.value = draft.pendingBody;
+    }
+    if (approveHeaderInput) approveHeaderInput.value = draft.approveHeader;
+    if (approveBodyInput) approveBodyInput.value = draft.approveBody;
+    if (denyHeaderInput) denyHeaderInput.value = draft.denyHeader;
+    if (denyBodyPhotoshopInput) denyBodyPhotoshopInput.value = draft.denyBodyPhotoshop;
+    if (denyBodyUnclearInput) denyBodyUnclearInput.value = draft.denyBodyUnclear;
+    if (denyBodyInstructionsInput) denyBodyInstructionsInput.value = draft.denyBodyInstructions;
+    if (denyBodyOtherInput) denyBodyOtherInput.value = draft.denyBodyOther;
+    if (removeHeaderInput) removeHeaderInput.value = draft.removeHeader;
+    if (removeBodyInput) removeBodyInput.value = draft.removeBody;
+  }
+
+  function restoreThemeDraft(draft) {
+    if (!draft) {
+      return;
+    }
+    selectedThemePreset = draft.selectedThemePreset || selectedThemePreset;
+    if (useCustomColorsInput) {
+      useCustomColorsInput.checked = draft.useCustomColors;
+    }
+    if (customPrimaryInput) {
+      customPrimaryInput.value = draft.customPrimary;
+      const normalized = normalizeHex(draft.customPrimary);
+      if (normalized) {
+        customPrimaryInput.dataset.lastValidColor = normalized;
+      }
+      customPrimaryInput.disabled = !draft.useCustomColors;
+    }
+    if (customPrimaryHexInput) {
+      customPrimaryHexInput.value = draft.customPrimaryHex;
+      const normalized = normalizeHex(draft.customPrimaryHex);
+      if (normalized) {
+        customPrimaryHexInput.dataset.lastValidColor = normalized;
+      }
+      customPrimaryHexInput.disabled = !draft.useCustomColors;
+    }
+    if (customAccentInput) {
+      customAccentInput.value = draft.customAccent;
+      const normalized = normalizeHex(draft.customAccent);
+      if (normalized) {
+        customAccentInput.dataset.lastValidColor = normalized;
+      }
+      customAccentInput.disabled = !draft.useCustomColors;
+    }
+    if (customAccentHexInput) {
+      customAccentHexInput.value = draft.customAccentHex;
+      const normalized = normalizeHex(draft.customAccentHex);
+      if (normalized) {
+        customAccentHexInput.dataset.lastValidColor = normalized;
+      }
+      customAccentHexInput.disabled = !draft.useCustomColors;
+    }
+    if (customBackgroundInput) {
+      customBackgroundInput.value = draft.customBackground;
+      const normalized = normalizeHex(draft.customBackground);
+      if (normalized) {
+        customBackgroundInput.dataset.lastValidColor = normalized;
+      }
+      customBackgroundInput.disabled = !draft.useCustomColors;
+    }
+    if (customBackgroundHexInput) {
+      customBackgroundHexInput.value = draft.customBackgroundHex;
+      const normalized = normalizeHex(draft.customBackgroundHex);
+      if (normalized) {
+        customBackgroundHexInput.dataset.lastValidColor = normalized;
+      }
+      customBackgroundHexInput.disabled = !draft.useCustomColors;
+    }
+    renderThemePresets();
+    renderThemePreview();
+  }
+
+  function restoreUiDrafts(drafts) {
+    if (!drafts || typeof drafts !== 'object') {
+      return;
+    }
+    restorePendingReviewDrafts(drafts.pendingReviewDrafts);
+    restoreSettingsDraft(drafts.settings);
+    restoreTemplatesDraft(drafts.templates);
+    restoreThemeDraft(drafts.theme);
   }
 
   async function post(message) {
@@ -220,7 +595,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
         return;
       }
 
-      if (message.type === 'ready' || message.type === 'refresh' || message.type === 'syncPending') {
+      if (message.type === 'ready' || message.type === 'refresh') {
         applyApiState(await requestJson('/api/mod/state'));
         return;
       }
@@ -347,6 +722,10 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
       }
       button.disabled = isBusy;
     }
+    if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
+      realtimeRefreshQueued = false;
+      void refreshFromRealtimeSignal();
+    }
   }
 
   function postWithBusy(message) {
@@ -377,6 +756,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
     }
 
     if (message.type === 'state' && message.payload) {
+      const uiDrafts = captureUiDrafts();
       state = message.payload;
       if (approvedSearchRequestId === 0 && Array.isArray(state.approved)) {
         approvedSearchItems = state.approved.slice();
@@ -398,7 +778,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
         readyTimerId = 0;
       }
       renderAll();
-      startPendingSyncLoop();
+      restoreUiDrafts(uiDrafts);
       if (tabPanels.history && !tabPanels.history.classList.contains('hidden')) {
         if (activeHistoryView === 'records') {
           runHistoryRecordsSearchWithInputGuard(true);
@@ -809,133 +1189,6 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
     for (const item of filtered) {
       pendingList.appendChild(buildPendingCard(item));
     }
-  }
-
-  function applyPendingPatch(payload) {
-    if (!state || !payload || typeof payload !== 'object') {
-      return;
-    }
-    const id = String(payload.id || '');
-    if (!id) {
-      return;
-    }
-    if (Number.isFinite(Number(payload.pendingCount))) {
-      state.pendingCount = Number(payload.pendingCount);
-    }
-
-    const op = payload.op === 'remove' ? 'remove' : 'upsert';
-    if (op === 'remove') {
-      state.pending = (state.pending || []).filter((entry) => String(entry.id || '') !== id);
-      renderPending();
-      updateHeroMeta();
-      return;
-    }
-
-    if (!payload.item || typeof payload.item !== 'object') {
-      return;
-    }
-    const item = payload.item;
-    const nextPending = Array.isArray(state.pending) ? state.pending.slice() : [];
-    const existingIndex = nextPending.findIndex((entry) => String(entry.id || '') === id);
-    if (existingIndex >= 0) {
-      nextPending[existingIndex] = item;
-    } else {
-      nextPending.push(item);
-    }
-    nextPending.sort((left, right) => getPendingSortScore(left) - getPendingSortScore(right));
-    state.pending = nextPending;
-
-    const flairTemplateId = String((state.config && state.config.flairTemplateId) || '').trim();
-    if (!flairTemplateId) {
-      updateHeroMeta();
-      return;
-    }
-
-    renderPending();
-    updateHeroMeta();
-  }
-
-  function pendingItemsEqual(left, right) {
-    if (!left || !right) {
-      return false;
-    }
-    return (
-      String(left.id || '') === String(right.id || '') &&
-      String(left.username || '') === String(right.username || '') &&
-      String(left.submittedAt || '') === String(right.submittedAt || '') &&
-      String(left.ageAcknowledgedAt || '') === String(right.ageAcknowledgedAt || '') &&
-      String(left.photoOneUrl || '') === String(right.photoOneUrl || '') &&
-      String(left.photoTwoUrl || '') === String(right.photoTwoUrl || '') &&
-      String(left.photoThreeUrl || '') === String(right.photoThreeUrl || '') &&
-      String(left.claimedBy || '') === String(right.claimedBy || '') &&
-      String(left.claimedAt || '') === String(right.claimedAt || '') &&
-      String(left.parentVerificationId || '') === String(right.parentVerificationId || '')
-    );
-  }
-
-  function applyPendingSyncSnapshot(payload) {
-    if (!state || !payload || typeof payload !== 'object') {
-      return;
-    }
-    const incomingItems = Array.isArray(payload.items) ? payload.items : [];
-    const pendingCount = Number.isFinite(Number(payload.pendingCount)) ? Number(payload.pendingCount) : incomingItems.length;
-
-    const currentById = new Map();
-    for (const item of Array.isArray(state.pending) ? state.pending : []) {
-      currentById.set(String(item.id || ''), item);
-    }
-    const incomingById = new Map();
-    for (const item of incomingItems) {
-      incomingById.set(String(item.id || ''), item);
-    }
-
-    for (const currentId of currentById.keys()) {
-      if (!incomingById.has(currentId)) {
-        applyPendingPatch({ op: 'remove', id: currentId, pendingCount });
-      }
-    }
-
-    for (const [incomingId, incomingItem] of incomingById.entries()) {
-      const currentItem = currentById.get(incomingId);
-      if (!currentItem || !pendingItemsEqual(currentItem, incomingItem)) {
-        applyPendingPatch({
-          op: 'upsert',
-          id: incomingId,
-          item: incomingItem,
-          pendingCount,
-        });
-      }
-    }
-
-    state.pendingCount = pendingCount;
-    updateHeroMeta();
-  }
-
-  function shouldRunPendingSync() {
-    if (!stateInitialized || !state) {
-      return false;
-    }
-    const pendingPanel = tabPanels.pending;
-    if (!pendingPanel) {
-      return false;
-    }
-    return !pendingPanel.classList.contains('hidden');
-  }
-
-  function requestPendingSync() {
-    if (!shouldRunPendingSync()) {
-      return;
-    }
-    post({ type: 'syncPending' });
-  }
-
-  function startPendingSyncLoop() {
-    if (pendingSyncTimerId) {
-      return;
-    }
-    pendingSyncTimerId = window.setInterval(() => {
-      requestPendingSync();
-    }, 4000);
   }
 
   function renderBlocked() {
@@ -1914,7 +2167,15 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
   }
 
   if (backToHubBtn) {
-    backToHubBtn.addEventListener('click', () => {
+    backToHubBtn.addEventListener('click', (event) => {
+      if (event instanceof MouseEvent && getWebViewMode() === 'expanded') {
+        try {
+          exitExpandedMode(event);
+          return;
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+        }
+      }
       window.location.assign(buildHubPath());
     });
   }
@@ -2302,7 +2563,7 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
       if (tab) {
         setTab(tab);
         if (tab === 'pending') {
-          requestPendingSync();
+          void refreshFromRealtimeSignal();
         } else if (tab === 'history') {
           setHistoryView(activeHistoryView);
           if (activeHistoryView === 'records') {
@@ -2339,6 +2600,8 @@ import { navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
       prefersDarkMedia.addListener(onColorSchemeChange);
     }
   }
+
+  window.addEventListener('pagehide', closeRealtimeSubscription);
 
   applyDefaultDateRange(historySearchFromInput, historySearchToInput, 30);
   applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, 30);

@@ -405,7 +405,6 @@ const VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS = MILLIS_PER_DAY;
 const FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS = MILLIS_PER_DAY;
 const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 0;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
-const MOD_MENU_AUDIT_PURGE_DAYS_CONFIG_FIELD = 'mod_menu_audit_purge_days';
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const USER_VALIDATION_CRON = '30 3 * * *';
 const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
@@ -914,7 +913,7 @@ async function onModeratorPurgeUserData(
     return;
   }
 
-  const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context, subredditId);
+  const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context);
   const deletedAuditCount = await purgeAuditLogOlderThanDays(
     context,
     subredditId,
@@ -2288,6 +2287,9 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
   const canReviewUser = isModeratorUser && canManageUsers;
   let config = await getRuntimeConfig(context, subredditId);
+  if (viewerUsername && config.flairTemplateId.trim()) {
+    config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
+  }
 
   let shouldRunDailyFlairMaintenance = false;
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
@@ -2478,12 +2480,21 @@ function normalizeTemplateId(value: string): string {
 }
 
 async function fetchConfiguredFlairTemplateTextFromSelector(
-  _context: Devvit.Context,
-  _subredditName: string,
+  context: Devvit.Context,
+  subredditName: string,
   _lookupName: string,
-  _configuredTemplateId: string
+  configuredTemplateId: string
 ): Promise<string | null> {
-  return null;
+  try {
+    const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
+    const flairTemplates = await subreddit.getUserFlairTemplates();
+    const normalizedTemplateId = normalizeTemplateId(configuredTemplateId);
+    const matchedTemplate = flairTemplates.find((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
+    return matchedTemplate?.text?.trim() ?? null;
+  } catch (error) {
+    console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
+    return null;
+  }
 }
 
 async function refreshConfiguredFlairTemplateCache(
@@ -3941,30 +3952,17 @@ function parseBooleanString(value: string | undefined, fallback: boolean): boole
 }
 
 async function getModMenuAuditPurgeMinAgeDays(
-  context: Pick<Devvit.Context, 'settings' | 'redis'>,
-  subredditId: string
+  context: Pick<Devvit.Context, 'settings'>
 ): Promise<number> {
-  const storedValue = await context.redis.hGet(subredditConfigKey(subredditId), MOD_MENU_AUDIT_PURGE_DAYS_CONFIG_FIELD);
-  const storedParsed = parseNonNegativeInt(storedValue, null);
-  if (storedParsed !== null) {
-    return storedParsed;
-  }
-
   const rawValue = await context.settings.get<number | string>(INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS);
-  const parsedFromSetting =
-    typeof rawValue === 'number'
-      ? Number.isFinite(rawValue)
-        ? Math.max(0, Math.floor(rawValue))
-        : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
-      : typeof rawValue === 'string'
-        ? parseNonNegativeInt(rawValue, DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS) ??
-          DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
-        : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS;
-
-  await context.redis.hSet(subredditConfigKey(subredditId), {
-    [MOD_MENU_AUDIT_PURGE_DAYS_CONFIG_FIELD]: `${parsedFromSetting}`,
-  });
-  return parsedFromSetting;
+  return typeof rawValue === 'number'
+    ? Number.isFinite(rawValue)
+      ? Math.max(0, Math.floor(rawValue))
+      : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
+    : typeof rawValue === 'string'
+      ? parseNonNegativeInt(rawValue, DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS) ??
+        DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
+      : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number | null {
