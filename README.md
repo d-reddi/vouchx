@@ -348,4 +348,4 @@ These actions delete the user’s verification records and associated audit entr
 
 # Change Log
 
-1.0.8 - Initial Release
+1.0.10 - Initial Release

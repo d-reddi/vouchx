@@ -92,5 +92,8 @@
   },
   "dev": {
     "subreddit": "vouchx_dev"
+  },
+  "marketingAssets": {
+    "icon": "webroot/logo.png"
   }
 }
