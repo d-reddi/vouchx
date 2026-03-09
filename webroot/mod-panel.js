@@ -9,11 +9,18 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     blocked: document.getElementById('tab-blocked'),
     history: document.getElementById('tab-history'),
     settings: document.getElementById('tab-settings'),
-    templates: document.getElementById('tab-templates'),
-    themes: document.getElementById('tab-themes'),
   };
 
-  const heroMeta = document.getElementById('hero-meta');
+  const settingsTabButtons = Array.from(document.querySelectorAll('.settings-tab-btn'));
+  const settingsPanels = {
+    general: document.getElementById('settings-panel-general'),
+    templates: document.getElementById('settings-panel-templates'),
+    themes: document.getElementById('settings-panel-themes'),
+  };
+
+  const heroSubreddit = document.getElementById('hero-subreddit');
+  const heroQueueStatus = document.getElementById('hero-queue-status');
+  const heroUpdated = document.getElementById('hero-updated');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSlaButtons = Array.from(document.querySelectorAll('.pending-sla-btn'));
@@ -132,7 +139,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
   let activeHistoryView = 'records';
+  let activeSettingsTab = 'general';
   let selectedThemePreset = 'coastal_light';
+  let lastStateUpdatedAt = 0;
   let historySearchItems = [];
   let historySearchOffset = 0;
   let historySearchHasMore = false;
@@ -185,6 +194,14 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   function themeLightTokens(value) {
     const palette = normalizeThemePalette(value);
     return palette ? palette.light : null;
+  }
+
+  function themeDarkTokens(value) {
+    const palette = normalizeThemePalette(value);
+    if (!palette) {
+      return null;
+    }
+    return palette.dark || palette.light || null;
   }
 
   function persistThemeSnapshot(value) {
@@ -830,6 +847,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     if (message.type === 'state' && message.payload) {
       const uiDrafts = captureUiDrafts();
       state = message.payload;
+      lastStateUpdatedAt = Date.now();
       if (approvedSearchRequestId === 0 && Array.isArray(state.approved)) {
         approvedSearchItems = state.approved.slice();
         approvedSearchOffset = approvedSearchItems.length;
@@ -918,6 +936,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
 
   function setTab(tabName) {
     for (const [name, panel] of Object.entries(tabPanels)) {
+      if (!panel) {
+        continue;
+      }
       if (name === tabName) {
         panel.classList.remove('hidden');
       } else {
@@ -930,6 +951,24 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       } else {
         btn.classList.remove('tab-btn-active');
       }
+    }
+  }
+
+  function setSettingsTab(tabName) {
+    activeSettingsTab = tabName === 'templates' || tabName === 'themes' ? tabName : 'general';
+    for (const [name, panel] of Object.entries(settingsPanels)) {
+      if (!panel) {
+        continue;
+      }
+      panel.classList.toggle('hidden', name !== activeSettingsTab);
+    }
+    for (const button of settingsTabButtons) {
+      const isActive = String(button.dataset.settingsTab || 'general') === activeSettingsTab;
+      button.classList.toggle('settings-tab-btn-active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+    if (activeSettingsTab === 'themes') {
+      renderThemePreview();
     }
   }
 
@@ -998,7 +1037,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   }
 
   function updateHeroMeta() {
-    if (!state || !heroMeta) {
+    if (!state) {
       return;
     }
     const pendingCount = Number.isFinite(Number(state.pendingCount))
@@ -1006,7 +1045,27 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       : Array.isArray(state.pending)
         ? state.pending.length
         : 0;
-    heroMeta.textContent = `r/${state.subredditName} | Pending: ${pendingCount} | Updated: ${new Date().toLocaleTimeString()}`;
+    const blockedCount = Array.isArray(state.blocked) ? state.blocked.length : 0;
+    if (heroSubreddit) {
+      const subredditName = String(state.subredditName || '').trim();
+      heroSubreddit.textContent = subredditName ? `r/${subredditName}` : 'Unknown subreddit';
+    }
+    if (heroQueueStatus) {
+      heroQueueStatus.textContent = `${pendingCount} pending${blockedCount > 0 ? ` • ${blockedCount} blocked` : ''}`;
+    }
+    if (heroUpdated) {
+      if (!lastStateUpdatedAt) {
+        heroUpdated.textContent = 'Waiting for sync';
+      } else {
+        const updatedAt = new Date(lastStateUpdatedAt);
+        heroUpdated.textContent = updatedAt.toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+      }
+    }
   }
 
   function getPendingAgeHours(submittedAt) {
@@ -1266,24 +1325,50 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     return card;
   }
 
+  function renderEmptyState(container, title, detail) {
+    if (!container) {
+      return;
+    }
+    container.innerHTML = '';
+    const stateWrap = document.createElement('div');
+    stateWrap.className = 'empty-state';
+
+    const titleEl = document.createElement('p');
+    titleEl.className = 'empty-state-title';
+    titleEl.textContent = title;
+    stateWrap.appendChild(titleEl);
+
+    if (detail) {
+      const detailEl = document.createElement('p');
+      detailEl.className = 'empty-state-copy';
+      detailEl.textContent = detail;
+      stateWrap.appendChild(detailEl);
+    }
+
+    container.appendChild(stateWrap);
+  }
+
   function renderPending() {
     updatePendingSlaButtonStyles();
     pendingList.innerHTML = '';
     if (!state || !Array.isArray(state.pending) || state.pending.length === 0) {
-      pendingList.innerHTML = '<p class="muted">No pending verifications.</p>';
+      renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
       return;
     }
 
     const flairTemplateId = String((state.config && state.config.flairTemplateId) || '').trim();
     if (!flairTemplateId) {
-      pendingList.innerHTML =
-        '<p class="muted">Set a Flair template ID in Verification Settings before processing approvals/denials. Pending items are hidden until this is configured.</p>';
+      renderEmptyState(
+        pendingList,
+        'Queue unavailable',
+        'Set a flair template ID in Verification Settings before processing approvals or denials.'
+      );
       return;
     }
 
     const filtered = state.pending.filter(matchesPendingFilters).sort((left, right) => getPendingSortScore(left) - getPendingSortScore(right));
     if (filtered.length === 0) {
-      pendingList.innerHTML = '<p class="muted">No pending verifications match your filters.</p>';
+      renderEmptyState(pendingList, 'No matching requests', 'Try adjusting the username filter or queue age range.');
       return;
     }
 
@@ -1298,7 +1383,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     blockedList.innerHTML = '';
     if (!state || !Array.isArray(state.blocked) || state.blocked.length === 0) {
-      blockedList.innerHTML = '<p class="muted">No blocked users.</p>';
+      renderEmptyState(blockedList, 'No blocked users', 'Blocked users and denial-threshold lockouts will appear here.');
       return;
     }
 
@@ -1313,7 +1398,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     });
 
     if (filtered.length === 0) {
-      blockedList.innerHTML = '<p class="muted">No blocked users match your search.</p>';
+      renderEmptyState(blockedList, 'No blocked users found', 'Try a different username or reason search.');
       return;
     }
 
@@ -1363,7 +1448,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const isMinLengthHintVisible = Boolean(historySearchHint && !historySearchHint.classList.contains('hidden'));
     if (!Array.isArray(historySearchItems) || historySearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        historySearchResults.innerHTML = '<p class="muted">No history search results.</p>';
+        renderEmptyState(historySearchResults, 'No history results', 'Search records by username prefix or date range.');
       }
     } else {
       for (const item of historySearchItems) {
@@ -1420,7 +1505,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const isMinLengthHintVisible = Boolean(approvedSearchHint && !approvedSearchHint.classList.contains('hidden'));
     if (!Array.isArray(approvedSearchItems) || approvedSearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        approvedSearchResults.innerHTML = '<p class="muted">No approved users found for this filter.</p>';
+        renderEmptyState(approvedSearchResults, 'No approved users found', 'Adjust the filters to search approved verifications.');
       }
     } else {
       for (const item of approvedSearchItems) {
@@ -1480,7 +1565,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const isMinLengthHintVisible = Boolean(auditSearchHint && !auditSearchHint.classList.contains('hidden'));
     if (!Array.isArray(auditSearchItems) || auditSearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        auditSearchResults.innerHTML = '<p class="muted">No audit log entries found for this filter.</p>';
+        renderEmptyState(auditSearchResults, 'No audit entries found', 'Try a different moderator, action, or date range.');
       }
     } else {
       for (const item of auditSearchItems) {
@@ -1843,7 +1928,23 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
   }
 
-  function applyThemeVariables(target, tokens) {
+  function applyModeratorThemeVariables(target, tokens) {
+    if (!target || !tokens) {
+      return;
+    }
+    target.style.setProperty('--theme-primary', tokens.primary);
+    target.style.setProperty('--theme-primary-strong', tokens.primary);
+    target.style.setProperty('--theme-accent', tokens.accent);
+    target.style.setProperty('--theme-success', tokens.success);
+    target.style.setProperty('--theme-danger', tokens.danger);
+    target.style.setProperty('--theme-bg', tokens.bg);
+    target.style.setProperty('--theme-surface', tokens.surface);
+    target.style.setProperty('--theme-text', tokens.text);
+    target.style.setProperty('--theme-muted', tokens.mutedText);
+    target.style.setProperty('--theme-border', tokens.border);
+  }
+
+  function applyThemePreviewVariables(target, tokens) {
     if (!target || !tokens) {
       return;
     }
@@ -1922,7 +2023,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     const tokens = themeTokensForMode(resolveEditedTheme() || state.resolvedTheme);
     if (tokens) {
-      applyThemeVariables(themePreview, tokens);
+      applyThemePreviewVariables(themePreview, tokens);
     }
   }
 
@@ -2017,9 +2118,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     if (!state) {
       return;
     }
-    const activeTokens = themeTokensForMode(state.resolvedTheme);
+    const activeTokens = themeDarkTokens(state.resolvedTheme);
     if (activeTokens) {
-      applyThemeVariables(document.documentElement, activeTokens);
+      applyModeratorThemeVariables(document.documentElement, activeTokens);
       persistThemeSnapshot(state.resolvedTheme);
     }
     updateHeroMeta();
@@ -2033,6 +2134,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     renderSettings();
     renderTemplates();
     renderThemes();
+    setSettingsTab(activeSettingsTab);
   }
 
   function createPhotoWrap(url, alt) {
@@ -2713,6 +2815,15 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     });
   }
 
+  for (const btn of settingsTabButtons) {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.settingsTab;
+      if (tab) {
+        setSettingsTab(tab);
+      }
+    });
+  }
+
   for (const btn of tabButtons) {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
@@ -2737,6 +2848,8 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
               runAuditSearchWithInputGuard(true);
             }
           }
+        } else if (tab === 'settings') {
+          setSettingsTab(activeSettingsTab);
         }
       }
     });
@@ -2766,6 +2879,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   setAuditSearchHintVisible(false);
   setAuditActionFilter('all');
   setHistoryView('records');
+  setSettingsTab('general');
 
   function startHandshake() {
     post({ type: 'ready' });
