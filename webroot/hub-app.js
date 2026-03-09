@@ -1,4 +1,5 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
+import brandLogoUrl from './logo.png';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
@@ -25,8 +26,16 @@ function createShell(root, inline) {
       <div data-el="main" class="hidden">
         <section class="card">
           <div class="card-header">
-            <div>
-              <h1>Verification Hub</h1>
+            <div class="hub-brand">
+              <div class="hub-title-row">
+                <img
+                  data-el="brand-logo"
+                  class="hub-brand-logo hidden"
+                  src=""
+                  alt="VouchX logo"
+                />
+                <h1>Verification Hub</h1>
+              </div>
               <p data-el="meta-subreddit" class="meta"></p>
               <p data-el="meta-username" class="meta"></p>
               <p data-el="meta-status" class="status-line"></p>
@@ -84,6 +93,7 @@ function createShell(root, inline) {
   return {
     loadingScreen: root.querySelector('[data-el="loading"]'),
     mainContent: root.querySelector('[data-el="main"]'),
+    brandLogo: root.querySelector('[data-el="brand-logo"]'),
     metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
     metaUsername: root.querySelector('[data-el="meta-username"]'),
     metaStatus: root.querySelector('[data-el="meta-status"]'),
@@ -373,6 +383,16 @@ export function mountHub(options = {}) {
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
   ];
+
+  if (refs.brandLogo) {
+    refs.brandLogo.src = brandLogoUrl;
+    refs.brandLogo.addEventListener('load', () => {
+      refs.brandLogo.classList.remove('hidden');
+    });
+    refs.brandLogo.addEventListener('error', () => {
+      refs.brandLogo.classList.add('hidden');
+    });
+  }
 
   if (refs.legalLinks) {
     refs.legalLinks.classList.remove('hidden');

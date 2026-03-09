@@ -91,6 +91,34 @@ body.hub-inline .card {
   gap: 12px;
 }
 
+.hub-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.hub-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.hub-brand-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 12px;
+  flex: 0 0 auto;
+  display: block;
+}
+
+body.hub-inline .hub-brand-logo {
+  width: 30px;
+  height: 30px;
+}
+
 h1,
 h2 {
   margin: 0;
@@ -216,6 +244,16 @@ button:disabled {
   font-size: 0.92rem;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .card-header {
+    flex-direction: column;
+  }
+
+  .hub-title-row {
+    gap: 8px;
+  }
 }
 
 .legal-link:hover {
