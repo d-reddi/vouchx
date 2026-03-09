@@ -155,7 +155,9 @@
               <input id="verifications-enabled" type="checkbox" />
               <span>Allow users to submit verifications</span>
             </label>
-            <p class="muted small">When disabled, users see: "Verifications are temporarily disabled.  Please check back soon."</p>
+            <p id="verifications-disabled-message-hint" class="muted small">
+              When disabled, users see: "" Configurable in install settings for this subreddit.
+            </p>
 
             <label class="field-label" for="flair-template-id">Flair template ID to set</label>
             <input id="flair-template-id" class="field-input" type="text" />
@@ -174,7 +176,18 @@
             </select>
             <p class="muted small">Controls how many photo upload fields users see in the submit form.</p>
 
+            <label class="field-label" for="photo-instructions">Photo Instructions</label>
+            <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
+            <p class="muted small">
+              Shown to users in the dashboard when they press <strong>Photo Instructions</strong> before submitting.
+              Markdown is supported. Supported placeholders: {{subreddit}}, {{days}}.
+            </p>
+
             <button id="save-flair-btn" class="btn btn-primary">Save Verification Settings</button>
+            <p id="install-settings-row" class="muted small hidden">
+              Install settings for this subreddit are available here:
+              <a id="install-settings-link" href="#" target="_blank" rel="noopener noreferrer">Open install settings</a>
+            </p>
           </div>
         </section>
 
@@ -200,27 +213,42 @@
             <label class="field-label" for="deny-header">Denial header</label>
             <input id="deny-header" class="field-input" type="text" />
 
-            <label class="field-label" for="deny-body-photoshop">Denial body: Photoshop</label>
-            <textarea id="deny-body-photoshop" class="field-textarea" rows="4"></textarea>
+            <p class="muted small">
+              Denial reason labels are configured in the subreddit install settings. Template fields below only appear
+              for reasons whose install-setting label is not blank. Saving templates here updates only this subreddit.
+            </p>
 
-            <label class="field-label" for="deny-body-unclear">Denial body: Unclear image</label>
-            <textarea id="deny-body-unclear" class="field-textarea" rows="4"></textarea>
+            <div id="deny-template-reason-1-wrap" class="hidden">
+              <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
+              <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
+            </div>
 
-            <label class="field-label" for="deny-body-instructions">Denial body: Did not follow instructions</label>
-            <textarea id="deny-body-instructions" class="field-textarea" rows="4"></textarea>
+            <div id="deny-template-reason-2-wrap" class="hidden">
+              <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
+              <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
+            </div>
 
-            <label class="field-label" for="deny-body-other">Denial body: Other</label>
-            <textarea id="deny-body-other" class="field-textarea" rows="4"></textarea>
+            <div id="deny-template-reason-3-wrap" class="hidden">
+              <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
+              <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
+            </div>
 
-            <label class="field-label" for="remove-header">Removal header</label>
+            <div id="deny-template-reason-4-wrap" class="hidden">
+              <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
+              <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
+            </div>
+
+            <label class="field-label" for="remove-header">Revoked Verification Header</label>
             <input id="remove-header" class="field-input" type="text" />
 
-            <label class="field-label" for="remove-body">Removal body</label>
+            <label class="field-label" for="remove-body">Revoked Verification Body</label>
             <textarea id="remove-body" class="field-textarea" rows="4"></textarea>
 
             <p class="muted small">
               Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{reason}}, {{days}}.
-              Approval/denial/removal headers are rendered in bold with an underline separator at the top of modmail replies.
+              In denial templates, `{{reason}}` inserts the optional moderator notes entered during review.
+              The `{{days}}` token already includes the unit, for example `3 days`.
+              Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
             </p>
             <button id="save-templates-btn" class="btn btn-primary">Save Modmail Templates</button>
           </div>

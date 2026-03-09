@@ -25,18 +25,27 @@ import {
   searchHistoryRecords,
   setPendingClaimState,
   submitVerification,
-  trackSubreddit,
   toHubState,
   toModPanelState,
   unblockUserForModerator,
   withdrawCurrentUserPendingVerification,
-  type DenyReason,
+  parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
 
 type ToastPayload = {
   text: string;
   tone: 'success' | 'error' | 'info';
+};
+
+type SettingsValidationRequest<ValueType> = {
+  value: ValueType | undefined;
+  isEditing: boolean;
+};
+
+type SettingsValidationResponse = {
+  success: boolean;
+  error?: string;
 };
 
 type HttpError = Error & {
@@ -75,6 +84,37 @@ function getStatus(error: unknown): number {
 function sendError(res: express.Response, error: unknown): void {
   const message = errorText(error);
   res.status(getStatus(error)).json({ error: message });
+}
+
+function toSettingsValidationResponse(error?: string): SettingsValidationResponse {
+  return error ? { success: false, error } : { success: true };
+}
+
+function validateAuditPurgeDays(value: unknown): string | undefined {
+  if (value === undefined) {
+    return;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    return 'Enter a whole number of days (0 or greater).';
+  }
+}
+
+function validateVerificationsDisabledMessage(value: unknown): string | undefined {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length > 200) {
+    return 'Keep the disabled message at 200 characters or fewer.';
+  }
+}
+
+function validateDenyReasonLabel(value: unknown): string | undefined {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length > 48) {
+    return 'Keep the reason label at 48 characters or fewer.';
+  }
 }
 
 async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
@@ -158,19 +198,6 @@ async function sendModRefreshSignal(appContext: Devvit.Context): Promise<void> {
   }
 }
 
-function asDenyReason(value: unknown): DenyReason | null {
-  const normalized = String(value ?? '').trim();
-  switch (normalized) {
-    case 'photoshop':
-    case 'unclear_image':
-    case 'did_not_follow_instructions':
-    case 'other':
-      return normalized;
-    default:
-      return null;
-  }
-}
-
 function submitToast(result: Awaited<ReturnType<typeof submitVerification>>): ToastPayload {
   const pendingModmailSent =
     result.pendingModmail.status === 'created' ||
@@ -194,6 +221,21 @@ app.get('/api/hub/state', async (_req, res) => {
   } catch (error) {
     sendError(res, error);
   }
+});
+
+app.post('/internal/settings/validate/mod-menu-audit-purge-days', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<number>>;
+  res.json(toSettingsValidationResponse(validateAuditPurgeDays(body.value)));
+});
+
+app.post('/internal/settings/validate/verifications-disabled-message', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+  res.json(toSettingsValidationResponse(validateVerificationsDisabledMessage(body.value)));
+});
+
+app.post('/internal/settings/validate/deny-reason-label', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+  res.json(toSettingsValidationResponse(validateDenyReasonLabel(body.value)));
 });
 
 app.post('/api/hub/submit', async (req, res) => {
@@ -253,7 +295,6 @@ app.post('/api/admin/create-post', async (req, res) => {
     const appContext = currentContext();
     const { subredditName } = await requireModerator(appContext);
     const title = String(req.body?.postTitle ?? '').trim() || 'Photo Verification Hub';
-    await trackSubreddit(appContext, subredditName);
     const post = await reddit.submitCustomPost({
       subredditName,
       title,
@@ -311,16 +352,13 @@ app.post('/api/mod/approve', async (req, res) => {
 app.post('/api/mod/deny', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
-    const reason = asDenyReason(req.body?.reason);
+    const reason = parseDenyReason(String(req.body?.reason ?? '').trim());
     const moderatorNotes = String(req.body?.moderatorNotes ?? '').trim();
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     if (!reason) {
       throw httpError(400, 'Select a valid denial reason.');
-    }
-    if (reason === 'other' && !moderatorNotes) {
-      throw httpError(400, 'Moderator notes are required when denial reason is Other.');
     }
     const appContext = currentContext();
     const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);
@@ -333,10 +371,14 @@ app.post('/api/mod/deny', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
+    const payload = await buildModPayload(appContext);
+    const denyReasonLabel =
+      payload.state.config.denyReasons.find((item) => item.id === reason)?.label?.trim() ||
+      reason.replace(/_/g, ' ');
     res.json({
-      ...(await buildModPayload(appContext)),
+      ...payload,
       toast: {
-        text: `${success ? 'Denied' : 'Denied with issues'} (${reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
+        text: `${success ? 'Denied' : 'Denied with issues'} (${denyReasonLabel}): ${details.join('; ')}.${blockText}`,
         tone: success ? 'success' : 'error',
       },
     });

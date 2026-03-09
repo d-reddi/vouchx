@@ -1,8 +1,6 @@
-import { Devvit, SettingScope, fetchDevvitWeb, type FormOnSubmitEvent } from '@devvit/public-api';
+import { Devvit, fetchDevvitWeb, type FormOnSubmitEvent } from '@devvit/public-api';
 
 import {
-  DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
-  INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
   USER_VALIDATION_JOB_NAME,
   ensureUserValidationSchedule,
   errorText,
@@ -79,23 +77,6 @@ async function onRemoveVerificationPost(
   }
 }
 
-Devvit.addSettings({
-  type: 'number',
-  name: INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
-  label: 'Purge Audit Log days',
-  helpText: 'Days used by subreddit menu "Purge Audit Log". Use 0 to purge all entries.',
-  scope: SettingScope.Installation,
-  defaultValue: DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
-  onValidate: ({ value }) => {
-    if (value === undefined) {
-      return;
-    }
-    if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
-      return 'Enter a whole number of days (0 or greater).';
-    }
-  },
-});
-
 const createVerificationPostForm = Devvit.createForm(
   {
     title: 'Create verification hub post',
@@ -153,7 +134,7 @@ const removeVerificationPostForm = Devvit.createForm(
 );
 
 Devvit.addMenuItem({
-  label: 'Create Verification Hub (NSFW)',
+  label: 'Create Verification Hub (VouchX)',
   location: 'subreddit',
   forUserType: 'moderator',
   onPress: (_, context) => {
@@ -194,7 +175,7 @@ Devvit.addSchedulerJob<AuditRetentionJobData>({
       const summary = await reconcileApprovedUsersForRetention(context, subredditId, subredditName);
       if (!summary.skipped) {
         console.log(
-          `[user-validation] r/${subredditName}: approved_processed=${summary.processed} approved_validated=${summary.validated} approved_purged=${summary.purged} approved_retries=${summary.retried} non_approved_processed=${summary.nonApprovedProcessed} non_approved_validated=${summary.nonApprovedValidated} non_approved_purged=${summary.nonApprovedPurged} non_approved_retries=${summary.nonApprovedRetried}`
+          `[user-validation] r/${subredditName}: approved_processed=${summary.processed} approved_validated=${summary.validated} approved_purged=${summary.purged} approved_retries=${summary.retried} non_approved_processed=${summary.nonApprovedProcessed} non_approved_validated=${summary.nonApprovedValidated} non_approved_purged=${summary.nonApprovedPurged} non_approved_retries=${summary.nonApprovedRetried} audit_purged=${summary.auditPurged} stale_index_entries_purged=${summary.staleIndexEntriesPurged}`
         );
       }
     } catch (error) {

@@ -1,7 +1,8 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 
-const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/';
-const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx_dev/wiki/terms-and-conditions/privacy-policy/';
+const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
+const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx/wiki/privacy-policy/';
 const SUBMIT_ACKNOWLEDGEMENTS = [
   {
     key: 'is18Confirmed',
@@ -9,20 +10,13 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
   {
     key: 'adultOnlySelfPhotosConfirmed',
-    label: 'The uploaded photos are of me and do not depict anyone under the age of 18.',
+    label: 'Any uploaded photo(s) are of me and do not depict anyone under the age of 18.',
   },
   {
     key: 'termsAccepted',
     label: 'I have read and accept the Terms and Conditions of the VouchX app.',
   },
 ];
-
-const DENY_REASON_LABEL = {
-  photoshop: 'Photoshop',
-  unclear_image: 'Unclear image',
-  did_not_follow_instructions: 'Did not follow written instructions',
-  other: 'Other',
-};
 
 function createShell(root, inline) {
   root.innerHTML = `
@@ -71,6 +65,19 @@ function createShell(root, inline) {
           </div>
         </div>
       </div>
+
+      <div data-el="photo-instructions-modal" class="hub-modal hidden">
+        <div class="hub-modal-card">
+          <h2>Photo Instructions</h2>
+          <p class="meta">
+            Review these instructions before opening the upload form.
+          </p>
+          <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+          <div class="row">
+            <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -92,6 +99,9 @@ function createShell(root, inline) {
     submitWarningLinks: root.querySelector('[data-el="submit-warning-links"]'),
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
+    photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
+    photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
   };
 }
 
@@ -164,6 +174,15 @@ function makeButton(label, className, onClick) {
   return button;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeExternalUrl(value) {
   const candidate = String(value || '').trim();
   if (!candidate) {
@@ -196,6 +215,147 @@ function createExternalLink(item, extraClassName = '') {
   return link;
 }
 
+function formatDenyReasonSlot(reasonId) {
+  const match = String(reasonId || '').match(/^reason_(\d+)$/);
+  return match ? `Reason ${match[1]}` : String(reasonId || '').replaceAll('_', ' ');
+}
+
+function getDenyReasonLabel(state, reasonId) {
+  if (!state || !state.config || !Array.isArray(state.config.denyReasons)) {
+    return formatDenyReasonSlot(reasonId);
+  }
+  const match = state.config.denyReasons.find((item) => item && item.id === reasonId);
+  const label = match && typeof match.label === 'string' ? match.label.trim() : '';
+  return label || formatDenyReasonSlot(reasonId);
+}
+
+function renderInlineMarkdown(value) {
+  const replacements = [];
+  const storeReplacement = (html) => {
+    const token = `%%MDTOKEN${replacements.length}%%`;
+    replacements.push(html);
+    return token;
+  };
+
+  let source = String(value ?? '');
+  source = source.replace(/`([^`]+)`/g, (_match, code) => storeReplacement(`<code>${escapeHtml(code)}</code>`));
+  source = source.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, url) => {
+    const normalized = normalizeExternalUrl(url);
+    if (!normalized) {
+      return label;
+    }
+    return storeReplacement(
+      `<a href="${escapeHtml(normalized)}" data-external-url="${escapeHtml(normalized)}">${escapeHtml(label)}</a>`
+    );
+  });
+
+  let html = escapeHtml(source);
+  html = html.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[\s(])\*([^*\n][\s\S]*?)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
+  html = html.replace(/(^|[\s(])_([^_\n][\s\S]*?)_(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
+
+  return html.replace(/%%MDTOKEN(\d+)%%/g, (_match, index) => replacements[Number(index)] ?? '');
+}
+
+function renderMarkdown(value) {
+  const source = String(value ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!source) {
+    return '<p class="markdown-empty">No photo instructions have been configured yet.</p>';
+  }
+
+  const html = [];
+  const lines = source.split('\n');
+  let paragraphLines = [];
+  let listType = '';
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) {
+      return;
+    }
+    html.push(`<p>${renderInlineMarkdown(paragraphLines.join('\n')).replace(/\n/g, '<br />')}</p>`);
+    paragraphLines = [];
+  };
+
+  const closeList = () => {
+    if (!listType) {
+      return;
+    }
+    html.push(listType === 'ol' ? '</ol>' : '</ul>');
+    listType = '';
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+    if (headingMatch) {
+      flushParagraph();
+      closeList();
+      const level = Math.min(6, headingMatch[1].length + 2);
+      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*]\s+(.*)$/);
+    if (unorderedMatch) {
+      flushParagraph();
+      if (listType !== 'ul') {
+        closeList();
+        html.push('<ul>');
+        listType = 'ul';
+      }
+      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\d+\.\s+(.*)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      if (listType !== 'ol') {
+        closeList();
+        html.push('<ol>');
+        listType = 'ol';
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+      continue;
+    }
+
+    if (listType) {
+      closeList();
+    }
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join('');
+}
+
+function formatPendingTurnaroundDays(days) {
+  const normalizedDays = Number.isFinite(Number(days)) ? Math.max(0, Math.trunc(Number(days))) : 0;
+  return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
+}
+
+function renderInstructionTemplate(value, state) {
+  const replacements = {
+    subreddit: String(state?.subredditName || '').trim(),
+    days: formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays),
+  };
+
+  return String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey) => {
+    const normalizedKey = String(rawKey || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    return replacements[normalizedKey] ?? '';
+  });
+}
+
 export function mountHub(options = {}) {
   const { rootId = 'app-root', inline = false } = options;
   const root = document.getElementById(rootId);
@@ -208,6 +368,7 @@ export function mountHub(options = {}) {
   let hubForms = null;
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
+  let autoRefreshTimerId = 0;
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
@@ -240,6 +401,35 @@ export function mountHub(options = {}) {
     for (const item of legalLinks) {
       refs.submitWarningLinks.appendChild(createExternalLink(item));
     }
+  }
+
+  if (refs.photoInstructionsBody) {
+    refs.photoInstructionsBody.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const link = event.target.closest('a[data-external-url]');
+      if (!link) {
+        return;
+      }
+      event.preventDefault();
+      const url = String(link.getAttribute('data-external-url') || '').trim();
+      if (!url) {
+        return;
+      }
+      navigateTo(url);
+    });
+  }
+
+  if (refs.photoInstructionsClose && refs.photoInstructionsModal) {
+    refs.photoInstructionsClose.addEventListener('click', () => {
+      refs.photoInstructionsModal.classList.add('hidden');
+    });
+    refs.photoInstructionsModal.addEventListener('click', (event) => {
+      if (event.target === refs.photoInstructionsModal) {
+        refs.photoInstructionsModal.classList.add('hidden');
+      }
+    });
   }
 
   function setBusy(next) {
@@ -346,10 +536,22 @@ export function mountHub(options = {}) {
     });
   }
 
+  function openPhotoInstructionsModal() {
+    if (!refs.photoInstructionsModal || !refs.photoInstructionsBody) {
+      return;
+    }
+    refs.photoInstructionsBody.innerHTML = renderMarkdown(
+      renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
+    );
+    refs.photoInstructionsModal.classList.remove('hidden');
+  }
+
   function renderState(state) {
     if (!state) {
       return;
     }
+
+    const isRestricted = Boolean(state.viewerBlocked && !state.viewerVerifiedByFlair);
 
     applyTheme(state.resolvedTheme);
     refs.metaSubreddit.textContent = `Subreddit: r/${state.subredditName || ''}`;
@@ -357,12 +559,12 @@ export function mountHub(options = {}) {
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
-    if (state.viewerBlocked) {
-      statusText = 'Blocked';
-      refs.metaStatus.classList.add('status-blocked');
-    } else if (state.viewerVerifiedByFlair) {
+    if (state.viewerVerifiedByFlair) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       refs.metaStatus.classList.add('status-verified');
+    } else if (isRestricted) {
+      statusText = 'Blocked';
+      refs.metaStatus.classList.add('status-blocked');
     } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
       statusText = 'Pending re-review';
       refs.metaStatus.classList.add('status-pending');
@@ -379,13 +581,13 @@ export function mountHub(options = {}) {
     refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
 
     let infoText = '';
-    if (!state.viewerVerifiedByFlair && !state.viewerBlocked && !state.config.verificationsEnabled) {
-      infoText = 'Verifications are temporarily disabled. Please check back soon.';
-    } else if (!state.viewerVerifiedByFlair && !state.viewerBlocked && state.userLatest?.status === 'pending') {
+    if (!state.viewerVerifiedByFlair && !isRestricted && !state.config.verificationsEnabled) {
+      infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
+    } else if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       infoText = state.userLatest.parentVerificationId
         ? 'Your verification is pending moderator re-review.'
         : 'Your verification is pending moderator review.';
-    } else if (!state.viewerVerifiedByFlair && state.viewerBlocked) {
+    } else if (!state.viewerVerifiedByFlair && isRestricted) {
       infoText = 'You cannot submit a verification request.';
     }
     refs.infoMsg.textContent = infoText;
@@ -399,10 +601,15 @@ export function mountHub(options = {}) {
 
     if (
       !state.viewerVerifiedByFlair &&
-      !state.viewerBlocked &&
+      !isRestricted &&
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
+      refs.actionRow.appendChild(
+        makeButton('Photo Instructions', 'btn-secondary', () => {
+          openPhotoInstructionsModal();
+        })
+      );
       refs.actionRow.appendChild(
         makeButton(submitLabel, 'btn-primary', () => {
           void openSubmitForm();
@@ -410,7 +617,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!state.viewerVerifiedByFlair && !state.viewerBlocked && state.userLatest?.status === 'pending') {
+    if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw');
@@ -426,7 +633,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!state.viewerBlocked && state.userLatest) {
+    if ((!isRestricted || state.viewerVerifiedByFlair) && state.userLatest) {
       const statusLabel =
         state.userLatest.status === 'removed'
           ? 'REVOKED'
@@ -441,11 +648,11 @@ export function mountHub(options = {}) {
         pieces.push(`<p>Reviewed: ${formatTimestamp(state.userLatest.reviewedAt)}</p>`);
       }
       if (state.userLatest.status === 'denied' && state.userLatest.denyReason) {
-        pieces.push(`<p>Reason: ${DENY_REASON_LABEL[state.userLatest.denyReason] || state.userLatest.denyReason}</p>`);
+        pieces.push(`<p>Reason: ${escapeHtml(getDenyReasonLabel(state, state.userLatest.denyReason))}</p>`);
       }
       refs.submissionBox.innerHTML = pieces.join('');
       refs.submissionBox.classList.remove('hidden');
-    } else if (!state.viewerBlocked) {
+    } else if (!isRestricted || state.viewerVerifiedByFlair) {
       refs.submissionBox.innerHTML = '<p>No verification submission yet.</p>';
       refs.submissionBox.classList.remove('hidden');
     } else {
@@ -470,7 +677,8 @@ export function mountHub(options = {}) {
     }
   }
 
-  async function refreshState() {
+  async function refreshState(options = {}) {
+    const { silent = false } = options;
     setBusy(true);
     try {
       applyPayload(await requestJson('/api/hub/state'));
@@ -479,10 +687,24 @@ export function mountHub(options = {}) {
       if (!hubState) {
         refs.loadingScreen.textContent = `Unable to load verification state: ${message}`;
       }
-      showToast(message, 'error');
+      if (!silent) {
+        showToast(message, 'error');
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  function scheduleAutoRefresh() {
+    if (autoRefreshTimerId) {
+      window.clearInterval(autoRefreshTimerId);
+    }
+    autoRefreshTimerId = window.setInterval(() => {
+      if (document.hidden || isBusy) {
+        return;
+      }
+      void refreshState({ silent: true });
+    }, AUTO_REFRESH_INTERVAL_MS);
   }
 
   refs.refreshBtn.addEventListener('click', () => {
@@ -503,5 +725,6 @@ export function mountHub(options = {}) {
     window.location.assign(modPanelPath || './mod-panel.html');
   });
 
+  scheduleAutoRefresh();
   void refreshState();
 }
