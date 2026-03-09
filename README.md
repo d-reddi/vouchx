@@ -1,133 +1,371 @@
-# NSFW Verify (Devvit)
+# VouchX
 
-NSFW Verify is a Reddit verification app for communities that need a moderator-reviewed photo verification process.
-It now uses the current Devvit Web post model: an inline launch screen, an expanded verification hub entrypoint, and a web-backed moderator panel.
+**A moderator-reviewed photo verification system for Reddit communities.**
 
-It includes:
-- A Devvit Web verification post with an inline launch card and expanded hub
-- A user-facing verification hub (submit, track status, withdraw pending, remove verification)
-- A moderator panel (review queue, history, blocked users, settings, templates, themes)
-- Flair + modmail automation
-- Account validation checks for approved users
-- Automatic data retention
+Members submit photos for review, and moderators manage approvals through a structured verification panel with queues, templates, and audit history.
 
-## For Community Members
+VouchX helps communities run organized verification workflows directly inside a subreddit post without relying on modmail threads, spreadsheets, or manual tracking.
 
-### What users can do
-- Submit verification photos from the verification post
-- Confirm they are 18+ before submitting
-- Upload the number of required photos set by moderators (`1`, `2`, or `3`)
-- See current status in the post:
-- `Verified`
-- `Pending review`
-- `Pending re-review`
-- `Not verified`
-- Withdraw a pending submission
-- Remove their own verification (self-removal)
+📷 **Screenshots and workflow demos:**  
+https://www.reddit.com/r/vouchx/wiki/demo/
 
-### What users see when submission is unavailable
-- If submissions are disabled by moderators:
-- `Verifications are temporarily disabled. Please check back soon.`
-- If the user is blocked:
-- `You cannot submit a verification request.`
+## Help Wiki Drafts
 
-### What happens after submission
-- Moderators review the submission
-- User receives update modmail from the subreddit
-- On approval, user flair is applied based on moderator settings
+Task-based help pages for publishing live in [`docs/wiki/README.md`](docs/wiki/README.md).
 
-## For Moderators
+Recommended reading order:
 
-### Getting started
-- Create the verification post from subreddit menu:
-- `Create Verification Hub (NSFW)`
-- This creates a Devvit Web custom post that opens from an inline launch screen into the full verification hub
-- Open moderator tools from the post:
-- `Open Moderator Panel`
-- Access is limited to moderators with Manage Users style permissions
+- [`home.md`](docs/wiki/home.md)
+- [`moderator-quick-start.md`](docs/wiki/moderator-quick-start.md)
+- [`member-guide.md`](docs/wiki/member-guide.md)
+- [`moderator-guide.md`](docs/wiki/moderator-guide.md)
+- [`settings-reference.md`](docs/wiki/settings-reference.md)
+- [`troubleshooting.md`](docs/wiki/troubleshooting.md)
 
-### Moderator panel tabs
 
-#### Pending
-- Live filter by username
-- SLA quick filters (`All`, `<24h`, `24-72h`, `>72h`)
-- Lock/unlock claims to coordinate reviews
-- Approve or deny submissions
-- Denials support a reason and optional notes
+# Features
 
-#### Blocked
-- Search blocked users
-- Manually block users
-- Unblock users
-- Auto-block occurs after repeated denials (threshold: `3`)
+- Moderator-reviewed photo verification
+- Inline verification hub post
+- Moderator review queue with claim locking
+- Automated modmail templates
+- Verification flair integration
+- Audit history and retention controls
+- Customizable themes and messaging
+- Automatic cleanup and validation jobs
 
-#### History
-The History tab has 3 views:
+---
 
-- `Records`:
-- Search by username prefix and date range
-- Reopen denied records for re-review
+# What VouchX Does
 
-- `Approved`:
-- Empty username query shows recent approved records (default date range: last 30 days)
-- Username query rules:
-- `0 chars`: show recent approved records
-- `1-2 chars`: no backend search; UI shows hint: `Type at least 3 characters to search.`
-- `3+ chars`: fast prefix search (`startsWith`, not contains)
-- Supports paging with `Load More`
+VouchX provides a structured system for managing photo verification submissions inside Reddit.
 
-- `Audit`:
-- Search audit events by username, actor, and date range
-- Supports paging with `Load More`
+Members submit photos for moderator review, and moderators manage approvals through a centralized moderation panel.
 
-#### Settings
-- Enable/disable verifications
-- Set required photo count (`1-3`)
-- Configure flair template ID
-- Approvals require a valid flair template ID
-- Optional CSS matcher for verified-state detection
-- View storage usage estimate
+The app provides:
 
-#### Templates
-- Manage modmail subject/body templates for:
-- Pending
-- Approved
-- Denied (per reason)
-- Removal
-- Supports placeholders like `{{username}}`, `{{mod}}`, `{{subreddit}}`, `{{date submitted}}`, `{{reason}}`, `{{days}}`
+- photo submission workflows
+- moderator review queues
+- approval and denial templates
+- verification flair integration
+- moderation audit history
+- automated moderation messages
 
-#### Themes
-- Choose preset themes
-- Optional custom primary/accent colors
-- Live preview before saving
+---
 
-## Verification and Moderation Behavior
+# Member Experience
 
-- Approved users are periodically revalidated (about every 30 days)
-- Validation is batched and due-based to avoid scanning all users
-- If a user is confirmed deleted/suspended, verification data is removed from active indexes
-- Approved username search uses prefix matching only (`startsWith`)
+Members interact with verification directly inside the verification hub post.
 
-## Data and Retention
+Users can:
 
-### What is stored
-- Verification records
-- Pending/approved/history/audit indexes
-- Per-user latest/pending pointers
-- Block list + denial counters
-- Subreddit configuration
+- submit photos for moderator review
+- review photo instructions before submitting
+- resubmit verification if denied (Moderators see "resubmitted" on the pending card if the user is resubitting)
+- withdraw a pending request
+- remove their own verification if they choose
 
-### Retention rules
-Retention rules are in place to maintain compliance with Reddit Dev Rules
-- History/verification records that are not approved:
-- Retained for 180 days (fixed)
+The verification hub automatically refreshes while open so members can see status updates.
 
-- Audit entries:
-- Retained for 180 days (fixed)
+Possible status messages include:
 
-- Approved verification records:
-- Retained for 365 days of inactivity (sliding), this allows users who take a break from your sub to still return verified.
-- A verified user opening/rendering the app counts as activity for the purposes of post veririficaiton expiry extension.
+- Verified
+- Verified (Manual)
+- Pending review
+- Pending re-review
+- Blocked
+- Not verified
 
-### Additional moderator menu action
-- `Purge Audit Log` (subreddit menu item) - this will remove all "audit" trails through the # of days set in the install settings.  Reccomended days: 3 to avoid abuse of this function. 
+If submissions are disabled, users will see the configured disabled message.
+
+---
+
+# Moderator Experience
+
+Moderators manage submissions through an expanded moderator panel.
+
+The moderator panel includes:
+
+- **Pending** — submissions awaiting review  
+- **Blocked** — users prevented from submitting  
+- **History** — past verification activity  
+- **Settings** — verification configuration  
+- **Templates** — automated messaging templates  
+- **Themes** — interface customization  
+
+Pending submissions support **claim locking**, ensuring multiple moderators do not act on the same request simultaneously.
+
+Denied submissions can be reopened for additional review.
+
+Users may be automatically blocked after repeated denials.
+
+---
+
+# Quick Setup (Moderator)
+
+Getting started takes less than a minute.
+
+1. Install **VouchX** in your subreddit.
+2. Use the moderator menu action **Create Verification Hub (NSFW)**.
+3. Open the created post.
+4. Click **Open Moderator Panel**.
+5. Configure verification settings:
+
+- enable or disable submissions
+- set the verification flair template (On desktop: In Mod tools sub settings, go to Look & Feel > user flair > hover over the flair and click copy ID, then plaste this in the verification flair template.)
+- choose required photo count
+- configure photo instructions
+
+Once saved, users can begin submitting verification requests.
+
+---
+
+# Moderator Menu Actions
+
+VouchX adds several tools to the subreddit moderator menu.
+
+### Create Verification Hub (NSFW)
+
+Creates a new verification hub post.
+
+### Purge Audit Log
+
+Removes audit log entries older than the configured retention window.
+
+### Remove Verification Hub Post
+
+Removes a verification post created by the app.
+
+---
+
+# Verification Flair Behavior
+
+When a submission is approved, the configured verification flair is applied.
+
+Verification status is determined using live subreddit flair detection rather than relying solely on stored records.
+
+The app checks:
+
+- flair template ID
+- optional flair CSS matcher
+- fallback flair text matching when necessary
+
+The app also performs flair reconciliation for approved users when a stored flair appears outdated compared to the currently configured template.
+
+Manual or unrelated flair is not overwritten simply because a verification record exists.
+
+---
+
+# Configuration Model
+
+Settings are stored **per subreddit installation**.
+
+## Install Settings
+
+Install settings control general verification behavior.
+
+Current settings include:
+
+- Purge Audit Log days
+- Verifications disabled message
+- Denial Reason 1 Label
+- Denial Reason 2 Label
+- Denial Reason 3 Label
+- Denial Reason 4 Label
+
+Denial reason labels are display names only.
+
+Leaving a denial label blank hides that reason in the moderator interface.
+
+---
+
+## Moderator Panel Settings
+
+### Verification Settings
+
+Moderators can configure:
+
+- enable or disable submissions
+- verification flair template ID
+- optional flair CSS matcher
+- required photo count
+- photo instructions (markdown)
+- estimated storage usage
+
+### Templates
+
+Automated messaging templates include:
+
+- pending notification
+- approval messages
+- denial messages
+- revoked verification messages
+
+Templates are customizable per subreddit.
+
+### Themes
+
+Interface appearance can be customized using:
+
+- preset themes
+- custom primary color
+- accent color
+- background color
+
+---
+
+# Template Placeholders
+
+Templates support dynamic placeholders.
+
+### Photo Instructions
+
+Supported placeholders:
+
+- `{{subreddit}}`
+- `{{days}}`
+
+### Modmail Templates
+
+Supported placeholders:
+
+- `{{username}}`
+- `{{mod}}`
+- `{{subreddit}}`
+- `{{date submitted}}`
+- `{{reason}}`
+- `{{days}}`
+
+Example '{{days}}' rendering:
+
+```
+3 days
+```
+
+---
+
+# Submission Flow
+
+When a user submits photos:
+
+1. The user opens the submission acknowledgement modal.
+2. The user confirms the submission statements.
+3. The Devvit image upload form opens.
+4. The app stores the returned media URLs on the verification record.
+5. A pending modmail notification is sent.
+6. A submission mod note is written.
+7. The submission appears in the moderator queue.
+
+The acknowledgement timestamp is recorded for audit purposes.
+
+---
+
+# Review Flow
+
+## Approve
+
+Approval performs the following actions:
+
+- applies verification flair
+- sends approval modmail
+- writes an approval moderator note
+- moves the record into the approved index
+- schedules validation tracking
+
+## Deny
+
+Denial performs the following actions:
+
+- stores the denial reason and moderator notes
+- sends denial modmail using the configured template
+- writes a moderator note
+- retains the record in history
+- may trigger automatic blocking after repeated denials
+
+## Revoke Verification
+
+Revoking verification performs the following actions:
+
+- removes the approved record
+- attempts to remove flair
+- sends revoked verification modmail
+- writes a moderator note
+
+---
+
+# Realtime Updates
+
+The moderator panel subscribes to a **subreddit-scoped realtime channel**.
+
+Realtime messages contain **no user data**.  
+They only signal the client to refresh.
+
+This allows moderation queues to update instantly when actions occur.
+
+Unsaved moderator drafts are preserved across refresh events.
+
+The user verification hub automatically refreshes every **2 minutes** while open.
+
+---
+
+# Data Stored
+
+The app stores only the information required to operate the verification workflow.
+
+Stored data includes:
+
+- verification records
+- pending, approved, and history indexes
+- audit log entries
+- per-user latest and pending pointers
+- blocked users and denial counters
+- subreddit configuration
+- validation tracking indexes
+
+The app also writes Reddit moderation artifacts such as **modmail messages** and **moderator notes**.
+
+The app **does not store image files**.  
+It stores only media URLs returned by the Devvit image upload system.
+
+---
+
+# Data Retention
+
+## Verification Records
+
+Non-approved verification records are retained for **45 days**.
+
+Approved records use a **sliding 45-day retention window**.
+
+Approved records store a `lastTtlBumpAt` timestamp, and retention may be refreshed when verified users interact with the app.
+
+Retention bumps are rate-limited to **once every 24 hours per record**.
+
+## Audit Logs
+
+Audit entries are retained for **45 days**.
+
+Moderators may purge audit entries earlier using the moderator menu action.
+
+---
+
+# Cleanup Jobs
+
+A daily scheduled job performs:
+
+- approved user validation
+- cleanup of deleted or suspended users
+- scanning of expired history records
+- removal of expired audit entries
+- index maintenance
+
+---
+
+# User-Initiated Removal
+
+Users may:
+
+- withdraw pending submissions
+- remove their own verification
+
+These actions delete the user’s verification records and associated audit entries.

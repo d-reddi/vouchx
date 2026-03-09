@@ -24,7 +24,10 @@
     "entry": "index.cjs"
   },
   "blocks": {
-    "entry": "src/main.tsx"
+    "entry": "src/main.tsx",
+    "settings": {
+      "enable": false
+    }
   },
   "permissions": {
     "reddit": {
@@ -34,6 +37,52 @@
     "realtime": true,
     "redis": true,
     "media": true
+  },
+  "settings": {
+    "subreddit": {
+      "mod_menu_audit_purge_days": {
+        "type": "number",
+        "label": "Purge Audit Log days",
+        "helpText": "Days used by subreddit menu \"Purge Audit Log\". Use 0 to purge all entries.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
+      },
+      "verifications_disabled_message": {
+        "type": "string",
+        "label": "Verifications disabled message",
+        "helpText": "Shown to users in this subreddit when submissions are turned off. If cleared, the app falls back to the built-in default message.",
+        "defaultValue": "Verifications are temporarily disabled.  Please check back soon.",
+        "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
+      },
+      "deny_reason_1_label": {
+        "type": "string",
+        "label": "Denial Reason 1 Label",
+        "helpText": "Friendly name for this subreddit install. Leave blank to hide this reason and its mod-panel template field. Max 48 characters.",
+        "defaultValue": "Altered or edited image",
+        "validationEndpoint": "/internal/settings/validate/deny-reason-label"
+      },
+      "deny_reason_2_label": {
+        "type": "string",
+        "label": "Denial Reason 2 Label",
+        "helpText": "Friendly name for this subreddit install. Leave blank to hide this reason and its mod-panel template field. Max 48 characters.",
+        "defaultValue": "Unclear image",
+        "validationEndpoint": "/internal/settings/validate/deny-reason-label"
+      },
+      "deny_reason_3_label": {
+        "type": "string",
+        "label": "Denial Reason 3 Label",
+        "helpText": "Friendly name for this subreddit install. Leave blank to hide this reason and its mod-panel template field. Max 48 characters.",
+        "defaultValue": "Did not follow instructions",
+        "validationEndpoint": "/internal/settings/validate/deny-reason-label"
+      },
+      "deny_reason_4_label": {
+        "type": "string",
+        "label": "Denial Reason 4 Label",
+        "helpText": "Friendly name for this subreddit install. Leave blank to hide this reason and its mod-panel template field. Max 48 characters.",
+        "defaultValue": "Other",
+        "validationEndpoint": "/internal/settings/validate/deny-reason-label"
+      }
+    }
   },
   "dev": {
     "subreddit": "vouchx_dev"
