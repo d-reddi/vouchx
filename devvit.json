@@ -54,6 +54,12 @@
         "defaultValue": "Verifications are temporarily disabled.  Please check back soon.",
         "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
       },
+      "auto_flair_reconcile_enabled": {
+        "type": "boolean",
+        "label": "Auto flair repair on hub load",
+        "helpText": "When enabled, the app checks every 24 hours approved users when they open the hub. If the configured verification flair was removed or replaced, it tries to re-apply it. It does not replace flairs that still match the CSS class configured in the mod panel.",
+        "defaultValue": true
+      },
       "deny_reason_1_label": {
         "type": "string",
         "label": "Denial Reason 1 Label",

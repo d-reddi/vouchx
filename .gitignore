@@ -3,3 +3,4 @@ node_modules/
 dist/
 pre-deploy-test-matrix.csv
 mod-qa-test-matrix.csv
+docs/

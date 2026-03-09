@@ -1,4 +1,5 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
+import brandLogoUrl from './logo.png';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
@@ -22,33 +23,48 @@ function createShell(root, inline) {
   root.innerHTML = `
     <div class="shell">
       <div data-el="loading" class="loading-screen">${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</div>
-      <div data-el="main" class="hidden">
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <h1>Verification Hub</h1>
-              <p data-el="meta-subreddit" class="meta"></p>
+      <div data-el="main" class="hub-main hidden">
+        <section class="hub-surface">
+          <header class="hub-hero">
+            <div class="hub-brand">
+              <div class="hub-title-row">
+                <div class="hub-brand-mark">
+                  <img
+                    data-el="brand-logo"
+                    class="hub-brand-logo hidden"
+                    src=""
+                    alt="VouchX logo"
+                  />
+                </div>
+                <div class="hub-title-copy">
+                  <p class="hub-kicker">VouchX</p>
+                  <h1>Verification Hub</h1>
+                </div>
+              </div>
               <p data-el="meta-username" class="meta"></p>
-              <p data-el="meta-status" class="status-line"></p>
+              <p data-el="meta-subreddit" class="meta"></p>
+              <div class="hub-brand-status">
+                <p class="hub-status-kicker">Current status</p>
+                <p data-el="meta-status" class="status-line"></p>
+              </div>
             </div>
-            <div class="row" style="margin-top: 0">
+            <div class="hub-hero-actions">
               <span data-el="pending-badge" class="badge hidden"></span>
-              <button data-el="refresh-btn" class="btn-secondary" type="button">Refresh</button>
+              <button data-el="mod-panel-btn" class="btn-secondary hub-toolbar-btn hidden" type="button">Mod Panel</button>
             </div>
-          </div>
-          <div class="row">
-            <button data-el="mod-panel-btn" class="btn-secondary hidden" type="button">Open Moderator Panel</button>
-          </div>
-        </section>
+          </header>
 
-        <section class="card">
-          <h2>Verification</h2>
-          <p data-el="info-msg" class="info-msg hidden"></p>
-          <div data-el="action-row" class="row"></div>
-          <div data-el="submission-box" class="submission-box hidden"></div>
-        </section>
+          <section class="hub-command">
+            <div class="hub-command-copy">
+              <p class="hub-kicker">Actions</p>
+              <h2 data-el="command-title">Review the instructions, then choose your next step.</h2>
+            </div>
+            <p data-el="info-msg" class="info-msg hidden"></p>
+            <div data-el="action-row" class="row hub-action-dock"></div>
+          </section>
 
-        <footer data-el="legal-links" class="legal-links hidden"></footer>
+          <footer data-el="legal-links" class="legal-links hidden"></footer>
+        </section>
       </div>
 
       <div data-el="submit-warning-modal" class="hub-modal hidden">
@@ -84,15 +100,15 @@ function createShell(root, inline) {
   return {
     loadingScreen: root.querySelector('[data-el="loading"]'),
     mainContent: root.querySelector('[data-el="main"]'),
-    metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
+    brandLogo: root.querySelector('[data-el="brand-logo"]'),
     metaUsername: root.querySelector('[data-el="meta-username"]'),
+    metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
     metaStatus: root.querySelector('[data-el="meta-status"]'),
+    commandTitle: root.querySelector('[data-el="command-title"]'),
     pendingBadge: root.querySelector('[data-el="pending-badge"]'),
-    refreshBtn: root.querySelector('[data-el="refresh-btn"]'),
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
     actionRow: root.querySelector('[data-el="action-row"]'),
-    submissionBox: root.querySelector('[data-el="submission-box"]'),
     legalLinks: root.querySelector('[data-el="legal-links"]'),
     submitWarningModal: root.querySelector('[data-el="submit-warning-modal"]'),
     submitWarningList: root.querySelector('[data-el="submit-warning-list"]'),
@@ -374,6 +390,16 @@ export function mountHub(options = {}) {
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
   ];
 
+  if (refs.brandLogo) {
+    refs.brandLogo.src = brandLogoUrl;
+    refs.brandLogo.addEventListener('load', () => {
+      refs.brandLogo.classList.remove('hidden');
+    });
+    refs.brandLogo.addEventListener('error', () => {
+      refs.brandLogo.classList.add('hidden');
+    });
+  }
+
   if (refs.legalLinks) {
     refs.legalLinks.classList.remove('hidden');
     for (const item of legalLinks) {
@@ -435,9 +461,6 @@ export function mountHub(options = {}) {
   function setBusy(next) {
     isBusy = Boolean(next);
     for (const button of root.querySelectorAll('button')) {
-      if (button === refs.refreshBtn) {
-        continue;
-      }
       button.disabled = isBusy;
     }
   }
@@ -554,8 +577,8 @@ export function mountHub(options = {}) {
     const isRestricted = Boolean(state.viewerBlocked && !state.viewerVerifiedByFlair);
 
     applyTheme(state.resolvedTheme);
-    refs.metaSubreddit.textContent = `Subreddit: r/${state.subredditName || ''}`;
     refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
+    refs.metaSubreddit.textContent = state.subredditName ? `Subreddit: r/${state.subredditName}` : '';
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
@@ -574,22 +597,48 @@ export function mountHub(options = {}) {
     } else {
       refs.metaStatus.classList.add('status-danger');
     }
-    refs.metaStatus.textContent = `Status: ${statusText}`;
+    refs.metaStatus.textContent = statusText;
 
     refs.pendingBadge.textContent = state.pendingCount > 99 ? '99+' : String(state.pendingCount || 0);
     refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
     refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
 
+    let commandTitle = 'Review the instructions, then choose your next step.';
     let infoText = '';
     if (!state.viewerVerifiedByFlair && !isRestricted && !state.config.verificationsEnabled) {
+      commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
     } else if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
+      commandTitle = state.userLatest.parentVerificationId ? 'Pending moderator re-review' : 'Pending moderator review';
       infoText = state.userLatest.parentVerificationId
         ? 'Your verification is pending moderator re-review.'
         : 'Your verification is pending moderator review.';
     } else if (!state.viewerVerifiedByFlair && isRestricted) {
+      commandTitle = 'Verification submissions are blocked';
       infoText = 'You cannot submit a verification request.';
+    } else if (state.viewerVerifiedByFlair) {
+      commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
+      if (state.userLatest?.reviewedAt) {
+        infoText = `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`;
+      }
+    } else if (state.userLatest?.status === 'denied') {
+      commandTitle = 'Ready to resubmit';
+      const parts = [];
+      if (state.userLatest.reviewedAt) {
+        parts.push(`Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`);
+      }
+      if (state.userLatest.denyReason) {
+        parts.push(`Reason: ${getDenyReasonLabel(state, state.userLatest.denyReason)}.`);
+      }
+      infoText = parts.join(' ');
+    } else if (state.userLatest?.status === 'removed') {
+      commandTitle = 'Verification removed';
+      if (state.userLatest.removedAt) {
+        infoText = `Removed ${formatTimestamp(state.userLatest.removedAt)}.`;
+      }
     }
+
+    refs.commandTitle.textContent = commandTitle;
     refs.infoMsg.textContent = infoText;
     refs.infoMsg.classList.toggle('hidden', !infoText);
 
@@ -633,31 +682,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if ((!isRestricted || state.viewerVerifiedByFlair) && state.userLatest) {
-      const statusLabel =
-        state.userLatest.status === 'removed'
-          ? 'REVOKED'
-          : state.userLatest.status === 'pending' && state.userLatest.parentVerificationId
-            ? 'PENDING (RE-REVIEW)'
-            : state.userLatest.status.toUpperCase();
-      const pieces = [
-        `<p><strong>Latest submission status:</strong> ${statusLabel}</p>`,
-        `<p>Submitted: ${formatTimestamp(state.userLatest.submittedAt)}</p>`,
-      ];
-      if (state.userLatest.reviewedAt) {
-        pieces.push(`<p>Reviewed: ${formatTimestamp(state.userLatest.reviewedAt)}</p>`);
-      }
-      if (state.userLatest.status === 'denied' && state.userLatest.denyReason) {
-        pieces.push(`<p>Reason: ${escapeHtml(getDenyReasonLabel(state, state.userLatest.denyReason))}</p>`);
-      }
-      refs.submissionBox.innerHTML = pieces.join('');
-      refs.submissionBox.classList.remove('hidden');
-    } else if (!isRestricted || state.viewerVerifiedByFlair) {
-      refs.submissionBox.innerHTML = '<p>No verification submission yet.</p>';
-      refs.submissionBox.classList.remove('hidden');
-    } else {
-      refs.submissionBox.classList.add('hidden');
-    }
+    refs.actionRow.classList.toggle('hidden', refs.actionRow.childElementCount === 0);
   }
 
   function applyPayload(payload) {
@@ -706,10 +731,6 @@ export function mountHub(options = {}) {
       void refreshState({ silent: true });
     }, AUTO_REFRESH_INTERVAL_MS);
   }
-
-  refs.refreshBtn.addEventListener('click', () => {
-    void refreshState();
-  });
 
   refs.modPanelBtn.addEventListener('click', (event) => {
     if (inline) {
