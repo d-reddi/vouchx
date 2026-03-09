@@ -57,6 +57,7 @@ type VerificationRecord = {
   terminalValidationFailureCount?: number;
   lastTtlBumpAt?: number | null;
   lastAppliedFlairTemplateId?: string | null;
+  lastFlairReconcileAt?: number | null;
 };
 
 type AuditLogEntry = {
@@ -74,6 +75,7 @@ type AuditLogEntry = {
 type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
+  autoFlairReconcileEnabled: boolean;
   requiredPhotoCount: number;
   photoInstructions: string;
   denyReasons: DenyReasonConfig[];
@@ -428,9 +430,11 @@ const AUDIT_RETENTION_DAYS = 45;
 const VERIFIED_RECORD_RETENTION_DAYS = 45;
 const VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS = MILLIS_PER_DAY;
 const FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS = MILLIS_PER_DAY;
+const VIEWER_FLAIR_RECONCILE_INTERVAL_MS = MILLIS_PER_DAY;
 const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
+const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
@@ -980,6 +984,7 @@ async function submitVerification(
     validationFailureCount: 0,
     terminalValidationFailureCount: 0,
     lastTtlBumpAt: null,
+    lastFlairReconcileAt: null,
   };
 
   await setRecord(context, subredditId, record);
@@ -1585,6 +1590,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     terminalValidationFailureCount: 0,
     lastTtlBumpAt: Date.now(),
     lastAppliedFlairTemplateId: normalizeTemplateId(config.flairTemplateId),
+    lastFlairReconcileAt: null,
   };
   const validationScheduledRecord = applyValidationSchedule(reviewedRecord, Date.now());
 
@@ -1802,6 +1808,7 @@ async function denyVerification(
     hardExpireAt: null,
     validationFailureCount: 0,
     terminalValidationFailureCount: 0,
+    lastFlairReconcileAt: null,
   };
 
   await setRecord(context, subredditId, reviewedRecord);
@@ -1949,6 +1956,7 @@ async function reopenDeniedVerification(
     hardExpireAt: null,
     validationFailureCount: 0,
     terminalValidationFailureCount: 0,
+    lastFlairReconcileAt: null,
   };
 
   await setRecord(context, subredditId, reopenedRecord);
@@ -2508,10 +2516,25 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
       };
 
   if (
+    config.autoFlairReconcileEnabled &&
     viewerUsername &&
     userLatest &&
+    isViewerFlairReconcileDue(userLatest, Date.now()) &&
     shouldReconcileApprovedViewerFlair(userLatest, config, flairCheck, viewerFlairSnapshot)
   ) {
+    const reconcileAttemptedAt = Date.now();
+    const stampedUserLatest: VerificationRecord = {
+      ...userLatest,
+      lastFlairReconcileAt: reconcileAttemptedAt,
+    };
+    try {
+      await setRecord(context, subredditId, stampedUserLatest);
+      userLatest = stampedUserLatest;
+    } catch (error) {
+      console.log(
+        `Viewer flair reconcile timestamp update failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${errorText(error)}`
+      );
+    }
     const previousAppliedTemplateId = normalizeTemplateId(userLatest.lastAppliedFlairTemplateId ?? '');
     const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
     const detectedTemplateIdBeforeReconcile = normalizeTemplateId(
@@ -2543,6 +2566,7 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
           const refreshedUserLatest: VerificationRecord = {
             ...userLatest,
             lastAppliedFlairTemplateId: updatedTemplateId,
+            lastFlairReconcileAt: reconcileAttemptedAt,
           };
           await setRecord(context, subredditId, refreshedUserLatest);
           userLatest = refreshedUserLatest;
@@ -2777,6 +2801,17 @@ function shouldReconcileApprovedViewerFlair(
   }
 
   return lastAppliedTemplateId !== configuredTemplateId;
+}
+
+function isViewerFlairReconcileDue(record: VerificationRecord, nowMs: number): boolean {
+  const lastFlairReconcileAt =
+    typeof record.lastFlairReconcileAt === 'number' && Number.isFinite(record.lastFlairReconcileAt)
+      ? Math.max(0, Math.floor(record.lastFlairReconcileAt))
+      : 0;
+  if (lastFlairReconcileAt > 0 && nowMs - lastFlairReconcileAt < VIEWER_FLAIR_RECONCILE_INTERVAL_MS) {
+    return false;
+  }
+  return true;
 }
 
 function isManualFlairVerificationSource(source: string): boolean {
@@ -4217,11 +4252,18 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const key = subredditConfigKey(subredditId);
   const stored = await context.redis.hGetAll(key);
   const rawVerificationsDisabledMessage = await context.settings.get<string>(INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE);
+  const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
+  );
   const verificationsDisabledMessage = normalizeInstallSettingMessage(
     rawVerificationsDisabledMessage,
     VERIFICATIONS_DISABLED_MESSAGE,
     MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH
   );
+  const autoFlairReconcileEnabled =
+    typeof rawAutoFlairReconcileEnabled === 'boolean'
+      ? rawAutoFlairReconcileEnabled
+      : parseBooleanString(rawAutoFlairReconcileEnabled, true);
   const pendingTurnaroundRaw = firstNonEmpty(stored[CONFIG_FIELD.pendingTurnaroundDays]);
   const pendingTurnaroundDays = parsePositiveInt(pendingTurnaroundRaw, DEFAULT_PENDING_TURNAROUND_DAYS);
   const approveBodyRaw = firstNonEmpty(stored[CONFIG_FIELD.approveBody]) ?? DEFAULT_APPROVE_BODY;
@@ -4240,6 +4282,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   return {
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
+    autoFlairReconcileEnabled,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
     denyReasons,
@@ -4448,6 +4491,10 @@ function parseRecord(payload: string): VerificationRecord | null {
       lastAppliedFlairTemplateId:
         typeof parsed.lastAppliedFlairTemplateId === 'string'
           ? normalizeTemplateId(parsed.lastAppliedFlairTemplateId)
+          : null,
+      lastFlairReconcileAt:
+        typeof parsed.lastFlairReconcileAt === 'number' && Number.isFinite(parsed.lastFlairReconcileAt)
+          ? Math.max(0, Math.floor(parsed.lastFlairReconcileAt))
           : null,
     };
   } catch {
@@ -5624,6 +5671,7 @@ export {
   assertCanReview,
   DENY_REASON_INSTALL_SETTINGS,
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
+  INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
   INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
   INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
   MAX_DENY_REASON_LABEL_LENGTH,

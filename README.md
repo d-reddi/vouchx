@@ -2,30 +2,12 @@
 
 **A moderator-reviewed photo verification system for Reddit communities.**
 
-Members submit photos for review, and moderators manage approvals through a structured verification panel with queues, templates, and audit history.
+VouchX provides a structured system for managing photo verification submissions inside Reddit.
 
-VouchX helps communities run organized verification workflows directly inside a subreddit post without relying on modmail threads, spreadsheets, or manual tracking.
+Members submit photos for moderator review, and moderators manage approvals through a centralized moderation panel.
 
-📷 **Screenshots and workflow demos:**  
-https://www.reddit.com/r/vouchx/wiki/demo/
+The app provides:
 
-## Help Wiki Drafts
-
-Task-based help pages for publishing live in [`docs/wiki/README.md`](docs/wiki/README.md).
-
-Recommended reading order:
-
-- [`home.md`](docs/wiki/home.md)
-- [`moderator-quick-start.md`](docs/wiki/moderator-quick-start.md)
-- [`member-guide.md`](docs/wiki/member-guide.md)
-- [`moderator-guide.md`](docs/wiki/moderator-guide.md)
-- [`settings-reference.md`](docs/wiki/settings-reference.md)
-- [`troubleshooting.md`](docs/wiki/troubleshooting.md)
-
-
-# Features
-
-- Moderator-reviewed photo verification
 - Inline verification hub post
 - Moderator review queue with claim locking
 - Automated modmail templates
@@ -36,20 +18,12 @@ Recommended reading order:
 
 ---
 
-# What VouchX Does
+**Screenshots and workflow demos:**  
+https://www.reddit.com/r/vouchx/wiki/demo/
 
-VouchX provides a structured system for managing photo verification submissions inside Reddit.
+## Setup, Documentation & Help
+https://www.reddit.com/r/vouchx/wiki/guide/
 
-Members submit photos for moderator review, and moderators manage approvals through a centralized moderation panel.
-
-The app provides:
-
-- photo submission workflows
-- moderator review queues
-- approval and denial templates
-- verification flair integration
-- moderation audit history
-- automated moderation messages
 
 ---
 
@@ -369,3 +343,9 @@ Users may:
 - remove their own verification
 
 These actions delete the user’s verification records and associated audit entries.
+
+---
+
+# Change Log
+
+1.0.6 - Initial Release
