@@ -11,7 +11,7 @@
     "check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@devvit/public-api": "^0.12.13",
+    "@devvit/public-api": "^0.12.14",
     "@types/node": "^22.10.5",
     "typescript": "5.8.3"
   },
@@ -19,8 +19,8 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@devvit/start": "^0.12.13",
-    "@devvit/web": "^0.12.13",
+    "@devvit/start": "^0.12.14",
+    "@devvit/web": "^0.12.14",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "vite": "^7.3.1"

@@ -56,7 +56,7 @@ If submissions are disabled, users will see the configured disabled message.
 
 # Moderator Experience
 
-Moderators manage submissions through an expanded moderator panel.
+Moderators manage submissions through an expanded moderator panel. If a verificaiton is pending, a red bubble appears at the top right of the hub UI. 
 
 The moderator panel includes:
 
@@ -348,4 +348,4 @@ These actions delete the user’s verification records and associated audit entr
 
 # Change Log
 
-1.0.6 - Initial Release
+1.0.8 - Initial Release
