@@ -9,6 +9,19 @@ VouchX helps communities run organized verification workflows directly inside a 
 📷 **Screenshots and workflow demos:**  
 https://www.reddit.com/r/vouchx/wiki/demo/
 
+## Help Wiki Drafts
+
+Task-based help pages for publishing live in [`docs/wiki/README.md`](docs/wiki/README.md).
+
+Recommended reading order:
+
+- [`home.md`](docs/wiki/home.md)
+- [`moderator-quick-start.md`](docs/wiki/moderator-quick-start.md)
+- [`member-guide.md`](docs/wiki/member-guide.md)
+- [`moderator-guide.md`](docs/wiki/moderator-guide.md)
+- [`settings-reference.md`](docs/wiki/settings-reference.md)
+- [`troubleshooting.md`](docs/wiki/troubleshooting.md)
+
 
 # Features
 
