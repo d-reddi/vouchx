@@ -101,35 +101,9 @@
           </div>
           <div class="content-card">
             <div class="subtabs segmented-control">
-              <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
               <button id="history-view-approved" class="btn btn-secondary history-view-btn" data-history-view="approved">Approved</button>
+              <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
               <button id="history-view-audit" class="btn btn-secondary history-view-btn" data-history-view="audit">Audit</button>
-            </div>
-
-            <div id="history-panel-records" class="history-view-panel">
-              <div class="field-grid history-field-grid history-field-grid-records">
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-user">Username prefix</label>
-                  <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-from">From date</label>
-                  <input id="history-search-from" class="field-input" type="date" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-to">To date</label>
-                  <input id="history-search-to" class="field-input" type="date" />
-                </div>
-              </div>
-              <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <div class="row">
-                <button id="history-search-btn" class="btn btn-primary">Search</button>
-                <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
-              </div>
-              <div id="history-search-results" class="stack"></div>
-              <div class="row">
-                <button id="history-load-more-btn" class="btn btn-secondary hidden">Load More</button>
-              </div>
             </div>
 
             <div id="history-panel-approved" class="history-view-panel hidden">
@@ -155,6 +129,32 @@
               <div id="approved-search-results" class="stack"></div>
               <div class="row">
                 <button id="approved-load-more-btn" class="btn btn-secondary hidden">Load More</button>
+              </div>
+            </div>
+
+            <div id="history-panel-records" class="history-view-panel">
+              <div class="field-grid history-field-grid history-field-grid-records">
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-user">Username prefix</label>
+                  <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-from">From date</label>
+                  <input id="history-search-from" class="field-input" type="date" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-to">To date</label>
+                  <input id="history-search-to" class="field-input" type="date" />
+                </div>
+              </div>
+              <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
+              <div class="row">
+                <button id="history-search-btn" class="btn btn-primary">Search</button>
+                <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
+              </div>
+              <div id="history-search-results" class="stack"></div>
+              <div class="row">
+                <button id="history-load-more-btn" class="btn btn-secondary hidden">Load More</button>
               </div>
             </div>
 
