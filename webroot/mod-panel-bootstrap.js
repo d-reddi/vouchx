@@ -6,19 +6,18 @@
 
   const apply = (tokens) => {
     if (!tokens || typeof tokens !== 'object') return;
-    root.style.setProperty('--primary', tokens.primary);
-    root.style.setProperty('--accent', tokens.accent);
-    root.style.setProperty('--success', tokens.success);
-    root.style.setProperty('--danger', tokens.danger);
-    root.style.setProperty('--bg', tokens.bg);
-    root.style.setProperty('--card', tokens.surface);
-    root.style.setProperty('--text', tokens.text);
-    root.style.setProperty('--muted', tokens.mutedText);
-    root.style.setProperty('--line', tokens.border);
+    root.style.setProperty('--theme-primary', tokens.primary);
+    root.style.setProperty('--theme-primary-strong', tokens.primary);
+    root.style.setProperty('--theme-accent', tokens.accent);
+    root.style.setProperty('--theme-success', tokens.success);
+    root.style.setProperty('--theme-danger', tokens.danger);
+    root.style.setProperty('--theme-bg', tokens.bg);
+    root.style.setProperty('--theme-surface', tokens.surface);
+    root.style.setProperty('--theme-text', tokens.text);
+    root.style.setProperty('--theme-muted', tokens.mutedText);
+    root.style.setProperty('--theme-border', tokens.border);
   };
 
-  const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-  const mode = media && media.matches ? 'dark' : 'light';
   let palette = null;
 
   try {
@@ -33,7 +32,7 @@
     // Best-effort only.
   }
 
-  if (palette && palette[mode]) {
-    apply(palette[mode]);
+  if (palette) {
+    apply(palette.dark || palette.light);
   }
 })();
