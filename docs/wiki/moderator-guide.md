@@ -5,12 +5,12 @@ This page covers the day-to-day moderation workflow.
 ## Access rules
 
 - Moderators need `Manage Users` to use the moderator panel.
-- The panel opens from the verification hub post with `Open Moderator Panel`.
+- The panel opens from the verification hub post with `Mod Panel`.
 - The panel updates in realtime when actions happen. Unsaved review drafts are preserved across refreshes.
 
-## Pending tab
+## Queue tab
 
-Use `Pending` to review new requests.
+Use `Queue` to review new requests.
 
 If the list does not appear, save a valid value in `Flair template ID to set` under `Settings` first.
 
@@ -39,7 +39,7 @@ Approving a pending request:
 
 - applies the configured flair
 - marks the record approved
-- removes the request from `Pending`
+- removes the request from `Queue`
 - sends approval modmail
 - writes a moderator note
 - adds history and audit entries

@@ -4,13 +4,13 @@ This page collects common issues, operational limits, and retention behavior.
 
 ## Common setup issues
 
-### `Open Moderator Panel` is missing
+### `Mod Panel` is missing
 
 The current account probably does not have `Manage Users` in that subreddit.
 
-### Pending requests do not appear
+### Queue requests do not appear
 
-Check `Settings` and confirm `Flair template ID to set` is saved. VouchX hides pending review cards until this field is configured.
+Check `Settings -> General` and confirm `Flair template ID` is saved. VouchX hides queue review cards until this field is configured.
 
 ### Saving verification settings fails
 
@@ -44,7 +44,7 @@ A block stops new submissions. If the user is still showing as verified, check w
 
 ### User says they are verified but status is wrong
 
-VouchX determines verified status from live flair detection. It checks the configured flair template ID and can also fall back to the optional CSS matcher.
+VouchX determines verified status from live flair detection. It checks the configured flair template ID and can also fall back to the optional CSS substring matcher.
 
 ### User wants to remove their data
 

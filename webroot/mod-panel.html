@@ -280,12 +280,19 @@
                     </select>
                   </div>
                 </div>
-                <p class="muted small">Controls how many upload fields users see in the submit form.</p>
+                <p class="muted small field-help">Controls how many upload fields users see in the submit form.</p>
 
-                <label class="field-label" for="photo-instructions">Photo instructions</label>
+                <label class="minor-heading field-subsection-heading" for="photo-instructions">Photo instructions</label>
                 <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
-                <p class="muted small">
-                  Shown in the dashboard before a user opens the upload form. Markdown is supported. Placeholders: {{subreddit}}, {{days}}.
+                <p class="muted small field-help">
+                  Instructions shown when user presses photo instructions.
+                  <a
+                    id="markdown-guide-link"
+                    href="https://support.reddithelp.com/hc/en-us/articles/360043033952-Formatting-Guide#h_01HEK5SNJM44XVSJFH0BT5QS9X"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >Markdown</a>
+                  is supported. Placeholders: {{subreddit}}, {{days}}.
                 </p>
               </div>
 
