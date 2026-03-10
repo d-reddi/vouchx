@@ -23,15 +23,15 @@ Use this wiki in this order:
 ### Moderators
 
 - Use the subreddit menu item `Create Verification Hub (VouchX)` to create the post.
-- Open the post and click `Open Moderator Panel`.
+- Open the post and click `Mod Panel`.
 - Configure the flair template ID before trying to review the queue.
-- Review pending submissions, manage blocked users, search history, and customize messages and themes.
+- Review queue submissions, manage blocked users, search history, and customize settings, templates, and themes.
 
 ## Important prerequisites
 
 - The review panel is only available to moderators with `Manage Users`.
 - The install settings link is only shown to moderators with `All` permissions.
-- The pending queue is hidden until a valid flair template ID is saved in `Verification Settings`.
+- Queue review cards are hidden until a valid flair template ID is saved in `Settings -> General`.
 - Denial reasons come from install settings. If a denial label is blank, that reason is hidden from the review and template UI.
 
 ## Related pages

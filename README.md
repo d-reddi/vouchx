@@ -35,7 +35,7 @@ Users can:
 
 - submit photos for moderator review
 - review photo instructions before submitting
-- resubmit verification if denied (Moderators see "resubmitted" on the pending card if the user is resubitting)
+- resubmit verification if denied (moderators see "resubmitted" on the pending card if the user is resubmitting)
 - withdraw a pending request
 - remove their own verification if they choose
 
@@ -56,16 +56,14 @@ If submissions are disabled, users will see the configured disabled message.
 
 # Moderator Experience
 
-Moderators manage submissions through an expanded moderator panel. If a verificaiton is pending, a red bubble appears at the top right of the hub UI. 
+Moderators manage submissions through an expanded moderator panel. If a verification is pending, a red bubble appears at the top right of the hub UI.
 
 The moderator panel includes:
 
-- **Pending** — submissions awaiting review  
-- **Blocked** — users prevented from submitting  
-- **History** — past verification activity  
-- **Settings** — verification configuration  
-- **Templates** — automated messaging templates  
-- **Themes** — interface customization  
+- **Queue** — submissions awaiting review
+- **History** — records, approved users, and audit activity
+- **Blocked** — users prevented from submitting
+- **Settings** — general verification settings, templates, and themes
 
 Pending submissions support **claim locking**, ensuring multiple moderators do not act on the same request simultaneously.
 
@@ -82,11 +80,11 @@ Getting started takes less than a minute.
 1. Install **VouchX** in your subreddit.
 2. Use the moderator menu action **Create Verification Hub (NSFW)**.
 3. Open the created post.
-4. Click **Open Moderator Panel**.
+4. Click **Mod Panel**.
 5. Configure verification settings:
 
 - enable or disable submissions
-- set the verification flair template (On desktop: In Mod tools sub settings, go to Look & Feel > user flair > hover over the flair and click copy ID, then plaste this in the verification flair template.)
+- set the verification flair template ID (On desktop: in Mod Tools, go to Look & Feel > User Flair, hover over the flair, click Copy ID, then paste it into the verification flair template field.)
 - choose required photo count
 - configure photo instructions
 
@@ -121,7 +119,7 @@ Verification status is determined using live subreddit flair detection rather th
 The app checks:
 
 - flair template ID
-- optional flair CSS matcher
+- optional flair CSS substring matcher
 - fallback flair text matching when necessary
 
 The app also performs flair reconciliation for approved users when a stored flair appears outdated compared to the currently configured template.
@@ -155,18 +153,18 @@ Leaving a denial label blank hides that reason in the moderator interface.
 
 ## Moderator Panel Settings
 
-### Verification Settings
+### Settings > General
 
 Moderators can configure:
 
 - enable or disable submissions
 - verification flair template ID
-- optional flair CSS matcher
+- optional flair CSS matcher (substring match against live flair CSS classes)
 - required photo count
-- photo instructions (markdown)
+- photo instructions (Markdown shown when the user presses `Photo Instructions`)
 - estimated storage usage
 
-### Templates
+### Settings > Templates
 
 Automated messaging templates include:
 
@@ -177,7 +175,7 @@ Automated messaging templates include:
 
 Templates are customizable per subreddit.
 
-### Themes
+### Settings > Themes
 
 Interface appearance can be customized using:
 
@@ -348,11 +346,13 @@ These actions delete the user’s verification records and associated audit entr
 
 # Changelog
 
-## v1.1.0
+## v1.1.2
 
 - critical fix: initialize the daily retention / validation scheduler from live dashboard loads so subreddit installs do not miss scheduled cleanup
 - refine the moderator panel into a cleaner dark dashboard layout with better mobile workflow and queue prioritization
 - fix stale moderator history / approved / audit views after moderation actions
+- fix history, approved, and audit search consistency after approve, deny, remove, and reopen flows
+- fix history search date-window and pagination behavior so records do not disappear or duplicate after search
 - refresh the verification hub after stale withdraw attempts when the pending request has already been resolved
 - update the optional flair CSS matcher to use substring matching
 

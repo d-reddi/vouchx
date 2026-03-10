@@ -21,12 +21,12 @@ This page is for first-time setup.
 ### 2. Open the moderator panel
 
 1. Open the new verification hub post.
-2. Click `Open Moderator Panel`.
+2. Click `Mod Panel`.
 3. If you do not see the button, confirm the account has `Manage Users`.
 
 ### 3. Configure verification settings first
 
-Open the `Settings` tab and save these before processing the queue:
+Open `Settings -> General` and save these before processing the queue:
 
 - `Flair template ID to set`: paste the template ID for the verification flair you want VouchX to apply. If you do not already have a verification flair, use the appendix at the end of this page to create one first.
 - `Required verification photos` (# of photos defaults to 2)
@@ -50,7 +50,7 @@ If a denial label is blank, that denial reason and its template field disappear 
 
 ## 5. Customize modmail templates
 
-Open the `Templates` tab and set:
+Open `Settings -> Templates` and set:
 
 - modmail subject and pending body
 - approval header and body
@@ -62,7 +62,7 @@ All template fields are required for enabled features.
 
 ## 6. Optional: choose a theme
 
-Open the `Themes` tab to pick a preset or enable custom colors.
+Open `Settings -> Themes` to pick a preset or enable custom colors.
 
 ## 7. Test the flow
 
@@ -72,7 +72,7 @@ Run one full submission with a **non-moderator** account:
 2. Click `Photo Instructions`.
 3. Click `Submit Verification`.
 4. Accept all acknowledgements and upload the required photos.
-5. Return to the moderator panel and verify that the request appears in `Pending`.
+5. Return to the moderator panel and verify that the request appears in `Queue`.
 6. Approve or deny the request and confirm flair, modmail, mod note, and history behavior.
 
 ## Launch checklist
