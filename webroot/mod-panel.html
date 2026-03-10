@@ -7,51 +7,85 @@
     <script type="module" src="mod-panel-bootstrap.js"></script>
     <link rel="stylesheet" href="mod-panel.css" />
   </head>
-  <body>
+  <body class="mod-panel-page">
     <div class="app-shell">
-      <header class="hero card">
+      <header class="hero">
         <div class="hero-row">
-          <h1>Verification Moderator Panel</h1>
-          <div class="row">
-            <button id="back-to-hub-btn" class="btn btn-secondary">Back to Verification Hub</button>
+          <div class="panel-heading">
+            <p class="panel-kicker">VouchX</p>
+            <h1>Verification moderator panel</h1>
+            <p class="panel-subtitle">Review the queue, audit past decisions, and manage verification workflows from one workspace.</p>
+          </div>
+          <div class="row hero-actions">
+            <button id="back-to-hub-btn" class="btn btn-quiet">Back to Verification Hub</button>
             <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
           </div>
         </div>
-        <p id="hero-meta" class="muted">Loading moderator data...</p>
+        <div class="header-meta" aria-live="polite">
+          <div class="meta-block">
+            <span class="meta-label">Subreddit</span>
+            <span id="hero-subreddit" class="meta-value">Loading...</span>
+          </div>
+          <div class="meta-block">
+            <span class="meta-label">Queue</span>
+            <span id="hero-queue-status" class="meta-value">Loading...</span>
+          </div>
+          <div class="meta-block">
+            <span class="meta-label">Updated</span>
+            <span id="hero-updated" class="meta-value">Waiting for sync</span>
+          </div>
+        </div>
       </header>
 
-      <nav class="tabs card">
-        <button class="tab-btn tab-btn-active" data-tab="pending">Pending</button>
-        <button class="tab-btn" data-tab="blocked">Blocked</button>
+      <nav class="tabs primary-tabs" aria-label="Moderator navigation">
+        <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>
+        <button class="tab-btn" data-tab="blocked">Blocked</button>
         <button class="tab-btn" data-tab="settings">Settings</button>
-        <button class="tab-btn" data-tab="templates">Templates</button>
-        <button class="tab-btn" data-tab="themes">Themes</button>
       </nav>
 
       <main id="main-content" class="hidden">
         <section id="tab-pending" class="tab-panel">
-          <div class="card">
-            <h2>Pending Verifications</h2>
-            <label class="field-label" for="pending-search-user">Filter by username</label>
-            <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
-            <label class="field-label">SLA filter</label>
-            <div class="row">
-              <button id="pending-sla-all" class="btn btn-primary pending-sla-btn" data-sla="all">All</button>
-              <button id="pending-sla-lt24" class="btn btn-secondary pending-sla-btn" data-sla="lt24">&lt;24h</button>
-              <button id="pending-sla-24to72" class="btn btn-secondary pending-sla-btn" data-sla="24to72">24-72h</button>
-              <button id="pending-sla-gt72" class="btn btn-secondary pending-sla-btn" data-sla="gt72">&gt;72h</button>
+          <div class="section-head queue-section-head">
+            <div>
+              <h2>Queue</h2>
+              <p class="section-copy muted">Review pending verification requests, lock work in progress, and respond quickly.</p>
             </div>
-            <div id="pending-list" class="stack"></div>
+          </div>
+          <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
+            <div class="content-card queue-filter-card">
+              <div class="toolbar-grid">
+                <div class="field-stack toolbar-group">
+                  <p class="group-kicker">Filter</p>
+                  <label class="field-label" for="pending-search-user">Username</label>
+                  <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
+                </div>
+                <div class="field-stack toolbar-group toolbar-group-compact">
+                  <p class="group-kicker">Queue age</p>
+                  <div class="row button-row filter-chip-row">
+                    <button id="pending-sla-all" class="btn btn-primary pending-sla-btn" data-sla="all">All</button>
+                    <button id="pending-sla-lt24" class="btn btn-secondary pending-sla-btn" data-sla="lt24">&lt;24h</button>
+                    <button id="pending-sla-24to72" class="btn btn-secondary pending-sla-btn" data-sla="24to72">24-72h</button>
+                    <button id="pending-sla-gt72" class="btn btn-secondary pending-sla-btn" data-sla="gt72">&gt;72h</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="content-card queue-list-card">
+              <div id="pending-list" class="stack"></div>
+            </div>
           </div>
         </section>
 
         <section id="tab-blocked" class="tab-panel hidden">
-          <div class="card">
-            <div class="hero-row">
-              <h2>Blocked Users</h2>
-              <button id="block-user-btn" class="btn btn-primary">Block User</button>
+          <div class="section-head">
+            <div>
+              <h2>Blocked users</h2>
+              <p class="section-copy muted">Review manual blocks and users who reached the denial threshold.</p>
             </div>
+            <button id="block-user-btn" class="btn btn-primary">Block user</button>
+          </div>
+          <div class="content-card">
             <label class="field-label" for="blocked-search">Search blocked users</label>
             <input id="blocked-search" class="field-input" type="text" placeholder="Search username or reason" />
             <div id="blocked-list" class="stack"></div>
@@ -59,40 +93,35 @@
         </section>
 
         <section id="tab-history" class="tab-panel hidden">
-          <div class="card">
-            <h2>History</h2>
-            <div class="row">
-              <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
+          <div class="section-head">
+            <div>
+              <h2>History</h2>
+              <p class="section-copy muted">Search verification records, approved members, and the moderator audit trail.</p>
+            </div>
+          </div>
+          <div class="content-card">
+            <div class="subtabs segmented-control">
               <button id="history-view-approved" class="btn btn-secondary history-view-btn" data-history-view="approved">Approved</button>
+              <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
               <button id="history-view-audit" class="btn btn-secondary history-view-btn" data-history-view="audit">Audit</button>
             </div>
 
-            <div id="history-panel-records" class="history-view-panel">
-              <label class="field-label" for="history-search-user">Username prefix</label>
-              <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
-              <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <label class="field-label" for="history-search-from">From (submitted date)</label>
-              <input id="history-search-from" class="field-input" type="date" />
-              <label class="field-label" for="history-search-to">To (submitted date)</label>
-              <input id="history-search-to" class="field-input" type="date" />
-              <div class="row">
-                <button id="history-search-btn" class="btn btn-primary">Search</button>
-                <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
-              </div>
-              <div id="history-search-results" class="stack"></div>
-              <div class="row">
-                <button id="history-load-more-btn" class="btn btn-secondary hidden">Load More</button>
-              </div>
-            </div>
-
             <div id="history-panel-approved" class="history-view-panel hidden">
-              <label class="field-label" for="approved-search-user">Username prefix</label>
-              <input id="approved-search-user" class="field-input" type="text" placeholder="username (optional)" />
+              <div class="field-grid history-field-grid history-field-grid-approved">
+                <div class="field-stack">
+                  <label class="field-label" for="approved-search-user">Username prefix</label>
+                  <input id="approved-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="approved-search-from">From date</label>
+                  <input id="approved-search-from" class="field-input" type="date" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="approved-search-to">To date</label>
+                  <input id="approved-search-to" class="field-input" type="date" />
+                </div>
+              </div>
               <p id="approved-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <label class="field-label" for="approved-search-from">From (approved date)</label>
-              <input id="approved-search-from" class="field-input" type="date" />
-              <label class="field-label" for="approved-search-to">To (approved date)</label>
-              <input id="approved-search-to" class="field-input" type="date" />
               <div class="row">
                 <button id="approved-search-btn" class="btn btn-primary">Search</button>
                 <button id="approved-clear-btn" class="btn btn-secondary">Clear</button>
@@ -103,14 +132,54 @@
               </div>
             </div>
 
-            <div id="history-panel-audit" class="history-view-panel hidden">
-              <label class="field-label" for="audit-search-user">Username prefix</label>
-              <input id="audit-search-user" class="field-input" type="text" placeholder="username (optional)" />
-              <label class="field-label" for="audit-search-actor">Actor (moderator)</label>
-              <input id="audit-search-actor" class="field-input" type="text" placeholder="actor username (optional)" />
-              <p id="audit-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <label class="field-label">Action filter</label>
+            <div id="history-panel-records" class="history-view-panel">
+              <div class="field-grid history-field-grid history-field-grid-records">
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-user">Username prefix</label>
+                  <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-from">From date</label>
+                  <input id="history-search-from" class="field-input" type="date" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="history-search-to">To date</label>
+                  <input id="history-search-to" class="field-input" type="date" />
+                </div>
+              </div>
+              <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
               <div class="row">
+                <button id="history-search-btn" class="btn btn-primary">Search</button>
+                <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
+              </div>
+              <div id="history-search-results" class="stack"></div>
+              <div class="row">
+                <button id="history-load-more-btn" class="btn btn-secondary hidden">Load More</button>
+              </div>
+            </div>
+
+            <div id="history-panel-audit" class="history-view-panel hidden">
+              <div class="field-grid history-field-grid history-field-grid-audit">
+                <div class="field-stack">
+                  <label class="field-label" for="audit-search-user">Username prefix</label>
+                  <input id="audit-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="audit-search-actor">Moderator</label>
+                  <input id="audit-search-actor" class="field-input" type="text" placeholder="actor username (optional)" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="audit-search-from">From date</label>
+                  <input id="audit-search-from" class="field-input" type="date" />
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="audit-search-to">To date</label>
+                  <input id="audit-search-to" class="field-input" type="date" />
+                </div>
+              </div>
+              <p id="audit-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
+              <label class="field-label">Action</label>
+              <div class="row button-row filter-chip-row">
                 <button id="audit-action-all" class="btn btn-primary audit-action-btn" data-audit-action="all">All</button>
                 <button id="audit-action-approved" class="btn btn-secondary audit-action-btn" data-audit-action="approved">Approved</button>
                 <button id="audit-action-denied" class="btn btn-secondary audit-action-btn" data-audit-action="denied">Denied</button>
@@ -119,10 +188,6 @@
                 <button id="audit-action-blocked" class="btn btn-secondary audit-action-btn" data-audit-action="blocked">Blocked</button>
                 <button id="audit-action-unblocked" class="btn btn-secondary audit-action-btn" data-audit-action="unblocked">Unblocked</button>
               </div>
-              <label class="field-label" for="audit-search-from">From (action date)</label>
-              <input id="audit-search-from" class="field-input" type="date" />
-              <label class="field-label" for="audit-search-to">To (action date)</label>
-              <input id="audit-search-to" class="field-input" type="date" />
               <div class="row">
                 <button id="audit-search-btn" class="btn btn-primary">Search</button>
                 <button id="audit-clear-btn" class="btn btn-secondary">Clear</button>
@@ -136,194 +201,304 @@
         </section>
 
         <section id="tab-settings" class="tab-panel hidden">
-          <div class="card">
-            <div class="hero-row">
-              <h2>Storage Usage (Estimated)</h2>
-              <p id="storage-percent" class="storage-percent">0.0%</p>
+          <div class="section-head">
+            <div>
+              <h2>Settings</h2>
+              <p class="section-copy muted">Configure verification workflow, modmail templates, and the user-facing theme.</p>
             </div>
-            <div class="storage-meter">
-              <div id="storage-meter-fill" class="storage-meter-fill"></div>
+          </div>
+          <nav class="settings-tabs" aria-label="Settings sections">
+            <button class="settings-tab-btn settings-tab-btn-active" data-settings-tab="general">General</button>
+            <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
+            <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
+          </nav>
+
+          <div id="settings-panel-general" class="settings-panel">
+            <div class="settings-grid">
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Storage</h3>
+                    <p class="section-copy muted small">Estimated Reddit storage usage for verification data in this subreddit.</p>
+                  </div>
+                  <p id="storage-percent" class="storage-percent">0.0%</p>
+                </div>
+                <div class="storage-meter">
+                  <div id="storage-meter-fill" class="storage-meter-fill"></div>
+                </div>
+                <p id="storage-summary" class="item-meta">Estimating usage...</p>
+                <p id="storage-breakdown" class="muted small"></p>
+              </div>
             </div>
-            <p id="storage-summary" class="item-meta">Estimating usage...</p>
-            <p id="storage-breakdown" class="muted small"></p>
+
+            <div class="content-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-heading">Verification workflow</h3>
+                  <p class="section-copy muted small">Control submission access, flair behavior, and submission requirements.</p>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <h4 class="minor-heading">Submission access</h4>
+                <label class="field-label" for="verifications-enabled">Verifications enabled</label>
+                <label class="toggle-row">
+                  <input id="verifications-enabled" type="checkbox" />
+                  <span>Allow users to submit verifications</span>
+                </label>
+                <p id="verifications-disabled-message-hint" class="muted small">
+                  When disabled, users see: "" Configurable in install settings for this subreddit.
+                </p>
+              </div>
+
+              <div class="form-section">
+                <h4 class="minor-heading">Flair behavior</h4>
+                <div class="field-grid">
+                  <div class="field-stack">
+                    <label class="field-label" for="flair-template-id">Flair template ID</label>
+                    <input id="flair-template-id" class="field-input" type="text" />
+                  </div>
+                  <div class="field-stack">
+                    <label class="field-label" for="flair-css-class">Flair CSS matcher (optional)</label>
+                    <input id="flair-css-class" class="field-input" type="text" />
+                  </div>
+                </div>
+                <p class="muted small">
+                  Verified status uses OR logic: template ID match or CSS substring match.
+                </p>
+              </div>
+
+              <div class="form-section">
+                <h4 class="minor-heading">Submission requirements</h4>
+                <div class="field-grid">
+                  <div class="field-stack">
+                    <label class="field-label" for="required-photo-count">Required verification photos</label>
+                    <select id="required-photo-count" class="field-select">
+                      <option value="1">1 photo</option>
+                      <option value="2">2 photos</option>
+                      <option value="3">3 photos</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="muted small">Controls how many upload fields users see in the submit form.</p>
+
+                <label class="field-label" for="photo-instructions">Photo instructions</label>
+                <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
+                <p class="muted small">
+                  Shown in the dashboard before a user opens the upload form. Markdown is supported. Placeholders: {{subreddit}}, {{days}}.
+                </p>
+              </div>
+
+              <div class="row section-actions">
+                <button id="save-flair-btn" class="btn btn-primary">Save settings</button>
+              </div>
+              <p id="install-settings-row" class="muted small hidden">
+                Install settings for this subreddit are available here:
+                <a id="install-settings-link" href="#" target="_blank" rel="noopener noreferrer">Open install settings</a>
+              </p>
+            </div>
           </div>
 
-          <div class="card">
-            <h2>Verification Settings</h2>
-            <label class="field-label" for="verifications-enabled">Verifications enabled</label>
-            <label class="toggle-row">
-              <input id="verifications-enabled" type="checkbox" />
-              <span>Allow users to submit verifications</span>
-            </label>
-            <p id="verifications-disabled-message-hint" class="muted small">
-              When disabled, users see: "" Configurable in install settings for this subreddit.
-            </p>
+          <div id="settings-panel-templates" class="settings-panel hidden">
+            <div class="settings-grid template-settings-grid">
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Pending review</h3>
+                    <p class="section-copy muted small">Used when verification is received and queued for moderators.</p>
+                  </div>
+                </div>
+                <div class="field-grid">
+                  <div class="field-stack">
+                    <label class="field-label" for="modmail-subject">Modmail subject</label>
+                    <input id="modmail-subject" class="field-input" type="text" />
+                  </div>
+                  <div class="field-stack">
+                    <label class="field-label" for="pending-turnaround-days">Pending turnaround (days)</label>
+                    <input id="pending-turnaround-days" class="field-input" type="number" min="1" step="1" />
+                  </div>
+                </div>
+                <label class="field-label" for="pending-body">Pending body</label>
+                <textarea id="pending-body" class="field-textarea" rows="5"></textarea>
+              </div>
 
-            <label class="field-label" for="flair-template-id">Flair template ID to set</label>
-            <input id="flair-template-id" class="field-input" type="text" />
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Approval</h3>
+                    <p class="section-copy muted small">Sent when a verification is approved.</p>
+                  </div>
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="approve-header">Approval header</label>
+                  <input id="approve-header" class="field-input" type="text" />
+                </div>
+                <label class="field-label" for="approve-body">Approval body</label>
+                <textarea id="approve-body" class="field-textarea" rows="5"></textarea>
+              </div>
 
-            <label class="field-label" for="flair-css-class">Flair CSS matcher (optional)</label>
-            <input id="flair-css-class" class="field-input" type="text" />
-            <p class="muted small">
-              Template ID is set when you approve a user. Verified status uses OR logic: template ID match OR CSS wildcard match.
-            </p>
+              <div class="content-card content-card-span-2">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Denial</h3>
+                    <p class="section-copy muted small">
+                      Denial reason labels come from subreddit install settings. Fields below only appear for enabled labels.
+                    </p>
+                  </div>
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="deny-header">Denial header</label>
+                  <input id="deny-header" class="field-input" type="text" />
+                </div>
 
-            <label class="field-label" for="required-photo-count">Required verification photos</label>
-            <select id="required-photo-count" class="field-select">
-              <option value="1">1 photo</option>
-              <option value="2">2 photos</option>
-              <option value="3">3 photos</option>
-            </select>
-            <p class="muted small">Controls how many photo upload fields users see in the submit form.</p>
+                <div id="deny-template-reason-1-wrap" class="template-reason-block hidden">
+                  <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
+                  <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
+                </div>
 
-            <label class="field-label" for="photo-instructions">Photo Instructions</label>
-            <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
-            <p class="muted small">
-              Shown to users in the dashboard when they press <strong>Photo Instructions</strong> before submitting.
-              Markdown is supported. Supported placeholders: {{subreddit}}, {{days}}.
-            </p>
+                <div id="deny-template-reason-2-wrap" class="template-reason-block hidden">
+                  <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
+                  <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
+                </div>
 
-            <button id="save-flair-btn" class="btn btn-primary">Save Verification Settings</button>
-            <p id="install-settings-row" class="muted small hidden">
-              Install settings for this subreddit are available here:
-              <a id="install-settings-link" href="#" target="_blank" rel="noopener noreferrer">Open install settings</a>
-            </p>
+                <div id="deny-template-reason-3-wrap" class="template-reason-block hidden">
+                  <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
+                  <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
+                </div>
+
+                <div id="deny-template-reason-4-wrap" class="template-reason-block hidden">
+                  <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
+                  <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
+                </div>
+              </div>
+
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Revoked verification</h3>
+                    <p class="section-copy muted small">Sent when a previously approved verification is removed.</p>
+                  </div>
+                </div>
+                <div class="field-stack">
+                  <label class="field-label" for="remove-header">Revoked verification header</label>
+                  <input id="remove-header" class="field-input" type="text" />
+                </div>
+                <label class="field-label" for="remove-body">Revoked verification body</label>
+                <textarea id="remove-body" class="field-textarea" rows="4"></textarea>
+              </div>
+            </div>
+
+            <div class="panel-footer">
+              <p class="muted small">
+                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{reason}}, {{days}}.
+                In denial templates, `{{reason}}` inserts the optional moderator notes entered during review.
+                The `{{days}}` token already includes the unit, for example `3 days`.
+                Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
+              </p>
+              <div class="row section-actions section-actions-inline">
+                <button id="save-templates-btn" class="btn btn-primary">Save templates</button>
+              </div>
+            </div>
           </div>
-        </section>
 
-        <section id="tab-templates" class="tab-panel hidden">
-          <div class="card">
-            <h2>Modmail Templates</h2>
-
-            <label class="field-label" for="modmail-subject">Modmail Subject</label>
-            <input id="modmail-subject" class="field-input" type="text" />
-
-            <label class="field-label" for="pending-turnaround-days">Pending turnaround (days)</label>
-            <input id="pending-turnaround-days" class="field-input" type="number" min="1" step="1" />
-
-            <label class="field-label" for="pending-body">Pending body</label>
-            <textarea id="pending-body" class="field-textarea" rows="5"></textarea>
-
-            <label class="field-label" for="approve-header">Approval header</label>
-            <input id="approve-header" class="field-input" type="text" />
-
-            <label class="field-label" for="approve-body">Approval body</label>
-            <textarea id="approve-body" class="field-textarea" rows="5"></textarea>
-
-            <label class="field-label" for="deny-header">Denial header</label>
-            <input id="deny-header" class="field-input" type="text" />
-
-            <p class="muted small">
-              Denial reason labels are configured in the subreddit install settings. Template fields below only appear
-              for reasons whose install-setting label is not blank. Saving templates here updates only this subreddit.
-            </p>
-
-            <div id="deny-template-reason-1-wrap" class="hidden">
-              <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
-              <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
-            </div>
-
-            <div id="deny-template-reason-2-wrap" class="hidden">
-              <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
-              <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
-            </div>
-
-            <div id="deny-template-reason-3-wrap" class="hidden">
-              <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
-              <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
-            </div>
-
-            <div id="deny-template-reason-4-wrap" class="hidden">
-              <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
-              <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
-            </div>
-
-            <label class="field-label" for="remove-header">Revoked Verification Header</label>
-            <input id="remove-header" class="field-input" type="text" />
-
-            <label class="field-label" for="remove-body">Revoked Verification Body</label>
-            <textarea id="remove-body" class="field-textarea" rows="4"></textarea>
-
-            <p class="muted small">
-              Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{reason}}, {{days}}.
-              In denial templates, `{{reason}}` inserts the optional moderator notes entered during review.
-              The `{{days}}` token already includes the unit, for example `3 days`.
-              Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
-            </p>
-            <button id="save-templates-btn" class="btn btn-primary">Save Modmail Templates</button>
-          </div>
-        </section>
-
-        <section id="tab-themes" class="tab-panel hidden">
-          <div class="card">
-            <h2>Theme Presets</h2>
-            <div id="theme-preset-list" class="theme-grid"></div>
-
-            <label class="field-label" for="use-custom-colors">Use custom colors</label>
-            <label class="toggle-row">
-              <input id="use-custom-colors" type="checkbox" />
-              <span>Override primary, secondary, and background colors</span>
-            </label>
-
-            <div class="theme-custom-row">
-              <label class="field-label" for="custom-primary">Custom primary</label>
-              <div class="theme-color-control">
-                <input id="custom-primary" class="theme-color-picker" type="color" />
-                <input
-                  id="custom-primary-hex"
-                  class="field-input theme-color-hex"
-                  type="text"
-                  inputmode="text"
-                  spellcheck="false"
-                  placeholder="#0e91b6"
-                />
+          <div id="settings-panel-themes" class="settings-panel hidden">
+            <div class="settings-grid theme-settings-grid">
+              <div class="content-card content-card-span-2">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Theme presets</h3>
+                    <p class="section-copy muted small">Manage the user-facing VouchX theme without changing the moderator workspace style.</p>
+                  </div>
+                </div>
+                <div id="theme-preset-list" class="theme-grid"></div>
               </div>
-            </div>
-            <div class="theme-custom-row">
-              <label class="field-label" for="custom-accent">Custom accent</label>
-              <div class="theme-color-control">
-                <input id="custom-accent" class="theme-color-picker" type="color" />
-                <input
-                  id="custom-accent-hex"
-                  class="field-input theme-color-hex"
-                  type="text"
-                  inputmode="text"
-                  spellcheck="false"
-                  placeholder="#ff7a45"
-                />
+
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Custom colors</h3>
+                    <p class="section-copy muted small">Override primary, accent, and background colors for the user-facing hub.</p>
+                  </div>
+                </div>
+                <label class="field-label" for="use-custom-colors">Use custom colors</label>
+                <label class="toggle-row">
+                  <input id="use-custom-colors" type="checkbox" />
+                  <span>Override primary, accent, and background colors</span>
+                </label>
+
+                <div class="field-grid theme-controls-grid">
+                  <div class="theme-custom-row">
+                    <label class="field-label" for="custom-primary">Primary color</label>
+                    <div class="theme-color-control">
+                      <input id="custom-primary" class="theme-color-picker" type="color" />
+                      <input
+                        id="custom-primary-hex"
+                        class="field-input theme-color-hex"
+                        type="text"
+                        inputmode="text"
+                        spellcheck="false"
+                        placeholder="#0e91b6"
+                      />
+                    </div>
+                  </div>
+                  <div class="theme-custom-row">
+                    <label class="field-label" for="custom-accent">Accent color</label>
+                    <div class="theme-color-control">
+                      <input id="custom-accent" class="theme-color-picker" type="color" />
+                      <input
+                        id="custom-accent-hex"
+                        class="field-input theme-color-hex"
+                        type="text"
+                        inputmode="text"
+                        spellcheck="false"
+                        placeholder="#ff7a45"
+                      />
+                    </div>
+                  </div>
+                  <div class="theme-custom-row">
+                    <label class="field-label" for="custom-background">Background color</label>
+                    <div class="theme-color-control">
+                      <input id="custom-background" class="theme-color-picker" type="color" />
+                      <input
+                        id="custom-background-hex"
+                        class="field-input theme-color-hex"
+                        type="text"
+                        inputmode="text"
+                        spellcheck="false"
+                        placeholder="#f3fbff"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="theme-custom-row">
-              <label class="field-label" for="custom-background">Custom background</label>
-              <div class="theme-color-control">
-                <input id="custom-background" class="theme-color-picker" type="color" />
-                <input
-                  id="custom-background-hex"
-                  class="field-input theme-color-hex"
-                  type="text"
-                  inputmode="text"
-                  spellcheck="false"
-                  placeholder="#f3fbff"
-                />
+
+              <div class="content-card">
+                <div class="card-head">
+                  <div>
+                    <h3 class="section-heading">Preview</h3>
+                    <p class="section-copy muted small">Resolved theme tokens are previewed here before you save.</p>
+                  </div>
+                </div>
+                <div id="theme-preview" class="theme-preview">
+                  <p class="theme-preview-title">Live preview</p>
+                  <p class="theme-preview-muted">Buttons, borders, and text use resolved theme tokens.</p>
+                  <div class="theme-preview-box">
+                    <p class="item-meta">Preview card border and background blend</p>
+                  </div>
+                  <div class="row">
+                    <button class="btn btn-primary" type="button">Primary</button>
+                    <button class="btn btn-secondary" type="button">Secondary</button>
+                    <button class="btn btn-danger" type="button">Danger</button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div id="theme-preview" class="theme-preview">
-              <p class="theme-preview-title">Live preview</p>
-              <p class="theme-preview-muted">Buttons, borders, and text use resolved theme tokens.</p>
-              <div class="theme-preview-box">
-                <p class="item-meta">Preview card border and background blend</p>
+            <div class="panel-footer">
+              <div class="row section-actions section-actions-inline">
+                <button id="reset-theme-btn" class="btn btn-secondary">Reset to preset defaults</button>
+                <button id="save-theme-btn" class="btn btn-primary">Save theme</button>
               </div>
-              <div class="row">
-                <button class="btn btn-primary" type="button">Primary</button>
-                <button class="btn btn-secondary" type="button">Secondary</button>
-                <button class="btn btn-danger" type="button">Danger</button>
-              </div>
-            </div>
-
-            <div class="row">
-              <button id="reset-theme-btn" class="btn btn-secondary">Reset to Preset Defaults</button>
-              <button id="save-theme-btn" class="btn btn-primary">Save Theme</button>
             </div>
           </div>
         </section>

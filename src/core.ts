@@ -2465,6 +2465,7 @@ async function archiveModmailConversationBestEffort(
 async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
+  await ensureUserValidationSchedule(context, subredditId, subredditName);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
   const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
@@ -2814,16 +2815,8 @@ function isViewerFlairReconcileDue(record: VerificationRecord, nowMs: number): b
   return true;
 }
 
-function isManualFlairVerificationSource(source: string): boolean {
-  return source.includes('css-wildcard-match');
-}
-
 function normalizeCssClass(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function cssClassMatchesWildcard(configuredCssValue: string, detectedCssClass: string): boolean {
@@ -2832,16 +2825,12 @@ function cssClassMatchesWildcard(configuredCssValue: string, detectedCssClass: s
   if (!configured || !detected) {
     return false;
   }
-  if (configured === detected) {
-    return true;
-  }
-  const pattern = new RegExp(`^${escapeRegex(configured)}(?:\\w*\\d+)$`, 'i');
-  return pattern.test(detected);
+  return detected.includes(configured);
 }
-
 function normalizeSubredditNameForApi(subredditName: string): string {
   return subredditName.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '');
 }
+
 
 function dedupeNonEmpty(values: string[]): string[] {
   const deduped: string[] = [];
