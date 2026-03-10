@@ -346,6 +346,16 @@ These actions delete the user’s verification records and associated audit entr
 
 ---
 
-# Change Log
+# Changelog
 
-1.0.10 - Initial Release
+## v1.1.0
+
+- critical fix: initialize the daily retention / validation scheduler from live dashboard loads so subreddit installs do not miss scheduled cleanup
+- refine the moderator panel into a cleaner dark dashboard layout with better mobile workflow and queue prioritization
+- fix stale moderator history / approved / audit views after moderation actions
+- refresh the verification hub after stale withdraw attempts when the pending request has already been resolved
+- update the optional flair CSS matcher to use substring matching
+
+## v1.0.10
+
+- initial public Reddit release
