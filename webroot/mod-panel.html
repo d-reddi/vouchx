@@ -46,30 +46,34 @@
 
       <main id="main-content" class="hidden">
         <section id="tab-pending" class="tab-panel">
-          <div class="section-head">
+          <div class="section-head queue-section-head">
             <div>
               <h2>Queue</h2>
               <p class="section-copy muted">Review pending verification requests, lock work in progress, and respond quickly.</p>
             </div>
           </div>
-          <div class="content-card">
-            <div class="toolbar-grid">
-              <div class="field-stack toolbar-group">
-                <p class="group-kicker">Filter</p>
-                <label class="field-label" for="pending-search-user">Username</label>
-                <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
-              </div>
-              <div class="field-stack toolbar-group toolbar-group-compact">
-                <p class="group-kicker">Queue age</p>
-                <div class="row button-row filter-chip-row">
-                  <button id="pending-sla-all" class="btn btn-primary pending-sla-btn" data-sla="all">All</button>
-                  <button id="pending-sla-lt24" class="btn btn-secondary pending-sla-btn" data-sla="lt24">&lt;24h</button>
-                  <button id="pending-sla-24to72" class="btn btn-secondary pending-sla-btn" data-sla="24to72">24-72h</button>
-                  <button id="pending-sla-gt72" class="btn btn-secondary pending-sla-btn" data-sla="gt72">&gt;72h</button>
+          <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
+            <div class="content-card queue-filter-card">
+              <div class="toolbar-grid">
+                <div class="field-stack toolbar-group">
+                  <p class="group-kicker">Filter</p>
+                  <label class="field-label" for="pending-search-user">Username</label>
+                  <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
+                </div>
+                <div class="field-stack toolbar-group toolbar-group-compact">
+                  <p class="group-kicker">Queue age</p>
+                  <div class="row button-row filter-chip-row">
+                    <button id="pending-sla-all" class="btn btn-primary pending-sla-btn" data-sla="all">All</button>
+                    <button id="pending-sla-lt24" class="btn btn-secondary pending-sla-btn" data-sla="lt24">&lt;24h</button>
+                    <button id="pending-sla-24to72" class="btn btn-secondary pending-sla-btn" data-sla="24to72">24-72h</button>
+                    <button id="pending-sla-gt72" class="btn btn-secondary pending-sla-btn" data-sla="gt72">&gt;72h</button>
+                  </div>
                 </div>
               </div>
             </div>
-            <div id="pending-list" class="stack"></div>
+            <div class="content-card queue-list-card">
+              <div id="pending-list" class="stack"></div>
+            </div>
           </div>
         </section>
 
@@ -260,7 +264,7 @@
                   </div>
                 </div>
                 <p class="muted small">
-                  Verified status uses OR logic: template ID match or CSS wildcard match.
+                  Verified status uses OR logic: template ID match or CSS substring match.
                 </p>
               </div>
 

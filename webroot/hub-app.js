@@ -57,7 +57,7 @@ function createShell(root, inline) {
           <section class="hub-command">
             <div class="hub-command-copy">
               <p class="hub-kicker">Actions</p>
-              <h2 data-el="command-title">Review the instructions, then choose your next step.</h2>
+              <h2 data-el="command-title">Review the instructions, then submit your verification.</h2>
             </div>
             <p data-el="info-msg" class="info-msg hidden"></p>
             <div data-el="action-row" class="row hub-action-dock"></div>
@@ -465,12 +465,17 @@ export function mountHub(options = {}) {
     }
   }
 
-  async function performAction(path, body = {}) {
+  async function performAction(path, body = {}, options = {}) {
+    const { refreshOnError = null } = options;
     setBusy(true);
     try {
       applyPayload(await requestJson(path, body));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(message, 'error');
+      if (typeof refreshOnError === 'function' && refreshOnError(message)) {
+        await refreshState({ silent: true });
+      }
     } finally {
       setBusy(false);
     }
@@ -603,7 +608,7 @@ export function mountHub(options = {}) {
     refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
     refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
 
-    let commandTitle = 'Review the instructions, then choose your next step.';
+    let commandTitle = 'Review the instructions, then submit your verification.';
     let infoText = '';
     if (!state.viewerVerifiedByFlair && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
@@ -669,7 +674,11 @@ export function mountHub(options = {}) {
     if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
-          void performAction('/api/hub/withdraw');
+          void performAction('/api/hub/withdraw', {}, {
+            refreshOnError(message) {
+              return message.includes('No pending verification request found.');
+            },
+          });
         })
       );
     }

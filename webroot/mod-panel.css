@@ -360,6 +360,11 @@ textarea {
   align-items: end;
 }
 
+.queue-layout {
+  display: grid;
+  gap: 14px;
+}
+
 .field-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
@@ -386,6 +391,22 @@ textarea {
 
 .toolbar-group-compact {
   align-self: end;
+}
+
+.queue-filter-card {
+  padding-block: 15px;
+}
+
+.queue-filter-card .toolbar-grid {
+  gap: 10px 12px;
+}
+
+.queue-filter-card .group-kicker {
+  margin-bottom: 4px;
+}
+
+.queue-filter-card .field-label {
+  margin-bottom: 6px;
 }
 
 .group-kicker {
@@ -628,6 +649,23 @@ textarea {
   display: grid;
   gap: 0;
   margin-top: 12px;
+}
+
+.queue-list-card {
+  padding-top: 12px;
+  padding-bottom: 16px;
+}
+
+.queue-list-card .stack {
+  margin-top: 0;
+}
+
+.queue-list-card .item:first-child {
+  padding-top: 6px;
+}
+
+.queue-list-card .item:last-child {
+  padding-bottom: 2px;
 }
 
 .item {
@@ -1257,9 +1295,30 @@ textarea {
     border-radius: 18px;
   }
 
+  .queue-layout {
+    gap: 12px;
+  }
+
   .toolbar-grid {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  .queue-filter-card {
+    padding: 14px 16px;
+  }
+
+  .queue-filter-card .toolbar-grid {
+    gap: 8px;
+  }
+
+  .queue-list-card {
+    padding-top: 10px;
+    padding-bottom: 14px;
+  }
+
+  .queue-layout[data-mobile-priority="list"] .queue-list-card {
+    order: -1;
   }
 
   .toolbar-group-compact {
@@ -1307,6 +1366,10 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .queue-section-head {
+    gap: 8px;
+  }
+
   .panel-heading h1 {
     font-size: 1.26rem;
   }
@@ -1322,6 +1385,10 @@ textarea {
 
   .primary-tabs {
     gap: 10px 16px;
+  }
+
+  .queue-filter-card {
+    padding: 13px 14px;
   }
 
   .settings-tab-btn {

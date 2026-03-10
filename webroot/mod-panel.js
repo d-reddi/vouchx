@@ -21,6 +21,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const heroSubreddit = document.getElementById('hero-subreddit');
   const heroQueueStatus = document.getElementById('hero-queue-status');
   const heroUpdated = document.getElementById('hero-updated');
+  const pendingLayout = document.getElementById('pending-layout');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSlaButtons = Array.from(document.querySelectorAll('.pending-sla-btn'));
@@ -839,6 +840,23 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   }
   showToast.timerId = 0;
 
+  function invalidateHistoryCaches() {
+    historySearchRequestId += 1;
+    historySearchItems = [];
+    historySearchOffset = 0;
+    historySearchHasMore = false;
+
+    approvedSearchRequestId += 1;
+    approvedSearchItems = [];
+    approvedSearchOffset = 0;
+    approvedSearchHasMore = false;
+
+    auditSearchRequestId += 1;
+    auditSearchItems = [];
+    auditSearchOffset = 0;
+    auditSearchHasMore = false;
+  }
+
   function handleMessage(message) {
     if (!message || typeof message !== 'object') {
       return;
@@ -846,14 +864,17 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
 
     if (message.type === 'state' && message.payload) {
       const uiDrafts = captureUiDrafts();
+      const hadPriorState = stateInitialized;
       state = message.payload;
       lastStateUpdatedAt = Date.now();
-      if (approvedSearchRequestId === 0 && Array.isArray(state.approved)) {
+      if (hadPriorState) {
+        invalidateHistoryCaches();
+      } else if (Array.isArray(state.approved)) {
         approvedSearchItems = state.approved.slice();
         approvedSearchOffset = approvedSearchItems.length;
         approvedSearchHasMore = Boolean(state.approvedHasMore);
       }
-      if (auditSearchRequestId === 0 && Array.isArray(state.auditLog)) {
+      if (!hadPriorState && Array.isArray(state.auditLog)) {
         auditSearchItems = state.auditLog.slice();
         auditSearchOffset = auditSearchItems.length;
         auditSearchHasMore = Boolean(state.auditHasMore);
@@ -1351,7 +1372,11 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   function renderPending() {
     updatePendingSlaButtonStyles();
     pendingList.innerHTML = '';
-    if (!state || !Array.isArray(state.pending) || state.pending.length === 0) {
+    const hasPendingItems = Boolean(state && Array.isArray(state.pending) && state.pending.length > 0);
+    if (pendingLayout) {
+      pendingLayout.dataset.mobilePriority = hasPendingItems ? 'list' : 'filters';
+    }
+    if (!hasPendingItems) {
       renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
       return;
     }
