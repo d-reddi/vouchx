@@ -1011,6 +1011,24 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     inputTo.value = formatDateInputValue(now);
   }
 
+  function serializeDateInputBoundary(value, endOfDay) {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return '';
+    }
+    const [yearText, monthText, dayText] = raw.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+      return '';
+    }
+    const boundary = endOfDay
+      ? new Date(year, month - 1, day, 23, 59, 59, 999)
+      : new Date(year, month - 1, day, 0, 0, 0, 0);
+    return Number.isFinite(boundary.getTime()) ? boundary.toISOString() : '';
+  }
+
   function setHistoryView(viewName) {
     activeHistoryView = viewName === 'approved' || viewName === 'audit' ? viewName : 'records';
     if (historyPanelRecords) {
@@ -1618,35 +1636,6 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (auditLoadMoreBtn) {
       auditLoadMoreBtn.classList.toggle('hidden', !auditSearchHasMore || isMinLengthHintVisible);
-    }
-  }
-
-  function applyHistoryReopenPatch(payload) {
-    if (!payload || typeof payload !== 'object') {
-      return;
-    }
-    const deniedId = String(payload.deniedId || '');
-    const reopenedChildId = String(payload.reopenedChildId || '');
-    const reopenedState = String(payload.reopenedState || '');
-    if (!deniedId || !reopenedChildId) {
-      if (!deniedId) {
-        return;
-      }
-    }
-    let changed = false;
-    historySearchItems = (Array.isArray(historySearchItems) ? historySearchItems : []).map((item) => {
-      if (String(item.id || '') !== deniedId) {
-        return item;
-      }
-      changed = true;
-      return {
-        ...item,
-        reopenedChildId,
-        reopenedState: reopenedState || (reopenedChildId ? 'yes' : item.reopenedState || 'none'),
-      };
-    });
-    if (changed) {
-      renderHistorySearchResults();
     }
   }
 
@@ -2276,8 +2265,8 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     return {
       type: 'searchHistory',
       username: historySearchUserInput ? historySearchUserInput.value.trim() : '',
-      fromDate: historySearchFromInput ? historySearchFromInput.value : '',
-      toDate: historySearchToInput ? historySearchToInput.value : '',
+      fromDate: historySearchFromInput ? serializeDateInputBoundary(historySearchFromInput.value, false) : '',
+      toDate: historySearchToInput ? serializeDateInputBoundary(historySearchToInput.value, true) : '',
       offset,
       limit: 25,
       requestId,
@@ -2288,8 +2277,8 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     return {
       type: 'searchApproved',
       username: approvedSearchUserInput ? approvedSearchUserInput.value.trim() : '',
-      fromDate: approvedSearchFromInput ? approvedSearchFromInput.value : '',
-      toDate: approvedSearchToInput ? approvedSearchToInput.value : '',
+      fromDate: approvedSearchFromInput ? serializeDateInputBoundary(approvedSearchFromInput.value, false) : '',
+      toDate: approvedSearchToInput ? serializeDateInputBoundary(approvedSearchToInput.value, true) : '',
       offset,
       limit: 25,
       requestId,
@@ -2302,8 +2291,8 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       username: auditSearchUserInput ? auditSearchUserInput.value.trim() : '',
       actor: auditSearchActorInput ? auditSearchActorInput.value.trim() : '',
       action: selectedAuditActionFilter === 'all' ? '' : selectedAuditActionFilter,
-      fromDate: auditSearchFromInput ? auditSearchFromInput.value : '',
-      toDate: auditSearchToInput ? auditSearchToInput.value : '',
+      fromDate: auditSearchFromInput ? serializeDateInputBoundary(auditSearchFromInput.value, false) : '',
+      toDate: auditSearchToInput ? serializeDateInputBoundary(auditSearchToInput.value, true) : '',
       offset,
       limit: 25,
       requestId,

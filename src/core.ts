@@ -1597,6 +1597,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
   await setRecord(context, subredditId, validationScheduledRecord);
   await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
   const approvedAtMs = new Date(reviewedRecord.reviewedAt ?? reviewedRecord.submittedAt).getTime() || Date.now();
+  const historyAnchorMs = getHistoryRecordAnchorMs(validationScheduledRecord, approvedAtMs);
   await context.redis.zAdd(approvedIndexKey(subredditId), {
     member: verificationId,
     score: approvedAtMs,
@@ -1604,15 +1605,15 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
   await addApprovedPrefixIndexEntry(context, subredditId, verificationId, validationScheduledRecord.username, approvedAtMs);
   await context.redis.zAdd(historyDateIndexKey(subredditId), {
     member: verificationId,
-    score: new Date(record.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
     member: verificationId,
-    score: new Date(record.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
     member: verificationId,
-    score: new Date(reviewedRecord.reviewedAt ?? reviewedRecord.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.del(userPendingKey(subredditId, normalizeUsername(record.username)));
   await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
@@ -1812,20 +1813,21 @@ async function denyVerification(
   };
 
   await setRecord(context, subredditId, reviewedRecord);
+  const historyAnchorMs = getHistoryRecordAnchorMs(reviewedRecord);
   await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
   await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
   await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, record.username);
   await context.redis.zAdd(historyDateIndexKey(subredditId), {
     member: verificationId,
-    score: new Date(record.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
     member: verificationId,
-    score: new Date(record.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
     member: verificationId,
-    score: new Date(reviewedRecord.reviewedAt ?? reviewedRecord.submittedAt).getTime() || Date.now(),
+    score: historyAnchorMs,
   });
   await context.redis.del(userPendingKey(subredditId, normalizeUsername(record.username)));
   await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
@@ -2114,8 +2116,18 @@ async function removeApprovedVerificationByModerator(
   };
 
   await setRecord(context, subredditId, updatedRecord);
+  const historyAnchorMs = getHistoryRecordAnchorMs(updatedRecord);
   await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
   await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, record.username);
+  await context.redis.zAdd(historyDateIndexKey(subredditId), { member: verificationId, score: historyAnchorMs });
+  await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
   await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
   await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
@@ -2486,8 +2498,12 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   }
   const viewerBlocked = viewerUsername ? await getBlockedUser(context, subredditId, viewerUsername) : null;
   const pending = canReviewUser ? await listPendingVerifications(context, subredditId) : [];
+  const defaultSearchFromAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const defaultSearchToAt = new Date().toISOString();
   const approvedSearch = canReviewUser
     ? await searchApprovedRecords(context, subredditId, {
+        fromDate: defaultSearchFromAt,
+        toDate: defaultSearchToAt,
         offset: 0,
         limit: 25,
       })
@@ -2496,6 +2512,8 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   const blocked = canReviewUser ? await listBlockedUsers(context, subredditId) : [];
   const auditSearch = canReviewUser
     ? await searchAuditEntries(context, subredditId, {
+        fromDate: defaultSearchFromAt,
+        toDate: defaultSearchToAt,
         offset: 0,
         limit: 25,
       })
@@ -2989,8 +3007,8 @@ async function searchHistoryRecords(
   if (usernameFilter.length > 0 && usernameFilter.length < 3) {
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
-  const fromMs = query.fromDate ? new Date(`${query.fromDate}T00:00:00.000Z`).getTime() : 0;
-  const toMs = query.toDate ? new Date(`${query.toDate}T23:59:59.999Z`).getTime() : Date.now();
+  const fromMs = parseSearchBoundaryMs(query.fromDate, false);
+  const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
   const maxScore = Number.isFinite(toMs) ? toMs : Date.now();
   if (minScore > maxScore) {
@@ -3016,8 +3034,10 @@ async function searchHistoryRecords(
   );
   const items: HistorySearchPanelItem[] = [];
   const staleIds: string[] = [];
+  let scannedCount = 0;
 
   for (let index = 0; index < payloads.length; index++) {
+    scannedCount += 1;
     const payload = payloads[index];
     const recordId = candidateIds[index];
     if (!payload) {
@@ -3113,8 +3133,8 @@ async function searchHistoryRecords(
 
   return {
     items,
-    offset: offset + items.length,
-    hasMore: candidates.length >= candidateCount,
+    offset: offset + scannedCount,
+    hasMore: scannedCount < candidates.length || candidates.length >= candidateCount,
     requestId: 0,
   };
 }
@@ -3133,8 +3153,8 @@ async function searchApprovedRecords(
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
   const usernameFilter = query.username ? normalizeUsername(query.username) : '';
-  const fromMs = query.fromDate ? new Date(`${query.fromDate}T00:00:00.000Z`).getTime() : 0;
-  const toMs = query.toDate ? new Date(`${query.toDate}T23:59:59.999Z`).getTime() : Date.now();
+  const fromMs = parseSearchBoundaryMs(query.fromDate, false);
+  const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
   const maxScore = Number.isFinite(toMs) ? toMs : Date.now();
   if (minScore > maxScore) {
@@ -3158,7 +3178,9 @@ async function searchApprovedRecords(
 
     const items: ApprovedSearchPanelItem[] = [];
     const staleIds: string[] = [];
+    let scannedCount = 0;
     for (let index = 0; index < payloads.length; index++) {
+      scannedCount += 1;
       const payload = payloads[index];
       const recordId = candidateIds[index];
       if (!payload) {
@@ -3189,8 +3211,8 @@ async function searchApprovedRecords(
 
     return {
       items,
-      offset: offset + items.length,
-      hasMore: candidates.length >= limit * 4,
+      offset: offset + scannedCount,
+      hasMore: scannedCount < candidates.length || candidates.length >= limit * 4,
       requestId: 0,
     };
   }
@@ -3256,7 +3278,7 @@ async function searchApprovedRecords(
 
   return {
     items,
-    offset: offset + items.length,
+    offset: offset + candidateWindow.length,
     hasMore: matchedCount > limit || hasMoreCandidates,
     requestId: 0,
   };
@@ -3283,8 +3305,8 @@ async function searchAuditEntries(
   if ((usernameFilter.length > 0 && usernameFilter.length < 3) || (actorFilter.length > 0 && actorFilter.length < 3)) {
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
-  const fromMs = query.fromDate ? new Date(`${query.fromDate}T00:00:00.000Z`).getTime() : 0;
-  const toMs = query.toDate ? new Date(`${query.toDate}T23:59:59.999Z`).getTime() : Date.now();
+  const fromMs = parseSearchBoundaryMs(query.fromDate, false);
+  const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
   const maxScore = Number.isFinite(toMs) ? toMs : Date.now();
   if (minScore > maxScore) {
@@ -3308,7 +3330,9 @@ async function searchAuditEntries(
 
   const items: AuditSearchPanelItem[] = [];
   const staleIds: string[] = [];
+  let scannedCount = 0;
   for (let index = 0; index < payloads.length; index++) {
+    scannedCount += 1;
     const payload = payloads[index];
     const auditId = candidateIds[index];
     if (!payload) {
@@ -3348,8 +3372,8 @@ async function searchAuditEntries(
 
   return {
     items,
-    offset: offset + items.length,
-    hasMore: candidates.length >= limit * 4,
+    offset: offset + scannedCount,
+    hasMore: scannedCount < candidates.length || candidates.length >= limit * 4,
     requestId: 0,
   };
 }
@@ -3907,16 +3931,26 @@ async function getLatestRecordForUser(
   username: string
 ): Promise<VerificationRecord | null> {
   const normalizedUsername = normalizeUsername(username);
-  const id = await context.redis.get(userLatestKey(subredditId, normalizedUsername));
+  let id = await context.redis.get(userLatestKey(subredditId, normalizedUsername));
   if (!id) {
-    return null;
+    const fallbackId = await findLatestExistingRecordIdForUser(context, subredditId, normalizedUsername);
+    if (!fallbackId) {
+      return null;
+    }
+    id = fallbackId;
+    await context.redis.set(userLatestKey(subredditId, normalizedUsername), fallbackId);
   }
 
   const record = await getRecord(context, subredditId, id);
   if (!record) {
     await context.redis.del(userLatestKey(subredditId, normalizedUsername));
     await context.redis.del(userPendingKey(subredditId, normalizedUsername));
-    return null;
+    const fallbackId = await findLatestExistingRecordIdForUser(context, subredditId, normalizedUsername);
+    if (!fallbackId) {
+      return null;
+    }
+    await context.redis.set(userLatestKey(subredditId, normalizedUsername), fallbackId);
+    return await getRecord(context, subredditId, fallbackId);
   }
 
   return record;
@@ -3953,6 +3987,27 @@ function getApprovedRecordRetentionAnchorMs(
   const reviewedMs = getFiniteTimestampMs(record.reviewedAt, Number.NaN);
   if (Number.isFinite(reviewedMs)) {
     return reviewedMs;
+  }
+
+  return getFiniteTimestampMs(record.submittedAt, fallbackMs);
+}
+
+function getHistoryRecordAnchorMs(
+  record: Pick<VerificationRecord, 'status' | 'submittedAt' | 'reviewedAt' | 'removedAt'>,
+  fallbackMs = Date.now()
+): number {
+  if (record.status === 'removed') {
+    const removedMs = getFiniteTimestampMs(record.removedAt, Number.NaN);
+    if (Number.isFinite(removedMs)) {
+      return removedMs;
+    }
+  }
+
+  if (record.status === 'approved' || record.status === 'denied') {
+    const reviewedMs = getFiniteTimestampMs(record.reviewedAt, Number.NaN);
+    if (Number.isFinite(reviewedMs)) {
+      return reviewedMs;
+    }
   }
 
   return getFiniteTimestampMs(record.submittedAt, fallbackMs);
@@ -4722,6 +4777,17 @@ function approvedPrefixFromUsername(username: string): string {
     return '';
   }
   return normalized.slice(0, 3);
+}
+
+function parseSearchBoundaryMs(value: string | undefined, endOfDay: boolean): number {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return endOfDay ? Date.now() : 0;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}${endOfDay ? 'T23:59:59.999Z' : 'T00:00:00.000Z'}`).getTime();
+  }
+  return new Date(raw).getTime();
 }
 
 async function addApprovedPrefixIndexEntry(
