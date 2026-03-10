@@ -77,6 +77,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
   const installSettingsRow = document.getElementById('install-settings-row');
   const installSettingsLink = document.getElementById('install-settings-link');
+  const markdownGuideLink = document.getElementById('markdown-guide-link');
   const requiredPhotoCountInput = document.getElementById('required-photo-count');
   const photoInstructionsInput = document.getElementById('photo-instructions');
 
@@ -1288,7 +1289,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       denyNotes = document.createElement('textarea');
       denyNotes.className = 'field-textarea';
       denyNotes.rows = 3;
-      denyNotes.placeholder = 'Optional moderator notes for mod notes and any denial template that uses {{reason}}';
+      denyNotes.placeholder = 'Optional notes saved with the denial and included in any modmail template that uses {{reason}}';
       card.appendChild(denyNotes);
     }
 
@@ -2449,6 +2450,13 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
         return;
       }
       post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (markdownGuideLink) {
+    markdownGuideLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      post({ type: 'openExternalUrl', url: markdownGuideLink.href });
     });
   }
 
