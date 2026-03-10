@@ -25,10 +25,10 @@ These live in the subreddit app installation settings.
 
 - These are the moderator-facing names for the four denial slots
 - If a label is blank, that reason is hidden from the review UI
-- Hidden reasons also hide their matching template fields in the `Templates` tab
+- Hidden reasons also hide their matching template fields in `Settings -> Templates`
 - Maximum length: 48 characters per label
 
-## Verification Settings tab
+## Settings -> General
 
 ### Verifications enabled
 
@@ -39,18 +39,19 @@ These live in the subreddit app installation settings.
 
 - Required before the queue can be processed
 - Must look like a valid Reddit flair template ID
-- The app hides pending review cards until this is configured
+- The app hides queue review cards until this is configured
 
 Tip: moderators should copy this from Reddit desktop `Mod tools` -> `Look and Feel` -> `User flair`.
 
 ### Flair CSS matcher
 
-- This allows moderators to set flairs that still show "verified" for users. Use cases may be special flairs for certain users, etc. 
-- Flair is a CSS wild card. i.e., if any flair has a CSS class containing "verifieduser" then it will match. Wildcard matches "verifieduser1", "verifieduser_MVP" etc. 
+- This allows moderators to recognize alternate flair CSS classes that should still count as verified.
+- Matching is substring-based. If the configured value appears anywhere in the flair CSS class, it matches.
+- Example: a matcher of `verifieduser` matches `verifieduser1`, `verifieduser_MVP`, and `moderator_verifieduser`.
 - Optional fallback for verified-status detection
 - Verified status uses OR logic:
   - flair template ID match
-  - CSS wildcard match
+  - CSS substring match
 
 ### Required verification photos
 
@@ -58,13 +59,13 @@ Tip: moderators should copy this from Reddit desktop `Mod tools` -> `Look and Fe
 
 ### Photo Instructions
 
-- Shown to members in the `Photo Instructions` modal
-- Supports simple markdown
+- Shown to members when they press `Photo Instructions`
+- Supports Reddit Markdown
 - Supported placeholders:
   - `{{subreddit}}`
   - `{{days}}`
 
-## Templates tab
+## Settings -> Templates
 
 The templates tab controls modmail content.
 
@@ -95,7 +96,7 @@ Template notes:
 - `{{days}}` already includes the unit, for example `3 days`
 - approval, denial, and revocation headers are rendered as a bold header block in modmail replies
 
-## Themes tab
+## Settings -> Themes
 
 Moderators can:
 
