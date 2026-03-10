@@ -106,7 +106,7 @@ textarea {
 
 .hero {
   position: relative;
-  padding: 10px 0 0;
+  padding: 8px 0 0;
 }
 
 .hero::after {
@@ -131,7 +131,7 @@ textarea {
 }
 
 .panel-kicker {
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   color: color-mix(in srgb, var(--muted) 78%, var(--primary) 22%);
   font-family: var(--font-display);
   font-size: 0.73rem;
@@ -148,7 +148,7 @@ textarea {
 }
 
 .panel-subtitle {
-  margin-top: 8px;
+  margin-top: 7px;
   max-width: 62ch;
   color: color-mix(in srgb, var(--muted) 90%, white 10%);
   font-size: 0.93rem;
@@ -157,7 +157,7 @@ textarea {
 
 .hero-actions {
   flex: 0 0 auto;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .header-meta {
@@ -252,8 +252,8 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
-  padding: 0 0 14px;
-  margin: 0 0 16px;
+  padding: 0 0 12px;
+  margin: 0 0 18px;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-divider) 88%, transparent);
 }
 
@@ -371,13 +371,13 @@ textarea {
 
 .settings-panel {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .template-settings-grid,
 .theme-settings-grid,
 .theme-controls-grid {
-  gap: 14px;
+  gap: 16px;
 }
 
 .toolbar-group {
@@ -406,12 +406,17 @@ textarea {
 
 .field-label {
   display: block;
-  margin: 0 0 7px;
+  margin: 0 0 8px;
   color: var(--muted);
   font-size: 0.8rem;
   font-weight: 560;
   letter-spacing: -0.01em;
   text-transform: none;
+}
+
+.content-card .small,
+.content-card .section-copy.small {
+  line-height: 1.48;
 }
 
 .field-input,
@@ -520,7 +525,9 @@ textarea {
 .btn-quiet {
   border-color: transparent;
   background: transparent;
-  color: var(--muted);
+  color: color-mix(in srgb, var(--muted) 92%, white 8%);
+  padding-inline: 6px;
+  font-weight: 560;
 }
 
 .btn-quiet:hover:not(:disabled) {
@@ -590,8 +597,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  padding: 6px 12px;
+  min-height: 31px;
+  padding: 5px 11px;
   border: 0;
   background: transparent;
   border-radius: 10px;
@@ -738,8 +745,8 @@ textarea {
 }
 
 .form-section {
-  padding-top: 14px;
-  margin-top: 14px;
+  padding-top: 18px;
+  margin-top: 18px;
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 78%, transparent);
 }
 
@@ -750,8 +757,8 @@ textarea {
 }
 
 .template-reason-block {
-  padding-top: 12px;
-  margin-top: 12px;
+  padding-top: 16px;
+  margin-top: 16px;
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 74%, transparent);
 }
 
@@ -770,9 +777,20 @@ textarea {
 .panel-footer {
   display: grid;
   gap: 12px;
-  margin-top: 18px;
-  padding-top: 16px;
+  margin-top: 20px;
+  padding-top: 18px;
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 88%, transparent);
+}
+
+.template-settings-grid .content-card .field-grid + .field-label,
+.template-settings-grid .content-card .field-stack + .field-label {
+  margin-top: 16px;
+}
+
+.template-settings-grid .content-card .field-textarea + .small,
+.template-settings-grid .content-card .field-input + .small,
+.template-settings-grid .content-card .field-select + .small {
+  margin-top: 8px;
 }
 
 .storage-percent {
@@ -1073,16 +1091,16 @@ textarea {
 
 @media (max-width: 760px) {
   .app-shell {
-    padding: 10px 10px 22px;
+    padding: 8px 10px 22px;
     gap: 12px;
   }
 
   .hero {
-    padding-top: 2px;
+    padding-top: 0;
   }
 
   .hero::after {
-    margin-top: 12px;
+    margin-top: 10px;
   }
 
   .hero-row,
@@ -1092,23 +1110,23 @@ textarea {
   }
 
   .hero-row {
-    gap: 10px;
+    gap: 8px;
   }
 
   .panel-kicker {
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     font-size: 0.66rem;
   }
 
   .panel-heading h1 {
-    font-size: 1.4rem;
+    font-size: 1.34rem;
   }
 
   .panel-subtitle {
-    margin-top: 4px;
+    margin-top: 3px;
     max-width: none;
-    font-size: 0.84rem;
-    line-height: 1.42;
+    font-size: 0.82rem;
+    line-height: 1.38;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -1118,22 +1136,28 @@ textarea {
   .hero-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     width: auto;
   }
 
   .hero-actions .btn {
-    min-height: 32px;
-    padding: 6px 10px;
+    min-height: 31px;
+    padding: 5px 10px;
     font-size: 0.82rem;
+  }
+
+  .hero-actions .btn-quiet {
+    min-height: 30px;
+    padding-inline: 2px 6px;
+    font-size: 0.78rem;
   }
 
   .header-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 12px;
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
   }
 
   .meta-block {
@@ -1197,8 +1221,14 @@ textarea {
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 6px;
-    padding-bottom: 10px;
-    margin-bottom: 14px;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+
+  .settings-tab-btn {
+    padding: 6px 10px 8px;
+    font-size: 0.88rem;
+    border-radius: 9px 9px 0 0;
   }
 
   .subtabs {
@@ -1223,7 +1253,7 @@ textarea {
   }
 
   .content-card {
-    padding: 15px;
+    padding: 16px;
     border-radius: 18px;
   }
 
@@ -1238,6 +1268,28 @@ textarea {
 
   .filter-chip-row {
     margin-top: 2px;
+  }
+
+  .small,
+  .content-card .small,
+  .content-card .section-copy.small {
+    font-size: 0.83rem;
+    line-height: 1.42;
+  }
+
+  .form-section {
+    padding-top: 16px;
+    margin-top: 16px;
+  }
+
+  .template-reason-block {
+    padding-top: 14px;
+    margin-top: 14px;
+  }
+
+  .panel-footer {
+    margin-top: 18px;
+    padding-top: 16px;
   }
 
   .pending-title-row {
@@ -1256,7 +1308,7 @@ textarea {
 
 @media (max-width: 560px) {
   .panel-heading h1 {
-    font-size: 1.32rem;
+    font-size: 1.26rem;
   }
 
   .panel-subtitle {
@@ -1273,7 +1325,7 @@ textarea {
   }
 
   .settings-tab-btn {
-    padding-inline: 10px;
+    padding-inline: 9px;
   }
 
   .subtabs,
