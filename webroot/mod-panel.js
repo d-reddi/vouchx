@@ -1178,7 +1178,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const badge = document.createElement('span');
     badge.className = 'pending-age-badge pending-age-resubmitted';
     badge.textContent = 'Resubmitted';
-    badge.title = 'This pending request is a reopened resubmission';
+    badge.title = 'This request was reopened for another review.';
     return badge;
   }
 
@@ -1427,7 +1427,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     blockedList.innerHTML = '';
     if (!state || !Array.isArray(state.blocked) || state.blocked.length === 0) {
-      renderEmptyState(blockedList, 'No blocked users', 'Blocked users and denial-threshold lockouts will appear here.');
+      renderEmptyState(blockedList, 'No blocked users', 'Users you block manually and users blocked after repeated denials will appear here.');
       return;
     }
 
@@ -1649,7 +1649,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (verificationsDisabledMessageHint) {
       const message = String(state.config.verificationsDisabledMessage || '').trim();
-      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" Configurable in install settings for this subreddit.`;
+      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" You can change it in this subreddit's install settings.`;
     }
     if (installSettingsRow) {
       installSettingsRow.classList.toggle('hidden', !(state.canOpenInstallSettings === true));
@@ -2257,7 +2257,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   function appendSubmissionAcknowledgementMeta(container, item) {
     appendAcknowledgementMeta(
       container,
-      'Age gate and terms and conditions accepted at',
+      'Terms accepted and 18+ confirmed at',
       item.acknowledgedAt || null
     );
   }

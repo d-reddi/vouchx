@@ -11,11 +11,11 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
   {
     key: 'adultOnlySelfPhotosConfirmed',
-    label: 'Any uploaded photo(s) are of me and do not depict anyone under the age of 18.',
+    label: 'Any photos I upload are of me and do not include anyone under 18.',
   },
   {
     key: 'termsAccepted',
-    label: 'I have read and accept the Terms and Conditions of the VouchX app.',
+    label: 'I have read and accept the VouchX Terms and Conditions.',
   },
 ];
 
@@ -276,7 +276,7 @@ function renderInlineMarkdown(value) {
 function renderMarkdown(value) {
   const source = String(value ?? '').replace(/\r\n?/g, '\n').trim();
   if (!source) {
-    return '<p class="markdown-empty">No photo instructions have been configured yet.</p>';
+    return '<p class="markdown-empty">No photo instructions are available yet.</p>';
   }
 
   const html = [];
@@ -616,7 +616,7 @@ export function mountHub(options = {}) {
     } else if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
       commandTitle = state.userLatest.parentVerificationId ? 'Pending moderator re-review' : 'Pending moderator review';
       infoText = state.userLatest.parentVerificationId
-        ? 'Your verification is pending moderator re-review.'
+        ? 'Your verification is being reviewed again by the moderators.'
         : 'Your verification is pending moderator review.';
     } else if (!state.viewerVerifiedByFlair && isRestricted) {
       commandTitle = 'Verification submissions are blocked';

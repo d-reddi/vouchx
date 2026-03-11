@@ -485,7 +485,7 @@ const DEFAULT_REQUIRED_PHOTO_COUNT = 2;
 const DEFAULT_PENDING_TURNAROUND_DAYS = 3;
 const DEFAULT_MODMAIL_SUBJECT = 'Verification update from r/{{subreddit}}';
 const DEFAULT_PENDING_BODY =
-  'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time {{days}}\n\nThe moderation team';
+  'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time: {{days}}\n\nThe moderation team';
 const DEFAULT_APPROVE_HEADER = 'Verification Approved';
 const DEFAULT_REMOVAL_HEADER = 'Verification Revoked';
 const LEGACY_DEFAULT_APPROVE_BODY =
@@ -817,9 +817,9 @@ function buildSubmitVerificationForm(data: { [key: string]: any }) {
 
   return {
     title: 'Submit verification photos',
-    description: `You are submitting your photos for review by the moderators to receive the "Verified" Flair. Please upload ${requiredPhotoCount} image${
+    description: `Upload ${requiredPhotoCount} verification photo${
       requiredPhotoCount === 1 ? '' : 's'
-    } below to submit.`,
+    } for moderator review. Press submit below to submit.`,
     fields: [...photoFields],
     acceptLabel: 'Submit',
     cancelLabel: 'Cancel',
@@ -828,12 +828,12 @@ function buildSubmitVerificationForm(data: { [key: string]: any }) {
 
 const deleteVerificationDataFormDefinition = {
   title: 'Remove my verification',
-  description: "This will remove your verification and you'll need to resubmit if you want to be verified again.",
+  description: "This removes your verification. If you want to be verified again later you will need to submit a new request.",
   fields: [
     {
       type: 'boolean' as const,
       name: 'confirmDelete',
-      label: 'I understand I will lose my verified status.',
+      label: 'I understand that my verified status will be removed.',
     },
   ],
   acceptLabel: 'Remove verification',
@@ -2209,7 +2209,7 @@ async function addPendingSubmissionModNote(context: Devvit.Context, record: Veri
   await context.reddit.addModNote({
     subreddit: subredditName,
     user: record.username,
-    note: `Verification request submitted. Acceptance of Terms and 18+ certification recorded on: ${acknowledgedAt}`,
+    note: `Verification request submitted. Terms accepted and 18+ confirmation recorded on: ${acknowledgedAt}`,
   });
 }
 
@@ -2326,7 +2326,7 @@ async function sendPendingSubmissionModmail(
   };
   const subject = buildModmailSubject(resolvedConfig.modmailSubject, values);
   const acknowledgementAt = formatTimestamp(record.ageAcknowledgedAt || record.submittedAt);
-  const auditFooter = `Acceptance of Terms and 18+ certification recorded on: ${acknowledgementAt}`;
+  const auditFooter = `Terms accepted and 18+ confirmation recorded on: ${acknowledgementAt}`;
   const body = `${fillTemplate(resolvedConfig.pendingBody, values).trimEnd()}\n\n${auditFooter}`;
   return await sendUserModmailWithFallback(context, {
     subredditId,
