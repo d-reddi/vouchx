@@ -1,0 +1,75 @@
+name: Feature Request
+description: Suggest an improvement or new feature for VouchX
+title: "[Enhancement] "
+labels: ["enhancement"]
+assignees: ["d-reddi"]
+
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement to **VouchX**.  
+        Please use a descriptive title and fill out the details below to help us understand the problem you're trying to solve and your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: What problem does this feature solve?
+      placeholder: |
+        Example: Moderators cannot easily see verification activity trends.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or behavior you'd like.
+      placeholder: |
+        Example: Add a dashboard widget showing daily verification stats.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Example use case
+      description: Describe how moderators or users would use this feature.
+      placeholder: |
+        Example workflow:
+        1. Moderator opens mod panel
+        2. Selects verification queue
+        3. Uses the new feature to...
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Where would this feature apply?
+      options:
+        - Verification Hub
+        - Moderator Panel
+        - Both
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: subreddit
+    attributes:
+      label: Subreddit (if relevant)
+      description: If this request comes from a specific subreddit use case. The dev team may follow up for more details via modmail.
+      placeholder: r/example
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact level
+      description: How useful would this feature be?
+      options:
+        - Nice improvement
+        - Moderately useful
+        - Very useful
+        - Critical for moderation workflow
+

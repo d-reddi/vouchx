@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report a bug in the VouchX verification app
+title: "[Bug] "
+labels: ["bug"]
+assignees: ["d-reddi"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug in **VouchX**.
+        Use a descriptive title and fill out the details below to help us understand and reproduce the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: What happened?
+      placeholder: Explain the bug you encountered
+    validations:
+      required: true
+
+  - type: input
+    id: subreddit
+    attributes:
+      label: Subreddit
+      description: Which subreddit did this occur in?
+      placeholder: r/example
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Where did this happen?
+      options:
+        - Verification Hub
+        - Moderator Panel
+        - Both
+    validations:
+      required: true
+    
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App Version
+      description: If known
+      placeholder: e.g. 0.3.2
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Reddit iOS app
+        - Reddit Android app
+        - Desktop browser
+        - Mobile browser
+        - Multiple or All
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the verification hub
+        2. Click Submit Verification
+        3. Upload photos
+        4. Submit request
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional details
+      description: Screenshots, logs, or anything else helpful
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Upload relevant files
+      description: "Drag and drop any relevant screenshots."
+    validations:
+      required: false
+      accept: ".png,.jpg,.jpeg,.gif,.svg,.webp"
