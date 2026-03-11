@@ -357,6 +357,14 @@
                   <label class="field-label" for="deny-header">Denial header</label>
                   <input id="deny-header" class="field-input" type="text" />
                 </div>
+                <label class="toggle-row">
+                  <input id="always-include-denial-notes-in-modmail" type="checkbox" />
+                  <span>Always include moderator denial notes in denial modmail</span>
+                </label>
+                <p class="muted small field-help">
+                  Enabled: denial notes are always included.
+                  Disabled: notes appear only if the template uses {{denial_notes}}.
+                </p>
 
                 <div id="deny-template-reason-1-wrap" class="template-reason-block hidden">
                   <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
@@ -397,8 +405,8 @@
 
             <div class="panel-footer">
               <p class="muted small">
-                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{reason}}, {{days}}.
-                In denial templates, `{{reason}}` inserts the optional moderator notes entered during review.
+                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{days}}.
+                Denial bodies also support {{denial_notes}} for moderator-entered denial notes.
                 The `{{days}}` token already includes the unit, for example `3 days`.
                 Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
               </p>

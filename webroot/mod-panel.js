@@ -88,6 +88,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   const approveHeaderInput = document.getElementById('approve-header');
   const approveBodyInput = document.getElementById('approve-body');
   const denyHeaderInput = document.getElementById('deny-header');
+  const alwaysIncludeDenialNotesInModmailInput = document.getElementById('always-include-denial-notes-in-modmail');
   const removeHeaderInput = document.getElementById('remove-header');
   const removeBodyInput = document.getElementById('remove-body');
   const themePresetList = document.getElementById('theme-preset-list');
@@ -463,6 +464,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       pendingTurnaroundDays: stringInputValue(pendingTurnaroundDaysInput),
       modmailSubject: stringInputValue(modmailSubjectInput),
       pendingBody: stringInputValue(pendingBodyInput),
+      alwaysIncludeDenialNotesInModmail: boolInputValue(alwaysIncludeDenialNotesInModmailInput),
       approveHeader: stringInputValue(approveHeaderInput),
       approveBody: stringInputValue(approveBodyInput),
       denyHeader: stringInputValue(denyHeaderInput),
@@ -476,6 +478,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       draft.pendingTurnaroundDays !== `${state.config.pendingTurnaroundDays ?? ''}` ||
       draft.modmailSubject !== String(state.config.modmailSubject || '') ||
       draft.pendingBody !== String(state.config.pendingBody || '') ||
+      draft.alwaysIncludeDenialNotesInModmail !== (state.config.alwaysIncludeDenialNotesInModmail === true) ||
       draft.approveHeader !== String(state.config.approveHeader || '') ||
       draft.approveBody !== String(state.config.approveBody || '') ||
       draft.denyHeader !== String(state.config.denyHeader || '') ||
@@ -592,6 +595,9 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     if (pendingBodyInput) {
       pendingBodyInput.value = draft.pendingBody;
+    }
+    if (alwaysIncludeDenialNotesInModmailInput) {
+      alwaysIncludeDenialNotesInModmailInput.checked = draft.alwaysIncludeDenialNotesInModmail === true;
     }
     if (approveHeaderInput) approveHeaderInput.value = draft.approveHeader;
     if (approveBodyInput) approveBodyInput.value = draft.approveBody;
@@ -1304,7 +1310,8 @@ import { BUG_REPORT_URL } from './app-config.js';
       denyNotes = document.createElement('textarea');
       denyNotes.className = 'field-textarea';
       denyNotes.rows = 3;
-      denyNotes.placeholder = 'Optional notes saved with the denial and included in any modmail template that uses {{reason}}';
+      denyNotes.placeholder =
+        'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
       card.appendChild(denyNotes);
     }
 
@@ -1699,6 +1706,9 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     if (pendingBodyInput) {
       pendingBodyInput.value = state.config.pendingBody || '';
+    }
+    if (alwaysIncludeDenialNotesInModmailInput) {
+      alwaysIncludeDenialNotesInModmailInput.checked = state.config.alwaysIncludeDenialNotesInModmail === true;
     }
     approveHeaderInput.value = state.config.approveHeader || '';
     approveBodyInput.value = state.config.approveBody || '';
@@ -2755,6 +2765,9 @@ import { BUG_REPORT_URL } from './app-config.js';
       pendingTurnaroundDays: pendingTurnaroundDaysInput ? pendingTurnaroundDaysInput.value : '',
       modmailSubject: modmailSubjectInput ? modmailSubjectInput.value : '',
       pendingBody: pendingBodyInput ? pendingBodyInput.value : '',
+      alwaysIncludeDenialNotesInModmail: alwaysIncludeDenialNotesInModmailInput
+        ? Boolean(alwaysIncludeDenialNotesInModmailInput.checked)
+        : false,
       approveHeader: approveHeaderInput.value,
       approveBody: approveBodyInput.value,
       denyHeader: denyHeaderInput.value,

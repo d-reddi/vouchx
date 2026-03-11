@@ -12,7 +12,7 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
   {
     key: 'adultOnlySelfPhotosConfirmed',
-    label: 'Any photos I upload are of me and do not include anyone under 18.',
+    label: 'Photos I submit are of me and do not include anyone under 18.',
   },
   {
     key: 'termsAccepted',
