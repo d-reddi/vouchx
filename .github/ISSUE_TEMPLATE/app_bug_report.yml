@@ -32,6 +32,7 @@ body:
     attributes:
       label: Where did this happen?
       options:
+        - Select an option
         - Verification Hub
         - Moderator Panel
         - Both
@@ -51,6 +52,7 @@ body:
     attributes:
       label: Platform
       options:
+        - Select an option
         - Reddit iOS app
         - Reddit Android app
         - Desktop browser

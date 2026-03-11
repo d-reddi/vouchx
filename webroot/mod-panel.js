@@ -1,5 +1,6 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { BUG_REPORT_URL } from './app-config.js';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -132,6 +133,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
   const blockConfirmBtn = document.getElementById('block-confirm-btn');
+  const bugReportLink = document.getElementById('bug-report-link');
 
   let state = null;
   let stateInitialized = false;
@@ -191,6 +193,19 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       return null;
     }
     return isDarkMode() ? palette.dark : palette.light;
+  }
+
+  function normalizeExternalUrl(value) {
+    const candidate = String(value || '').trim();
+    if (!candidate) {
+      return '';
+    }
+    try {
+      const parsed = new URL(candidate);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+    } catch {
+      return '';
+    }
   }
 
   function themeLightTokens(value) {
@@ -2149,7 +2164,17 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     renderSettings();
     renderTemplates();
     renderThemes();
+    renderFooterMeta();
     setSettingsTab(activeSettingsTab);
+  }
+
+  function renderFooterMeta() {
+    if (!bugReportLink) {
+      return;
+    }
+    const bugReportUrl = normalizeExternalUrl(BUG_REPORT_URL);
+    bugReportLink.classList.toggle('hidden', !bugReportUrl);
+    bugReportLink.setAttribute('href', bugReportUrl || '#');
   }
 
   function createPhotoWrap(url, alt) {
@@ -2457,6 +2482,18 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     markdownGuideLink.addEventListener('click', (event) => {
       event.preventDefault();
       post({ type: 'openExternalUrl', url: markdownGuideLink.href });
+    });
+  }
+
+  if (bugReportLink) {
+    bugReportLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      const url = normalizeExternalUrl(BUG_REPORT_URL);
+      if (!url) {
+        showToast('Bug report URL is not configured.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url });
     });
   }
 

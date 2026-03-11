@@ -60,6 +60,12 @@
         "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
         "defaultValue": true
       },
+      "show_photo_instructions_before_submit": {
+        "type": "boolean",
+        "label": "Show photo instructions before verification submission",
+        "helpText": "When enabled users see the configured Photo Instructions after clicking \"Submit Verification\" and before uploading photos. If no instructions are configured the user proceeds directly to the acknowledgement screen and photo upload.",
+        "defaultValue": false
+      },
       "deny_reason_1_label": {
         "type": "string",
         "label": "Denial reason 1 label",

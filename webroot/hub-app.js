@@ -1,5 +1,6 @@
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 import brandLogoUrl from './logo.png';
+import { HOW_TO_USE_APP_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
@@ -90,6 +91,7 @@ function createShell(root, inline) {
           </p>
           <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
           <div class="row">
+            <button data-el="photo-instructions-continue" class="btn-primary hidden" type="button">Continue to Submission</button>
             <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
           </div>
         </div>
@@ -117,6 +119,7 @@ function createShell(root, inline) {
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
     photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
+    photoInstructionsContinue: root.querySelector('[data-el="photo-instructions-continue"]'),
     photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
   };
 }
@@ -385,9 +388,11 @@ export function mountHub(options = {}) {
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
   let autoRefreshTimerId = 0;
+  const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
+    ...(howToUseUrl ? [{ label: 'How to use this app', url: howToUseUrl }] : []),
   ];
 
   if (refs.brandLogo) {
@@ -447,17 +452,6 @@ export function mountHub(options = {}) {
     });
   }
 
-  if (refs.photoInstructionsClose && refs.photoInstructionsModal) {
-    refs.photoInstructionsClose.addEventListener('click', () => {
-      refs.photoInstructionsModal.classList.add('hidden');
-    });
-    refs.photoInstructionsModal.addEventListener('click', (event) => {
-      if (event.target === refs.photoInstructionsModal) {
-        refs.photoInstructionsModal.classList.add('hidden');
-      }
-    });
-  }
-
   function setBusy(next) {
     isBusy = Boolean(next);
     for (const button of root.querySelectorAll('button')) {
@@ -484,6 +478,15 @@ export function mountHub(options = {}) {
   async function openSubmitForm() {
     if (!hubForms?.submit) {
       return;
+    }
+    const shouldShowPhotoInstructionsFirst = Boolean(
+      hubState?.config?.showPhotoInstructionsBeforeSubmit && String(hubState?.config?.photoInstructions || '').trim()
+    );
+    if (shouldShowPhotoInstructionsFirst) {
+      const continueToSubmission = await requestPhotoInstructionsReview({ requireContinue: true });
+      if (!continueToSubmission) {
+        return;
+      }
     }
     const acknowledgements = await requestSubmitAcknowledgements();
     if (!acknowledgements) {
@@ -564,14 +567,56 @@ export function mountHub(options = {}) {
     });
   }
 
+  function requestPhotoInstructionsReview(options = {}) {
+    const { requireContinue = false } = options;
+    return new Promise((resolve) => {
+      if (
+        !refs.photoInstructionsModal ||
+        !refs.photoInstructionsBody ||
+        !refs.photoInstructionsClose ||
+        !refs.photoInstructionsContinue
+      ) {
+        resolve(false);
+        return;
+      }
+
+      refs.photoInstructionsBody.innerHTML = renderMarkdown(
+        renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
+      );
+      refs.photoInstructionsContinue.classList.toggle('hidden', !requireContinue);
+
+      const close = (result) => {
+        refs.photoInstructionsModal.classList.add('hidden');
+        refs.photoInstructionsClose.removeEventListener('click', onClose);
+        refs.photoInstructionsContinue.removeEventListener('click', onContinue);
+        refs.photoInstructionsModal.removeEventListener('click', onBackdrop);
+        refs.photoInstructionsContinue.classList.add('hidden');
+        resolve(result);
+      };
+
+      const onClose = () => {
+        close(requireContinue ? false : true);
+      };
+
+      const onContinue = () => {
+        close(true);
+      };
+
+      const onBackdrop = (event) => {
+        if (event.target === refs.photoInstructionsModal) {
+          close(requireContinue ? false : true);
+        }
+      };
+
+      refs.photoInstructionsClose.addEventListener('click', onClose);
+      refs.photoInstructionsContinue.addEventListener('click', onContinue);
+      refs.photoInstructionsModal.addEventListener('click', onBackdrop);
+      refs.photoInstructionsModal.classList.remove('hidden');
+    });
+  }
+
   function openPhotoInstructionsModal() {
-    if (!refs.photoInstructionsModal || !refs.photoInstructionsBody) {
-      return;
-    }
-    refs.photoInstructionsBody.innerHTML = renderMarkdown(
-      renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
-    );
-    refs.photoInstructionsModal.classList.remove('hidden');
+    void requestPhotoInstructionsReview();
   }
 
   function renderState(state) {

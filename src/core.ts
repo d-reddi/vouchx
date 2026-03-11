@@ -78,6 +78,7 @@ type RuntimeConfig = {
   autoFlairReconcileEnabled: boolean;
   requiredPhotoCount: number;
   photoInstructions: string;
+  showPhotoInstructionsBeforeSubmit: boolean;
   denyReasons: DenyReasonConfig[];
   pendingTurnaroundDays: number;
   modmailSubject: string;
@@ -435,6 +436,7 @@ const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
+const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
@@ -4299,6 +4301,9 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
+  );
   const verificationsDisabledMessage = normalizeInstallSettingMessage(
     rawVerificationsDisabledMessage,
     VERIFICATIONS_DISABLED_MESSAGE,
@@ -4308,6 +4313,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const showPhotoInstructionsBeforeSubmit =
+    typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
+      ? rawShowPhotoInstructionsBeforeSubmit
+      : parseBooleanString(rawShowPhotoInstructionsBeforeSubmit, false);
   const pendingTurnaroundRaw = firstNonEmpty(stored[CONFIG_FIELD.pendingTurnaroundDays]);
   const pendingTurnaroundDays = parsePositiveInt(pendingTurnaroundRaw, DEFAULT_PENDING_TURNAROUND_DAYS);
   const approveBodyRaw = firstNonEmpty(stored[CONFIG_FIELD.approveBody]) ?? DEFAULT_APPROVE_BODY;
@@ -4329,6 +4338,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     autoFlairReconcileEnabled,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
+    showPhotoInstructionsBeforeSubmit,
     denyReasons,
     pendingTurnaroundDays: pendingTurnaroundDays ?? DEFAULT_PENDING_TURNAROUND_DAYS,
     modmailSubject:
@@ -5728,6 +5738,7 @@ export {
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
   INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
+  INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT,
   INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
   MAX_DENY_REASON_LABEL_LENGTH,
   MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,
