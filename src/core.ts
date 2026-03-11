@@ -83,6 +83,7 @@ type RuntimeConfig = {
   pendingTurnaroundDays: number;
   modmailSubject: string;
   pendingBody: string;
+  alwaysIncludeDenialNotesInModmail: boolean;
   flairText: string;
   flairTemplateId: string;
   flairCssClass: string;
@@ -277,6 +278,7 @@ type ModmailTemplatesFormData = {
   pendingTurnaroundDays?: string;
   modmailSubject?: string;
   pendingBody?: string;
+  alwaysIncludeDenialNotesInModmail?: boolean;
   approveHeader?: string;
   approveBody?: string;
   denyHeader?: string;
@@ -440,7 +442,11 @@ const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instru
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
-  'Hi u/{{username}},\n\nWe could not approve your verification because of: {{reason}}.\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
+  'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
+const MODMAIL_DENIAL_NOTES_PREFIX = 'Moderator Notes:';
+const DENIAL_NOTES_PLACEHOLDER_KEY = 'denial_notes';
+const LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY = 'reason';
+const DENIAL_NOTES_BLOCK_MARKER = '__vouchx_denial_notes_block__';
 const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
   {
     id: 'reason_1',
@@ -472,7 +478,7 @@ const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
     templateConfigFieldName: 'deny_reason_4_template',
     defaultLabel: 'Other',
     defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\nModerator note: {{reason}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
+      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
   },
 ] as const;
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -701,6 +707,7 @@ const CONFIG_FIELD = {
   pendingTurnaroundDays: 'pending_turnaround_days',
   modmailSubject: 'modmail_subject',
   pendingBody: 'pending_body',
+  alwaysIncludeDenialNotesInModmail: 'always_include_denial_notes_in_modmail',
   flairText: 'flair_text',
   flairTemplateId: 'flair_template_id',
   flairCssClass: 'flair_css_class',
@@ -2287,18 +2294,32 @@ async function sendDenialModmail(
   const subredditName = sanitizeSubredditName(record.subredditName);
   const configuredReason = getConfiguredDenyReason(config, reason);
   const template = configuredReason?.template.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE;
-  const moderatorNotes = record.denyNotes?.trim() ?? '';
+  const moderatorNotes = normalizeDenialNotes(record.denyNotes);
+  const formattedModeratorNotes = formatDenialNotesForModmail(moderatorNotes);
+  const denialNotesAlreadyIncluded =
+    templateIncludesDenialNotesPlaceholder(template) || templateIncludesDenialNotesPlaceholder(config.denyHeader);
 
   const values = {
     username: record.username,
     mod: record.moderator ?? '',
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
-    reason: moderatorNotes,
+    reason: formattedModeratorNotes,
+    denial_notes: formattedModeratorNotes,
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
-  const body = prependModmailHeader(fillTemplate(template, values), config.denyHeader, values);
+  const renderedHeader = renderDenialTemplateText(config.denyHeader, values, moderatorNotes);
+  const body = prependRenderedModmailHeader(
+    renderDenialModmailBody(
+      template,
+      values,
+      moderatorNotes,
+      config.alwaysIncludeDenialNotesInModmail,
+      denialNotesAlreadyIncluded
+    ),
+    renderedHeader
+  );
 
   return await sendUserModmailWithFallback(context, {
     subredditId,
@@ -4213,6 +4234,7 @@ async function onSaveModmailTemplatesValues(
   const pendingTurnaroundDays = parsePositiveInt(values.pendingTurnaroundDays, DEFAULT_PENDING_TURNAROUND_DAYS);
   const modmailSubject = values.modmailSubject?.trim();
   const pendingBody = values.pendingBody?.trim();
+  const alwaysIncludeDenialNotesInModmail = values.alwaysIncludeDenialNotesInModmail === true;
   const approveHeader = values.approveHeader?.trim();
   const approveBody = values.approveBody?.trim();
   const denyHeader = values.denyHeader?.trim();
@@ -4251,6 +4273,7 @@ async function onSaveModmailTemplatesValues(
     [CONFIG_FIELD.pendingTurnaroundDays]: `${pendingTurnaroundDays}`,
     [CONFIG_FIELD.modmailSubject]: modmailSubject,
     [CONFIG_FIELD.pendingBody]: pendingBody,
+    [CONFIG_FIELD.alwaysIncludeDenialNotesInModmail]: `${alwaysIncludeDenialNotesInModmail}`,
     [CONFIG_FIELD.approveHeader]: approveHeader,
     [CONFIG_FIELD.approveBody]: approveBody,
     [CONFIG_FIELD.denyHeader]: denyHeader,
@@ -4345,6 +4368,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
       firstNonEmpty(stored[CONFIG_FIELD.modmailSubject], stored[LEGACY_CONFIG_FIELD.pendingSubject]) ??
       DEFAULT_MODMAIL_SUBJECT,
     pendingBody: firstNonEmpty(stored[CONFIG_FIELD.pendingBody]) ?? DEFAULT_PENDING_BODY,
+    alwaysIncludeDenialNotesInModmail: parseBooleanString(
+      stored[CONFIG_FIELD.alwaysIncludeDenialNotesInModmail],
+      false
+    ),
     flairText: firstNonEmpty(stored[CONFIG_FIELD.flairText]) ?? DEFAULT_FLAIR_TEXT,
     flairTemplateId: firstNonEmpty(stored[CONFIG_FIELD.flairTemplateId]) ?? '',
     flairCssClass: firstNonEmpty(stored[CONFIG_FIELD.flairCssClass]) ?? '',
@@ -5261,12 +5288,102 @@ function buildModmailSubject(template: string, values: Record<string, string>): 
   return (subject || fallback || 'Verification update').replace(/\s+/g, ' ').slice(0, 100);
 }
 
+function prependRenderedModmailHeader(body: string, header: string): string {
+  const normalizedHeader = header.replace(/\s+/g, ' ').trim();
+  if (!normalizedHeader) {
+    return body;
+  }
+  return `---\n\n**${normalizedHeader}**\n\n${body}`;
+}
+
 function prependModmailHeader(body: string, headerTemplate: string, values: Record<string, string>): string {
-  const header = fillTemplate(headerTemplate, values).replace(/\s+/g, ' ').trim();
+  const header = fillTemplate(headerTemplate, values);
   if (!header) {
     return body;
   }
-  return `---\n\n**${header}**\n\n${body}`;
+  return prependRenderedModmailHeader(body, header);
+}
+
+function normalizeDenialNotes(notes: string | null | undefined): string {
+  return String(notes ?? '').trim();
+}
+
+function formatDenialNotesForModmail(notes: string): string {
+  return notes ? `${MODMAIL_DENIAL_NOTES_PREFIX} ${notes}` : '';
+}
+
+function templateIncludesDenialNotesPlaceholder(template: string): boolean {
+  const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  for (const match of template.matchAll(placeholderPattern)) {
+    const key = normalizePlaceholderKey(match[1] ?? '');
+    if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeDenialNotesTemplateBlocks(template: string): string {
+  return template
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      const placeholderOnlyMatch = trimmed.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
+      if (placeholderOnlyMatch) {
+        const key = normalizePlaceholderKey(placeholderOnlyMatch[1] ?? '');
+        if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+          return DENIAL_NOTES_BLOCK_MARKER;
+        }
+      }
+
+      const prefixedPlaceholderMatch = trimmed.match(/^(moderator\s+notes?|reason)\s*:\s*\{\{\s*([^{}]+?)\s*\}\}$/i);
+      if (prefixedPlaceholderMatch) {
+        const key = normalizePlaceholderKey(prefixedPlaceholderMatch[2] ?? '');
+        if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+          return DENIAL_NOTES_BLOCK_MARKER;
+        }
+      }
+
+      return line;
+    })
+    .join('\n');
+}
+
+function collapseBlankLines(text: string): string {
+  return text.replace(/\n(?:[ \t]*\n){2,}/g, '\n\n');
+}
+
+function renderDenialTemplateText(template: string, values: Record<string, string>, moderatorNotes: string): string {
+  const normalizedNotes = normalizeDenialNotes(moderatorNotes);
+  const formattedNotes = formatDenialNotesForModmail(normalizedNotes);
+  const normalizedTemplate = normalizeDenialNotesTemplateBlocks(template);
+  const rendered = fillTemplate(normalizedTemplate, {
+    ...values,
+    [DENIAL_NOTES_PLACEHOLDER_KEY]: formattedNotes,
+    [LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY]: formattedNotes,
+  })
+    .split(DENIAL_NOTES_BLOCK_MARKER)
+    .join(formattedNotes);
+
+  return formattedNotes ? rendered : collapseBlankLines(rendered);
+}
+
+function renderDenialModmailBody(
+  template: string,
+  values: Record<string, string>,
+  moderatorNotes: string,
+  alwaysIncludeDenialNotesInModmail: boolean,
+  denialNotesAlreadyIncluded: boolean
+): string {
+  const normalizedNotes = normalizeDenialNotes(moderatorNotes);
+  const formattedNotes = formatDenialNotesForModmail(normalizedNotes);
+  let rendered = renderDenialTemplateText(template, values, moderatorNotes);
+
+  if (alwaysIncludeDenialNotesInModmail && formattedNotes && !denialNotesAlreadyIncluded) {
+    rendered = `${rendered.trimEnd()}\n\n${formattedNotes}`;
+  }
+
+  return formattedNotes ? rendered : collapseBlankLines(rendered);
 }
 
 function fillTemplate(template: string, values: Record<string, string>): string {
