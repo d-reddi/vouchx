@@ -66,6 +66,12 @@
         "helpText": "When enabled users see the configured Photo Instructions after clicking \"Submit Verification\" and before uploading photos. If no instructions are configured the user proceeds directly to the acknowledgement screen and photo upload.",
         "defaultValue": false
       },
+      "settings_tab_requires_config_access": {
+        "type": "boolean",
+        "label": "Restrict Settings tab to mods with config/settings access",
+        "helpText": "When enabled, only moderators with config/settings access can see and use the Settings tab in the moderator panel. Review queue access is unchanged.",
+        "defaultValue": false
+      },
       "deny_reason_1_label": {
         "type": "string",
         "label": "Denial reason 1 label",
