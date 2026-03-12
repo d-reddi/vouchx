@@ -21,11 +21,17 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
   },
 ];
 const MANUAL_SOURCE_MARKERS = ['css-substring-match', 'css-wildcard-match'];
+const WORKTREE_LABEL = typeof __VOUCHX_WORKTREE_LABEL__ === 'string' ? __VOUCHX_WORKTREE_LABEL__.trim() : '';
 
 function createShell(root, inline) {
   root.innerHTML = `
     <div class="shell">
-      <div data-el="loading" class="loading-screen">${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</div>
+      <div data-el="loading" class="loading-screen">
+        <div class="loading-copy">
+          ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
+          <p>${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</p>
+        </div>
+      </div>
       <div data-el="main" class="hub-main hidden">
         <section class="hub-surface">
           <header class="hub-hero">
@@ -42,6 +48,7 @@ function createShell(root, inline) {
                 <div class="hub-title-copy">
                   <p class="hub-kicker">VouchX</p>
                   <h1>Verification Hub</h1>
+                  ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
                 </div>
               </div>
               <p data-el="meta-username" class="meta"></p>
@@ -748,22 +755,23 @@ export function mountHub(options = {}) {
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
-    if (state.isModerator) {
-      statusText = 'Moderator';
-      refs.metaStatus.classList.add('status-pending');
-    } else if (state.viewerVerifiedByFlair) {
+    if (state.viewerVerifiedByFlair) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       refs.metaStatus.classList.add('status-verified');
     } else if (isRestricted) {
       statusText = 'Blocked';
       refs.metaStatus.classList.add('status-blocked');
     } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
-      statusText = 'Pending re-review';
-      refs.metaStatus.classList.add('status-pending');
+      statusText = 'Pending Re-review';
+      refs.metaStatus.classList.add('status-warning');
     } else if (state.userLatest?.status === 'pending') {
-      statusText = 'Pending review';
-      refs.metaStatus.classList.add('status-pending');
-    } else {
+      statusText = 'Pending Review';
+      refs.metaStatus.classList.add('status-warning');
+    } else if (state.userLatest?.status === 'denied') {
+      statusText = 'Denied - Resubmit';
+      refs.metaStatus.classList.add('status-danger');
+    } else if (state.userLatest?.status === 'removed') {
+      statusText = 'Verification Removed';
       refs.metaStatus.classList.add('status-danger');
     }
     refs.metaStatus.textContent = statusText;
@@ -791,15 +799,15 @@ export function mountHub(options = {}) {
         infoText = `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`;
       }
     } else if (state.userLatest?.status === 'denied') {
-      commandTitle = 'Ready to resubmit';
+      commandTitle = 'Denied - Resubmit your photo(s)';
       const parts = [];
-      if (state.userLatest.reviewedAt) {
-        parts.push(`Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`);
-      }
       if (state.userLatest.denyReason) {
         parts.push(`Reason: ${getDenyReasonLabel(state, state.userLatest.denyReason)}.`);
       }
-      infoText = parts.join(' ');
+      if (state.userLatest.reviewedAt) {
+        parts.push(`Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`);
+      }
+      infoText = parts.join('\n');
     } else if (state.userLatest?.status === 'removed') {
       commandTitle = 'Verification removed';
       if (state.userLatest.removedAt) {
