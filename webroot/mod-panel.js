@@ -1,8 +1,11 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { BUG_REPORT_URL } from './app-config.js';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+  const settingsPrimaryTabButton =
+    tabButtons.find((button) => String(button.dataset.tab || '') === 'settings') || null;
   const mainContent = document.getElementById('main-content');
   const tabPanels = {
     pending: document.getElementById('tab-pending'),
@@ -87,6 +90,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const approveHeaderInput = document.getElementById('approve-header');
   const approveBodyInput = document.getElementById('approve-body');
   const denyHeaderInput = document.getElementById('deny-header');
+  const alwaysIncludeDenialNotesInModmailInput = document.getElementById('always-include-denial-notes-in-modmail');
   const removeHeaderInput = document.getElementById('remove-header');
   const removeBodyInput = document.getElementById('remove-body');
   const themePresetList = document.getElementById('theme-preset-list');
@@ -132,6 +136,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
   const blockConfirmBtn = document.getElementById('block-confirm-btn');
+  const bugReportLink = document.getElementById('bug-report-link');
 
   let state = null;
   let stateInitialized = false;
@@ -191,6 +196,19 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       return null;
     }
     return isDarkMode() ? palette.dark : palette.light;
+  }
+
+  function normalizeExternalUrl(value) {
+    const candidate = String(value || '').trim();
+    if (!candidate) {
+      return '';
+    }
+    try {
+      const parsed = new URL(candidate);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+    } catch {
+      return '';
+    }
   }
 
   function themeLightTokens(value) {
@@ -448,6 +466,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       pendingTurnaroundDays: stringInputValue(pendingTurnaroundDaysInput),
       modmailSubject: stringInputValue(modmailSubjectInput),
       pendingBody: stringInputValue(pendingBodyInput),
+      alwaysIncludeDenialNotesInModmail: boolInputValue(alwaysIncludeDenialNotesInModmailInput),
       approveHeader: stringInputValue(approveHeaderInput),
       approveBody: stringInputValue(approveBodyInput),
       denyHeader: stringInputValue(denyHeaderInput),
@@ -461,6 +480,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       draft.pendingTurnaroundDays !== `${state.config.pendingTurnaroundDays ?? ''}` ||
       draft.modmailSubject !== String(state.config.modmailSubject || '') ||
       draft.pendingBody !== String(state.config.pendingBody || '') ||
+      draft.alwaysIncludeDenialNotesInModmail !== (state.config.alwaysIncludeDenialNotesInModmail === true) ||
       draft.approveHeader !== String(state.config.approveHeader || '') ||
       draft.approveBody !== String(state.config.approveBody || '') ||
       draft.denyHeader !== String(state.config.denyHeader || '') ||
@@ -577,6 +597,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (pendingBodyInput) {
       pendingBodyInput.value = draft.pendingBody;
+    }
+    if (alwaysIncludeDenialNotesInModmailInput) {
+      alwaysIncludeDenialNotesInModmailInput.checked = draft.alwaysIncludeDenialNotesInModmail === true;
     }
     if (approveHeaderInput) approveHeaderInput.value = draft.approveHeader;
     if (approveBodyInput) approveBodyInput.value = draft.approveBody;
@@ -956,24 +979,40 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
   }
 
+  function canAccessSettingsTab() {
+    return Boolean(state && state.canAccessSettingsTab === true);
+  }
+
+  function renderPrimaryTabs() {
+    if (settingsPrimaryTabButton) {
+      settingsPrimaryTabButton.classList.toggle('hidden', !canAccessSettingsTab());
+    }
+    if (!canAccessSettingsTab() && tabPanels.settings && !tabPanels.settings.classList.contains('hidden')) {
+      setTab('pending');
+    }
+  }
+
   function setTab(tabName) {
+    const requestedTab = tabName === 'history' || tabName === 'blocked' || tabName === 'settings' ? tabName : 'pending';
+    const resolvedTab = requestedTab === 'settings' && !canAccessSettingsTab() ? 'pending' : requestedTab;
     for (const [name, panel] of Object.entries(tabPanels)) {
       if (!panel) {
         continue;
       }
-      if (name === tabName) {
+      if (name === resolvedTab) {
         panel.classList.remove('hidden');
       } else {
         panel.classList.add('hidden');
       }
     }
     for (const btn of tabButtons) {
-      if (btn.dataset.tab === tabName) {
+      if (btn.dataset.tab === resolvedTab) {
         btn.classList.add('tab-btn-active');
       } else {
         btn.classList.remove('tab-btn-active');
       }
     }
+    return resolvedTab;
   }
 
   function setSettingsTab(tabName) {
@@ -1178,7 +1217,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     const badge = document.createElement('span');
     badge.className = 'pending-age-badge pending-age-resubmitted';
     badge.textContent = 'Resubmitted';
-    badge.title = 'This pending request is a reopened resubmission';
+    badge.title = 'This request was reopened for another review.';
     return badge;
   }
 
@@ -1289,7 +1328,8 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       denyNotes = document.createElement('textarea');
       denyNotes.className = 'field-textarea';
       denyNotes.rows = 3;
-      denyNotes.placeholder = 'Optional notes saved with the denial and included in any modmail template that uses {{reason}}';
+      denyNotes.placeholder =
+        'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
       card.appendChild(denyNotes);
     }
 
@@ -1427,7 +1467,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     blockedList.innerHTML = '';
     if (!state || !Array.isArray(state.blocked) || state.blocked.length === 0) {
-      renderEmptyState(blockedList, 'No blocked users', 'Blocked users and denial-threshold lockouts will appear here.');
+      renderEmptyState(blockedList, 'No blocked users', 'Users you block manually and users blocked after repeated denials will appear here.');
       return;
     }
 
@@ -1498,22 +1538,38 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       for (const item of historySearchItems) {
         const card = document.createElement('article');
         card.className = 'item';
+        card.appendChild(createUsernameHeading(item.username));
         const statusLabel =
           item.status === 'pending' && item.parentVerificationId
             ? 'PENDING RE-REVIEW'
             : String(item.status || '').toUpperCase();
-        const reopenedMeta =
-          item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none'
-            ? `<p class="item-meta reopened-warning">Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}</p>`
-            : '';
-        card.innerHTML = `
-          <h3 class="item-title">u/${item.username}</h3>
-          <p class="item-meta">Status: ${statusLabel}</p>
-          <p class="item-meta">Submitted: ${formatTime(item.submittedAt)}</p>
-          <p class="item-meta">Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}</p>
-          <p class="item-meta">Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}</p>
-          ${reopenedMeta}
-        `;
+
+        const statusMeta = document.createElement('p');
+        statusMeta.className = 'item-meta';
+        statusMeta.textContent = `Status: ${statusLabel}`;
+        card.appendChild(statusMeta);
+
+        const submittedMeta = document.createElement('p');
+        submittedMeta.className = 'item-meta';
+        submittedMeta.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
+        card.appendChild(submittedMeta);
+
+        const reviewedMeta = document.createElement('p');
+        reviewedMeta.className = 'item-meta';
+        reviewedMeta.textContent = `Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}`;
+        card.appendChild(reviewedMeta);
+
+        const moderatorMeta = document.createElement('p');
+        moderatorMeta.className = 'item-meta';
+        moderatorMeta.textContent = `Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}`;
+        card.appendChild(moderatorMeta);
+
+        if (item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none') {
+          const reopenedMeta = document.createElement('p');
+          reopenedMeta.className = 'item-meta reopened-warning';
+          reopenedMeta.textContent = `Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}`;
+          card.appendChild(reopenedMeta);
+        }
         if (item.status === 'denied' && item.denyReason) {
           const reasonMeta = document.createElement('p');
           reasonMeta.className = 'item-meta';
@@ -1649,7 +1705,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (verificationsDisabledMessageHint) {
       const message = String(state.config.verificationsDisabledMessage || '').trim();
-      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" Configurable in install settings for this subreddit.`;
+      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" You can change it in this subreddit's install settings.`;
     }
     if (installSettingsRow) {
       installSettingsRow.classList.toggle('hidden', !(state.canOpenInstallSettings === true));
@@ -1684,6 +1740,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     }
     if (pendingBodyInput) {
       pendingBodyInput.value = state.config.pendingBody || '';
+    }
+    if (alwaysIncludeDenialNotesInModmailInput) {
+      alwaysIncludeDenialNotesInModmailInput.checked = state.config.alwaysIncludeDenialNotesInModmail === true;
     }
     approveHeaderInput.value = state.config.approveHeader || '';
     approveBodyInput.value = state.config.approveBody || '';
@@ -2138,6 +2197,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       applyModeratorThemeVariables(document.documentElement, activeTokens);
       persistThemeSnapshot(state.resolvedTheme);
     }
+    renderPrimaryTabs();
     updateHeroMeta();
     renderPending();
     renderBlocked();
@@ -2149,7 +2209,17 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     renderSettings();
     renderTemplates();
     renderThemes();
+    renderFooterMeta();
     setSettingsTab(activeSettingsTab);
+  }
+
+  function renderFooterMeta() {
+    if (!bugReportLink) {
+      return;
+    }
+    const bugReportUrl = normalizeExternalUrl(BUG_REPORT_URL);
+    bugReportLink.classList.toggle('hidden', !bugReportUrl);
+    bugReportLink.setAttribute('href', bugReportUrl || '#');
   }
 
   function createPhotoWrap(url, alt) {
@@ -2257,7 +2327,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
   function appendSubmissionAcknowledgementMeta(container, item) {
     appendAcknowledgementMeta(
       container,
-      'Age gate and terms and conditions accepted at',
+      'Terms accepted and 18+ confirmed at',
       item.acknowledgedAt || null
     );
   }
@@ -2457,6 +2527,18 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     markdownGuideLink.addEventListener('click', (event) => {
       event.preventDefault();
       post({ type: 'openExternalUrl', url: markdownGuideLink.href });
+    });
+  }
+
+  if (bugReportLink) {
+    bugReportLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      const url = normalizeExternalUrl(BUG_REPORT_URL);
+      if (!url) {
+        showToast('Bug report URL is not configured.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url });
     });
   }
 
@@ -2718,6 +2800,9 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
       pendingTurnaroundDays: pendingTurnaroundDaysInput ? pendingTurnaroundDaysInput.value : '',
       modmailSubject: modmailSubjectInput ? modmailSubjectInput.value : '',
       pendingBody: pendingBodyInput ? pendingBodyInput.value : '',
+      alwaysIncludeDenialNotesInModmail: alwaysIncludeDenialNotesInModmailInput
+        ? Boolean(alwaysIncludeDenialNotesInModmailInput.checked)
+        : false,
       approveHeader: approveHeaderInput.value,
       approveBody: approveBodyInput.value,
       denyHeader: denyHeaderInput.value,
@@ -2850,10 +2935,10 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       if (tab) {
-        setTab(tab);
-        if (tab === 'pending') {
+        const activeTab = setTab(tab);
+        if (activeTab === 'pending') {
           void refreshFromRealtimeSignal();
-        } else if (tab === 'history') {
+        } else if (activeTab === 'history') {
           setHistoryView(activeHistoryView);
           if (activeHistoryView === 'records') {
             runHistoryRecordsSearchWithInputGuard(true);
@@ -2870,7 +2955,7 @@ import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowTo
               runAuditSearchWithInputGuard(true);
             }
           }
-        } else if (tab === 'settings') {
+        } else if (activeTab === 'settings') {
           setSettingsTab(activeSettingsTab);
         }
       }

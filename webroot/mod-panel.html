@@ -41,7 +41,7 @@
         <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>
         <button class="tab-btn" data-tab="blocked">Blocked</button>
-        <button class="tab-btn" data-tab="settings">Settings</button>
+        <button class="tab-btn hidden" data-tab="settings">Settings</button>
       </nav>
 
       <main id="main-content" class="hidden">
@@ -49,7 +49,7 @@
           <div class="section-head queue-section-head">
             <div>
               <h2>Queue</h2>
-              <p class="section-copy muted">Review pending verification requests, lock work in progress, and respond quickly.</p>
+              <p class="section-copy muted">Review pending verification requests.</p>
             </div>
           </div>
           <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
@@ -247,7 +247,7 @@
                   <span>Allow users to submit verifications</span>
                 </label>
                 <p id="verifications-disabled-message-hint" class="muted small">
-                  When disabled, users see: "" Configurable in install settings for this subreddit.
+                  When disabled, users see: "" You can change it in this subreddit's install settings.
                 </p>
               </div>
 
@@ -259,12 +259,12 @@
                     <input id="flair-template-id" class="field-input" type="text" />
                   </div>
                   <div class="field-stack">
-                    <label class="field-label" for="flair-css-class">Flair CSS matcher (optional)</label>
+                    <label class="field-label" for="flair-css-class">Flair CSS text to match (optional)</label>
                     <input id="flair-css-class" class="field-input" type="text" />
                   </div>
                 </div>
                 <p class="muted small">
-                  Verified status uses OR logic: template ID match or CSS substring match.
+                  A user counts as verified if either the flair template ID matches or the flair CSS class contains this value.
                 </p>
               </div>
 
@@ -349,7 +349,7 @@
                   <div>
                     <h3 class="section-heading">Denial</h3>
                     <p class="section-copy muted small">
-                      Denial reason labels come from subreddit install settings. Fields below only appear for enabled labels.
+                      Denial reason labels come from this subreddit's install settings. Only enabled reasons appear below.
                     </p>
                   </div>
                 </div>
@@ -357,6 +357,14 @@
                   <label class="field-label" for="deny-header">Denial header</label>
                   <input id="deny-header" class="field-input" type="text" />
                 </div>
+                <label class="toggle-row">
+                  <input id="always-include-denial-notes-in-modmail" type="checkbox" />
+                  <span>Always include moderator denial notes in denial modmail</span>
+                </label>
+                <p class="muted small field-help">
+                  Enabled: denial notes are always included.
+                  Disabled: notes appear only if the template uses {{denial_notes}}.
+                </p>
 
                 <div id="deny-template-reason-1-wrap" class="template-reason-block hidden">
                   <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
@@ -397,8 +405,8 @@
 
             <div class="panel-footer">
               <p class="muted small">
-                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{reason}}, {{days}}.
-                In denial templates, `{{reason}}` inserts the optional moderator notes entered during review.
+                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{days}}.
+                Denial bodies also support {{denial_notes}} for moderator-entered denial notes.
                 The `{{days}}` token already includes the unit, for example `3 days`.
                 Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
               </p>
@@ -430,7 +438,7 @@
                 <label class="field-label" for="use-custom-colors">Use custom colors</label>
                 <label class="toggle-row">
                   <input id="use-custom-colors" type="checkbox" />
-                  <span>Override primary, accent, and background colors</span>
+                  <span>Enable Custom Colors</span>
                 </label>
 
                 <div class="field-grid theme-controls-grid">
@@ -483,12 +491,12 @@
                 <div class="card-head">
                   <div>
                     <h3 class="section-heading">Preview</h3>
-                    <p class="section-copy muted small">Resolved theme tokens are previewed here before you save.</p>
+                    <p class="section-copy muted small">Preview the selected theme before saving.</p>
                   </div>
                 </div>
                 <div id="theme-preview" class="theme-preview">
                   <p class="theme-preview-title">Live preview</p>
-                  <p class="theme-preview-muted">Buttons, borders, and text use resolved theme tokens.</p>
+                  <p class="theme-preview-muted">This preview shows how buttons borders and text will appear.</p>
                   <div class="theme-preview-box">
                     <p class="item-meta">Preview card border and background blend</p>
                   </div>
@@ -510,6 +518,18 @@
           </div>
         </section>
       </main>
+
+      <footer class="panel-footer panel-page-footer">
+        <div class="row panel-page-footer-row">
+          <a
+            id="bug-report-link"
+            class="muted small footer-link-muted hidden"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Report a Bug</a>
+        </div>
+      </footer>
     </div>
 
     <div id="toast" class="toast hidden"></div>

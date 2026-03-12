@@ -78,10 +78,12 @@ type RuntimeConfig = {
   autoFlairReconcileEnabled: boolean;
   requiredPhotoCount: number;
   photoInstructions: string;
+  showPhotoInstructionsBeforeSubmit: boolean;
   denyReasons: DenyReasonConfig[];
   pendingTurnaroundDays: number;
   modmailSubject: string;
   pendingBody: string;
+  alwaysIncludeDenialNotesInModmail: boolean;
   flairText: string;
   flairTemplateId: string;
   flairCssClass: string;
@@ -139,6 +141,8 @@ type DashboardData = {
   canReview: boolean;
   canManageUsers: boolean;
   canOpenInstallSettings: boolean;
+  hasConfigAccess: boolean;
+  canAccessSettingsTab: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -276,6 +280,7 @@ type ModmailTemplatesFormData = {
   pendingTurnaroundDays?: string;
   modmailSubject?: string;
   pendingBody?: string;
+  alwaysIncludeDenialNotesInModmail?: boolean;
   approveHeader?: string;
   approveBody?: string;
   denyHeader?: string;
@@ -379,6 +384,8 @@ type ModPanelStatePayload = {
   viewerUsername: string | null;
   subredditName: string;
   canOpenInstallSettings: boolean;
+  hasConfigAccess: boolean;
+  canAccessSettingsTab: boolean;
   pendingCount: number;
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
@@ -435,10 +442,16 @@ const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
+const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
+const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
-  'Hi u/{{username}},\n\nWe could not approve your verification because of: {{reason}}.\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
+  'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
+const MODMAIL_DENIAL_NOTES_PREFIX = 'Moderator Notes:';
+const DENIAL_NOTES_PLACEHOLDER_KEY = 'denial_notes';
+const LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY = 'reason';
+const DENIAL_NOTES_BLOCK_MARKER = '__vouchx_denial_notes_block__';
 const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
   {
     id: 'reason_1',
@@ -470,7 +483,7 @@ const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
     templateConfigFieldName: 'deny_reason_4_template',
     defaultLabel: 'Other',
     defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\nModerator note: {{reason}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
+      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
   },
 ] as const;
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -485,7 +498,7 @@ const DEFAULT_REQUIRED_PHOTO_COUNT = 2;
 const DEFAULT_PENDING_TURNAROUND_DAYS = 3;
 const DEFAULT_MODMAIL_SUBJECT = 'Verification update from r/{{subreddit}}';
 const DEFAULT_PENDING_BODY =
-  'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time {{days}}\n\nThe moderation team';
+  'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time: {{days}}\n\nThe moderation team';
 const DEFAULT_APPROVE_HEADER = 'Verification Approved';
 const DEFAULT_REMOVAL_HEADER = 'Verification Revoked';
 const LEGACY_DEFAULT_APPROVE_BODY =
@@ -699,6 +712,7 @@ const CONFIG_FIELD = {
   pendingTurnaroundDays: 'pending_turnaround_days',
   modmailSubject: 'modmail_subject',
   pendingBody: 'pending_body',
+  alwaysIncludeDenialNotesInModmail: 'always_include_denial_notes_in_modmail',
   flairText: 'flair_text',
   flairTemplateId: 'flair_template_id',
   flairCssClass: 'flair_css_class',
@@ -817,9 +831,9 @@ function buildSubmitVerificationForm(data: { [key: string]: any }) {
 
   return {
     title: 'Submit verification photos',
-    description: `You are submitting your photos for review by the moderators to receive the "Verified" Flair. Please upload ${requiredPhotoCount} image${
+    description: `Upload ${requiredPhotoCount} verification photo${
       requiredPhotoCount === 1 ? '' : 's'
-    } below to submit.`,
+    } for moderator review. Press submit below to submit.`,
     fields: [...photoFields],
     acceptLabel: 'Submit',
     cancelLabel: 'Cancel',
@@ -828,12 +842,12 @@ function buildSubmitVerificationForm(data: { [key: string]: any }) {
 
 const deleteVerificationDataFormDefinition = {
   title: 'Remove my verification',
-  description: "This will remove your verification and you'll need to resubmit if you want to be verified again.",
+  description: "This removes your verification. If you want to be verified again later you will need to submit a new request.",
   fields: [
     {
       type: 'boolean' as const,
       name: 'confirmDelete',
-      label: 'I understand I will lose my verified status.',
+      label: 'I understand that my verified status will be removed.',
     },
   ],
   acceptLabel: 'Remove verification',
@@ -845,6 +859,8 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
+    hasConfigAccess: dashboard.hasConfigAccess,
+    canAccessSettingsTab: dashboard.canAccessSettingsTab,
     pendingCount: dashboard.pending.length,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
     approved: dashboard.approved,
@@ -2209,7 +2225,7 @@ async function addPendingSubmissionModNote(context: Devvit.Context, record: Veri
   await context.reddit.addModNote({
     subreddit: subredditName,
     user: record.username,
-    note: `Verification request submitted. Acceptance of Terms and 18+ certification recorded on: ${acknowledgedAt}`,
+    note: `Verification request submitted. Terms accepted and 18+ confirmation recorded on: ${acknowledgedAt}`,
   });
 }
 
@@ -2285,18 +2301,32 @@ async function sendDenialModmail(
   const subredditName = sanitizeSubredditName(record.subredditName);
   const configuredReason = getConfiguredDenyReason(config, reason);
   const template = configuredReason?.template.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE;
-  const moderatorNotes = record.denyNotes?.trim() ?? '';
+  const moderatorNotes = normalizeDenialNotes(record.denyNotes);
+  const formattedModeratorNotes = formatDenialNotesForModmail(moderatorNotes);
+  const denialNotesAlreadyIncluded =
+    templateIncludesDenialNotesPlaceholder(template) || templateIncludesDenialNotesPlaceholder(config.denyHeader);
 
   const values = {
     username: record.username,
     mod: record.moderator ?? '',
     subreddit: subredditName,
     date_submitted: formatTimestamp(record.submittedAt),
-    reason: moderatorNotes,
+    reason: formattedModeratorNotes,
+    denial_notes: formattedModeratorNotes,
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
-  const body = prependModmailHeader(fillTemplate(template, values), config.denyHeader, values);
+  const renderedHeader = renderDenialTemplateText(config.denyHeader, values, moderatorNotes);
+  const body = prependRenderedModmailHeader(
+    renderDenialModmailBody(
+      template,
+      values,
+      moderatorNotes,
+      config.alwaysIncludeDenialNotesInModmail,
+      denialNotesAlreadyIncluded
+    ),
+    renderedHeader
+  );
 
   return await sendUserModmailWithFallback(context, {
     subredditId,
@@ -2326,7 +2356,7 @@ async function sendPendingSubmissionModmail(
   };
   const subject = buildModmailSubject(resolvedConfig.modmailSubject, values);
   const acknowledgementAt = formatTimestamp(record.ageAcknowledgedAt || record.submittedAt);
-  const auditFooter = `Acceptance of Terms and 18+ certification recorded on: ${acknowledgementAt}`;
+  const auditFooter = `Terms accepted and 18+ confirmation recorded on: ${acknowledgementAt}`;
   const body = `${fillTemplate(resolvedConfig.pendingBody, values).trimEnd()}\n\n${auditFooter}`;
   return await sendUserModmailWithFallback(context, {
     subredditId,
@@ -2480,11 +2510,15 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   await ensureUserValidationSchedule(context, subredditId, subredditName);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
-  const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
-  const canOpenInstallSettings = viewerUsername
-    ? await hasAllModeratorPermission(context, subredditName, viewerUsername)
-    : false;
+  const moderatorPermissions = viewerUsername
+    ? await getCurrentModeratorPermissionList(context, subredditName, viewerUsername)
+    : [];
+  const canManageUsers = hasManageUsersPermissionInList(moderatorPermissions);
+  const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
+  const canOpenInstallSettings = hasAllModeratorPermissionInList(moderatorPermissions);
+  const hasConfigAccess = hasConfigAccessPermissionInList(moderatorPermissions);
   const canReviewUser = isModeratorUser && canManageUsers;
+  const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
   if (viewerUsername && config.flairTemplateId.trim()) {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
@@ -2613,6 +2647,8 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     canReview: canReviewUser,
     canManageUsers,
     canOpenInstallSettings,
+    hasConfigAccess,
+    canAccessSettingsTab,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,
@@ -4082,6 +4118,56 @@ async function assertCanReview(
   }
 }
 
+async function getSettingsTabRequiresConfigAccess(
+  context: Pick<Devvit.Context, 'settings'>
+): Promise<boolean> {
+  const raw = await context.settings.get<boolean | string>(INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS);
+  return typeof raw === 'boolean' ? raw : parseBooleanString(raw, false);
+}
+
+async function getCurrentModeratorPermissionList(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<string[]> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username);
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+    return [];
+  }
+
+  try {
+    const currentUser = await context.reddit.getCurrentUser();
+    if (!currentUser) {
+      return [];
+    }
+    return await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+  } catch (error) {
+    console.log(
+      `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+    return [];
+  }
+}
+
+async function assertCanAccessModeratorSettingsTab(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<void> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  await assertCanReview(context, sanitizedSubreddit, username);
+  const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
+  if (!settingsTabRequiresConfigAccess) {
+    return;
+  }
+  const hasSettingsAccess = await hasConfigAccessPermission(context, sanitizedSubreddit, username);
+  if (!hasSettingsAccess) {
+    throw new Error('Only moderators with config/settings access can use the Settings tab.');
+  }
+}
+
 async function hasManageUsersPermission(
   context: Devvit.Context,
   subredditName: string,
@@ -4104,6 +4190,33 @@ async function hasManageUsersPermission(
   } catch (error) {
     console.log(
       `Manage Users permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+    return false;
+  }
+}
+
+async function hasConfigAccessPermission(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<boolean> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username);
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+    return false;
+  }
+
+  try {
+    const currentUser = await context.reddit.getCurrentUser();
+    if (!currentUser) {
+      return false;
+    }
+    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+    return hasConfigAccessPermissionInList(permissions);
+  } catch (error) {
+    console.log(
+      `Config access permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
     return false;
   }
@@ -4138,13 +4251,12 @@ async function hasAllModeratorPermission(
 
 function hasManageUsersPermissionInList(permissions: string[]): boolean {
   const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
-  return (
-    normalized.includes('all') ||
-    normalized.includes('everything') ||
-    normalized.includes('access') ||
-    normalized.includes('manageusers') ||
-    normalized.includes('users')
-  );
+  return normalized.includes('all') || normalized.includes('access');
+}
+
+function hasConfigAccessPermissionInList(permissions: string[]): boolean {
+  const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
+  return normalized.includes('all') || normalized.includes('config');
 }
 
 function hasAllModeratorPermissionInList(permissions: string[]): boolean {
@@ -4163,7 +4275,7 @@ async function onSaveFlairTemplateValues(
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const verificationsEnabled = values.verificationsEnabled !== false;
   const existingConfig = await getRuntimeConfig(context, subredditId);
@@ -4206,11 +4318,12 @@ async function onSaveModmailTemplatesValues(
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const pendingTurnaroundDays = parsePositiveInt(values.pendingTurnaroundDays, DEFAULT_PENDING_TURNAROUND_DAYS);
   const modmailSubject = values.modmailSubject?.trim();
   const pendingBody = values.pendingBody?.trim();
+  const alwaysIncludeDenialNotesInModmail = values.alwaysIncludeDenialNotesInModmail === true;
   const approveHeader = values.approveHeader?.trim();
   const approveBody = values.approveBody?.trim();
   const denyHeader = values.denyHeader?.trim();
@@ -4249,6 +4362,7 @@ async function onSaveModmailTemplatesValues(
     [CONFIG_FIELD.pendingTurnaroundDays]: `${pendingTurnaroundDays}`,
     [CONFIG_FIELD.modmailSubject]: modmailSubject,
     [CONFIG_FIELD.pendingBody]: pendingBody,
+    [CONFIG_FIELD.alwaysIncludeDenialNotesInModmail]: `${alwaysIncludeDenialNotesInModmail}`,
     [CONFIG_FIELD.approveHeader]: approveHeader,
     [CONFIG_FIELD.approveBody]: approveBody,
     [CONFIG_FIELD.denyHeader]: denyHeader,
@@ -4271,7 +4385,7 @@ async function onSaveThemeValues(values: ThemeSettingsValues, context: Devvit.Co
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const preset = parseThemePreset(values.themePreset);
   const useCustomColors = values.useCustomColors === true;
@@ -4299,6 +4413,9 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
+  );
   const verificationsDisabledMessage = normalizeInstallSettingMessage(
     rawVerificationsDisabledMessage,
     VERIFICATIONS_DISABLED_MESSAGE,
@@ -4308,6 +4425,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const showPhotoInstructionsBeforeSubmit =
+    typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
+      ? rawShowPhotoInstructionsBeforeSubmit
+      : parseBooleanString(rawShowPhotoInstructionsBeforeSubmit, false);
   const pendingTurnaroundRaw = firstNonEmpty(stored[CONFIG_FIELD.pendingTurnaroundDays]);
   const pendingTurnaroundDays = parsePositiveInt(pendingTurnaroundRaw, DEFAULT_PENDING_TURNAROUND_DAYS);
   const approveBodyRaw = firstNonEmpty(stored[CONFIG_FIELD.approveBody]) ?? DEFAULT_APPROVE_BODY;
@@ -4329,12 +4450,17 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     autoFlairReconcileEnabled,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
+    showPhotoInstructionsBeforeSubmit,
     denyReasons,
     pendingTurnaroundDays: pendingTurnaroundDays ?? DEFAULT_PENDING_TURNAROUND_DAYS,
     modmailSubject:
       firstNonEmpty(stored[CONFIG_FIELD.modmailSubject], stored[LEGACY_CONFIG_FIELD.pendingSubject]) ??
       DEFAULT_MODMAIL_SUBJECT,
     pendingBody: firstNonEmpty(stored[CONFIG_FIELD.pendingBody]) ?? DEFAULT_PENDING_BODY,
+    alwaysIncludeDenialNotesInModmail: parseBooleanString(
+      stored[CONFIG_FIELD.alwaysIncludeDenialNotesInModmail],
+      false
+    ),
     flairText: firstNonEmpty(stored[CONFIG_FIELD.flairText]) ?? DEFAULT_FLAIR_TEXT,
     flairTemplateId: firstNonEmpty(stored[CONFIG_FIELD.flairTemplateId]) ?? '',
     flairCssClass: firstNonEmpty(stored[CONFIG_FIELD.flairCssClass]) ?? '',
@@ -5251,12 +5377,102 @@ function buildModmailSubject(template: string, values: Record<string, string>): 
   return (subject || fallback || 'Verification update').replace(/\s+/g, ' ').slice(0, 100);
 }
 
+function prependRenderedModmailHeader(body: string, header: string): string {
+  const normalizedHeader = header.replace(/\s+/g, ' ').trim();
+  if (!normalizedHeader) {
+    return body;
+  }
+  return `---\n\n**${normalizedHeader}**\n\n${body}`;
+}
+
 function prependModmailHeader(body: string, headerTemplate: string, values: Record<string, string>): string {
-  const header = fillTemplate(headerTemplate, values).replace(/\s+/g, ' ').trim();
+  const header = fillTemplate(headerTemplate, values);
   if (!header) {
     return body;
   }
-  return `---\n\n**${header}**\n\n${body}`;
+  return prependRenderedModmailHeader(body, header);
+}
+
+function normalizeDenialNotes(notes: string | null | undefined): string {
+  return String(notes ?? '').trim();
+}
+
+function formatDenialNotesForModmail(notes: string): string {
+  return notes ? `${MODMAIL_DENIAL_NOTES_PREFIX} ${notes}` : '';
+}
+
+function templateIncludesDenialNotesPlaceholder(template: string): boolean {
+  const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  for (const match of template.matchAll(placeholderPattern)) {
+    const key = normalizePlaceholderKey(match[1] ?? '');
+    if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeDenialNotesTemplateBlocks(template: string): string {
+  return template
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      const placeholderOnlyMatch = trimmed.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
+      if (placeholderOnlyMatch) {
+        const key = normalizePlaceholderKey(placeholderOnlyMatch[1] ?? '');
+        if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+          return DENIAL_NOTES_BLOCK_MARKER;
+        }
+      }
+
+      const prefixedPlaceholderMatch = trimmed.match(/^(moderator\s+notes?|reason)\s*:\s*\{\{\s*([^{}]+?)\s*\}\}$/i);
+      if (prefixedPlaceholderMatch) {
+        const key = normalizePlaceholderKey(prefixedPlaceholderMatch[2] ?? '');
+        if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
+          return DENIAL_NOTES_BLOCK_MARKER;
+        }
+      }
+
+      return line;
+    })
+    .join('\n');
+}
+
+function collapseBlankLines(text: string): string {
+  return text.replace(/\n(?:[ \t]*\n){2,}/g, '\n\n');
+}
+
+function renderDenialTemplateText(template: string, values: Record<string, string>, moderatorNotes: string): string {
+  const normalizedNotes = normalizeDenialNotes(moderatorNotes);
+  const formattedNotes = formatDenialNotesForModmail(normalizedNotes);
+  const normalizedTemplate = normalizeDenialNotesTemplateBlocks(template);
+  const rendered = fillTemplate(normalizedTemplate, {
+    ...values,
+    [DENIAL_NOTES_PLACEHOLDER_KEY]: formattedNotes,
+    [LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY]: formattedNotes,
+  })
+    .split(DENIAL_NOTES_BLOCK_MARKER)
+    .join(formattedNotes);
+
+  return formattedNotes ? rendered : collapseBlankLines(rendered);
+}
+
+function renderDenialModmailBody(
+  template: string,
+  values: Record<string, string>,
+  moderatorNotes: string,
+  alwaysIncludeDenialNotesInModmail: boolean,
+  denialNotesAlreadyIncluded: boolean
+): string {
+  const normalizedNotes = normalizeDenialNotes(moderatorNotes);
+  const formattedNotes = formatDenialNotesForModmail(normalizedNotes);
+  let rendered = renderDenialTemplateText(template, values, moderatorNotes);
+
+  if (alwaysIncludeDenialNotesInModmail && formattedNotes && !denialNotesAlreadyIncluded) {
+    rendered = `${rendered.trimEnd()}\n\n${formattedNotes}`;
+  }
+
+  return formattedNotes ? rendered : collapseBlankLines(rendered);
 }
 
 function fillTemplate(template: string, values: Record<string, string>): string {
@@ -5728,6 +5944,7 @@ export {
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
   INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
+  INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT,
   INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
   MAX_DENY_REASON_LABEL_LENGTH,
   MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,

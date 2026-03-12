@@ -829,6 +829,20 @@ textarea {
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 88%, transparent);
 }
 
+.panel-page-footer {
+  margin-top: 8px;
+  padding-top: 14px;
+}
+
+.panel-page-footer-row {
+  margin-top: 0;
+}
+
+.footer-link-muted {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .template-settings-grid .content-card .field-grid + .field-label,
 .template-settings-grid .content-card .field-stack + .field-label {
   margin-top: 16px;

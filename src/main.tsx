@@ -80,7 +80,7 @@ async function onRemoveVerificationPost(
 const createVerificationPostForm = Devvit.createForm(
   {
     title: 'Create verification hub post',
-    description: 'Creates a Devvit Web verification post and marks it NSFW.',
+    description: 'Creates the verification hub post and marks it NSFW.',
     fields: [
       {
         type: 'string',
@@ -90,7 +90,7 @@ const createVerificationPostForm = Devvit.createForm(
         defaultValue: 'Photo Verification Hub',
       },
     ],
-    acceptLabel: 'Create NSFW post',
+    acceptLabel: 'Create NSFW verification post',
     cancelLabel: 'Cancel',
   },
   onCreateVerificationPost
@@ -105,7 +105,7 @@ const purgeUserDataForm = Devvit.createForm(
       {
         type: 'string',
         name: 'confirmationText',
-        label: 'You must type "confirm" to complete purge',
+        label: 'Type "confirm" to purge the audit log.',
         required: true,
       },
     ],
