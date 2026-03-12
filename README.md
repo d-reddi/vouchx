@@ -205,8 +205,14 @@ Supported placeholders:
 - `{{mod}}`
 - `{{subreddit}}`
 - `{{date submitted}}`
-- `{{reason}}`
 - `{{days}}`
+
+Denial body templates also support:
+
+- `{{denial_notes}}`
+
+`{{denial_notes}}` renders moderator-entered denial notes as `Moderator Notes: ...` when notes are present. The
+legacy `{{reason}}` denial placeholder is still accepted as a temporary compatibility alias.
 
 Example '{{days}}' rendering:
 
@@ -249,7 +255,7 @@ Approval performs the following actions:
 Denial performs the following actions:
 
 - stores the denial reason and moderator notes
-- sends denial modmail using the configured template
+- sends denial modmail using the configured template and optional `{{denial_notes}}` placeholder
 - writes a moderator note
 - retains the record in history
 - may trigger automatic blocking after repeated denials
