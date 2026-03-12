@@ -639,10 +639,7 @@ export function mountHub(options = {}) {
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
-    if (state.isModerator) {
-      statusText = 'Moderator';
-      refs.metaStatus.classList.add('status-pending');
-    } else if (state.viewerVerifiedByFlair) {
+    if (state.viewerVerifiedByFlair) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       refs.metaStatus.classList.add('status-verified');
     } else if (isRestricted) {
