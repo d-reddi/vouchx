@@ -141,6 +141,8 @@ type DashboardData = {
   canReview: boolean;
   canManageUsers: boolean;
   canOpenInstallSettings: boolean;
+  hasConfigAccess: boolean;
+  canAccessSettingsTab: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -382,6 +384,8 @@ type ModPanelStatePayload = {
   viewerUsername: string | null;
   subredditName: string;
   canOpenInstallSettings: boolean;
+  hasConfigAccess: boolean;
+  canAccessSettingsTab: boolean;
   pendingCount: number;
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
@@ -439,6 +443,7 @@ const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
+const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
@@ -854,6 +859,8 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
+    hasConfigAccess: dashboard.hasConfigAccess,
+    canAccessSettingsTab: dashboard.canAccessSettingsTab,
     pendingCount: dashboard.pending.length,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
     approved: dashboard.approved,
@@ -2503,11 +2510,15 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
   await ensureUserValidationSchedule(context, subredditId, subredditName);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
-  const canManageUsers = viewerUsername ? await hasManageUsersPermission(context, subredditName, viewerUsername) : false;
-  const canOpenInstallSettings = viewerUsername
-    ? await hasAllModeratorPermission(context, subredditName, viewerUsername)
-    : false;
+  const moderatorPermissions = viewerUsername
+    ? await getCurrentModeratorPermissionList(context, subredditName, viewerUsername)
+    : [];
+  const canManageUsers = hasManageUsersPermissionInList(moderatorPermissions);
+  const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
+  const canOpenInstallSettings = hasAllModeratorPermissionInList(moderatorPermissions);
+  const hasConfigAccess = hasConfigAccessPermissionInList(moderatorPermissions);
   const canReviewUser = isModeratorUser && canManageUsers;
+  const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
   if (viewerUsername && config.flairTemplateId.trim()) {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
@@ -2636,6 +2647,8 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
     canReview: canReviewUser,
     canManageUsers,
     canOpenInstallSettings,
+    hasConfigAccess,
+    canAccessSettingsTab,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,
@@ -4105,6 +4118,56 @@ async function assertCanReview(
   }
 }
 
+async function getSettingsTabRequiresConfigAccess(
+  context: Pick<Devvit.Context, 'settings'>
+): Promise<boolean> {
+  const raw = await context.settings.get<boolean | string>(INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS);
+  return typeof raw === 'boolean' ? raw : parseBooleanString(raw, false);
+}
+
+async function getCurrentModeratorPermissionList(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<string[]> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username);
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+    return [];
+  }
+
+  try {
+    const currentUser = await context.reddit.getCurrentUser();
+    if (!currentUser) {
+      return [];
+    }
+    return await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+  } catch (error) {
+    console.log(
+      `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+    return [];
+  }
+}
+
+async function assertCanAccessModeratorSettingsTab(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<void> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  await assertCanReview(context, sanitizedSubreddit, username);
+  const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
+  if (!settingsTabRequiresConfigAccess) {
+    return;
+  }
+  const hasSettingsAccess = await hasConfigAccessPermission(context, sanitizedSubreddit, username);
+  if (!hasSettingsAccess) {
+    throw new Error('Only moderators with config/settings access can use the Settings tab.');
+  }
+}
+
 async function hasManageUsersPermission(
   context: Devvit.Context,
   subredditName: string,
@@ -4127,6 +4190,33 @@ async function hasManageUsersPermission(
   } catch (error) {
     console.log(
       `Manage Users permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+    );
+    return false;
+  }
+}
+
+async function hasConfigAccessPermission(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<boolean> {
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsername(username);
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+    return false;
+  }
+
+  try {
+    const currentUser = await context.reddit.getCurrentUser();
+    if (!currentUser) {
+      return false;
+    }
+    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+    return hasConfigAccessPermissionInList(permissions);
+  } catch (error) {
+    console.log(
+      `Config access permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
     return false;
   }
@@ -4161,13 +4251,12 @@ async function hasAllModeratorPermission(
 
 function hasManageUsersPermissionInList(permissions: string[]): boolean {
   const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
-  return (
-    normalized.includes('all') ||
-    normalized.includes('everything') ||
-    normalized.includes('access') ||
-    normalized.includes('manageusers') ||
-    normalized.includes('users')
-  );
+  return normalized.includes('all') || normalized.includes('access');
+}
+
+function hasConfigAccessPermissionInList(permissions: string[]): boolean {
+  const normalized = permissions.map((permission) => permission.trim().toLowerCase().replace(/[^a-z]/g, ''));
+  return normalized.includes('all') || normalized.includes('config');
 }
 
 function hasAllModeratorPermissionInList(permissions: string[]): boolean {
@@ -4186,7 +4275,7 @@ async function onSaveFlairTemplateValues(
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const verificationsEnabled = values.verificationsEnabled !== false;
   const existingConfig = await getRuntimeConfig(context, subredditId);
@@ -4229,7 +4318,7 @@ async function onSaveModmailTemplatesValues(
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const pendingTurnaroundDays = parsePositiveInt(values.pendingTurnaroundDays, DEFAULT_PENDING_TURNAROUND_DAYS);
   const modmailSubject = values.modmailSubject?.trim();
@@ -4296,7 +4385,7 @@ async function onSaveThemeValues(values: ThemeSettingsValues, context: Devvit.Co
 
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
   const preset = parseThemePreset(values.themePreset);
   const useCustomColors = values.useCustomColors === true;

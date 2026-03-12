@@ -4,6 +4,8 @@ import { BUG_REPORT_URL } from './app-config.js';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+  const settingsPrimaryTabButton =
+    tabButtons.find((button) => String(button.dataset.tab || '') === 'settings') || null;
   const mainContent = document.getElementById('main-content');
   const tabPanels = {
     pending: document.getElementById('tab-pending'),
@@ -977,24 +979,40 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
   }
 
+  function canAccessSettingsTab() {
+    return Boolean(state && state.canAccessSettingsTab === true);
+  }
+
+  function renderPrimaryTabs() {
+    if (settingsPrimaryTabButton) {
+      settingsPrimaryTabButton.classList.toggle('hidden', !canAccessSettingsTab());
+    }
+    if (!canAccessSettingsTab() && tabPanels.settings && !tabPanels.settings.classList.contains('hidden')) {
+      setTab('pending');
+    }
+  }
+
   function setTab(tabName) {
+    const requestedTab = tabName === 'history' || tabName === 'blocked' || tabName === 'settings' ? tabName : 'pending';
+    const resolvedTab = requestedTab === 'settings' && !canAccessSettingsTab() ? 'pending' : requestedTab;
     for (const [name, panel] of Object.entries(tabPanels)) {
       if (!panel) {
         continue;
       }
-      if (name === tabName) {
+      if (name === resolvedTab) {
         panel.classList.remove('hidden');
       } else {
         panel.classList.add('hidden');
       }
     }
     for (const btn of tabButtons) {
-      if (btn.dataset.tab === tabName) {
+      if (btn.dataset.tab === resolvedTab) {
         btn.classList.add('tab-btn-active');
       } else {
         btn.classList.remove('tab-btn-active');
       }
     }
+    return resolvedTab;
   }
 
   function setSettingsTab(tabName) {
@@ -1520,22 +1538,38 @@ import { BUG_REPORT_URL } from './app-config.js';
       for (const item of historySearchItems) {
         const card = document.createElement('article');
         card.className = 'item';
+        card.appendChild(createUsernameHeading(item.username));
         const statusLabel =
           item.status === 'pending' && item.parentVerificationId
             ? 'PENDING RE-REVIEW'
             : String(item.status || '').toUpperCase();
-        const reopenedMeta =
-          item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none'
-            ? `<p class="item-meta reopened-warning">Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}</p>`
-            : '';
-        card.innerHTML = `
-          <h3 class="item-title">u/${item.username}</h3>
-          <p class="item-meta">Status: ${statusLabel}</p>
-          <p class="item-meta">Submitted: ${formatTime(item.submittedAt)}</p>
-          <p class="item-meta">Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}</p>
-          <p class="item-meta">Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}</p>
-          ${reopenedMeta}
-        `;
+
+        const statusMeta = document.createElement('p');
+        statusMeta.className = 'item-meta';
+        statusMeta.textContent = `Status: ${statusLabel}`;
+        card.appendChild(statusMeta);
+
+        const submittedMeta = document.createElement('p');
+        submittedMeta.className = 'item-meta';
+        submittedMeta.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
+        card.appendChild(submittedMeta);
+
+        const reviewedMeta = document.createElement('p');
+        reviewedMeta.className = 'item-meta';
+        reviewedMeta.textContent = `Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}`;
+        card.appendChild(reviewedMeta);
+
+        const moderatorMeta = document.createElement('p');
+        moderatorMeta.className = 'item-meta';
+        moderatorMeta.textContent = `Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}`;
+        card.appendChild(moderatorMeta);
+
+        if (item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none') {
+          const reopenedMeta = document.createElement('p');
+          reopenedMeta.className = 'item-meta reopened-warning';
+          reopenedMeta.textContent = `Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}`;
+          card.appendChild(reopenedMeta);
+        }
         if (item.status === 'denied' && item.denyReason) {
           const reasonMeta = document.createElement('p');
           reasonMeta.className = 'item-meta';
@@ -2163,6 +2197,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       applyModeratorThemeVariables(document.documentElement, activeTokens);
       persistThemeSnapshot(state.resolvedTheme);
     }
+    renderPrimaryTabs();
     updateHeroMeta();
     renderPending();
     renderBlocked();
@@ -2900,10 +2935,10 @@ import { BUG_REPORT_URL } from './app-config.js';
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       if (tab) {
-        setTab(tab);
-        if (tab === 'pending') {
+        const activeTab = setTab(tab);
+        if (activeTab === 'pending') {
           void refreshFromRealtimeSignal();
-        } else if (tab === 'history') {
+        } else if (activeTab === 'history') {
           setHistoryView(activeHistoryView);
           if (activeHistoryView === 'records') {
             runHistoryRecordsSearchWithInputGuard(true);
@@ -2920,7 +2955,7 @@ import { BUG_REPORT_URL } from './app-config.js';
               runAuditSearchWithInputGuard(true);
             }
           }
-        } else if (tab === 'settings') {
+        } else if (activeTab === 'settings') {
           setSettingsTab(activeSettingsTab);
         }
       }
