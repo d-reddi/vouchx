@@ -28,7 +28,7 @@ function createShell(root, inline) {
     <div class="shell">
       <div data-el="loading" class="loading-screen">
         <div class="loading-copy">
-          ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">DEVELOPMENT BUILD ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
+          ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
           <p>${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</p>
         </div>
       </div>
@@ -48,7 +48,7 @@ function createShell(root, inline) {
                 <div class="hub-title-copy">
                   <p class="hub-kicker">VouchX</p>
                   <h1>Verification Hub</h1>
-                  ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">DEVELOPMENT BUILD ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
+                  ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
                 </div>
               </div>
               <p data-el="meta-username" class="meta"></p>
