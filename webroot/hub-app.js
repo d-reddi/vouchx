@@ -1,3 +1,4 @@
+import { connectRealtime, disconnectRealtime } from '@devvit/realtime/client';
 import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
 import brandLogoUrl from './logo.png';
 import { HOW_TO_USE_APP_URL } from './app-config.js';
@@ -19,6 +20,7 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
     label: 'I have read and accept the VouchX Terms and Conditions.',
   },
 ];
+const MANUAL_SOURCE_MARKERS = ['css-substring-match', 'css-wildcard-match'];
 const WORKTREE_LABEL = typeof __VOUCHX_WORKTREE_LABEL__ === 'string' ? __VOUCHX_WORKTREE_LABEL__.trim() : '';
 
 function createShell(root, inline) {
@@ -180,7 +182,7 @@ function applyTheme(resolvedTheme) {
 }
 
 function isManualSource(source) {
-  return typeof source === 'string' && source.includes('css-wildcard-match');
+  return typeof source === 'string' && MANUAL_SOURCE_MARKERS.some((marker) => source.includes(marker));
 }
 
 function formatTimestamp(value) {
@@ -395,6 +397,11 @@ export function mountHub(options = {}) {
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
   let autoRefreshTimerId = 0;
+  let realtimeChannel = '';
+  let realtimeConnectedChannel = '';
+  let realtimeReconnectTimerId = 0;
+  let realtimeRefreshInFlight = false;
+  let realtimeRefreshQueued = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
@@ -463,6 +470,115 @@ export function mountHub(options = {}) {
     isBusy = Boolean(next);
     for (const button of root.querySelectorAll('button')) {
       button.disabled = isBusy;
+    }
+    if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
+      realtimeRefreshQueued = false;
+      void refreshFromRealtimeSignal();
+    }
+  }
+
+  function scheduleRealtimeReconnect(channel) {
+    if (!channel || channel !== realtimeChannel || realtimeReconnectTimerId) {
+      return;
+    }
+    realtimeReconnectTimerId = window.setTimeout(() => {
+      realtimeReconnectTimerId = 0;
+      if (channel === realtimeChannel && realtimeConnectedChannel !== channel) {
+        connectToRealtimeChannel(channel);
+      }
+    }, 1500);
+  }
+
+  function closeRealtimeSubscription() {
+    if (realtimeReconnectTimerId) {
+      window.clearTimeout(realtimeReconnectTimerId);
+      realtimeReconnectTimerId = 0;
+    }
+    const connectedChannel = realtimeConnectedChannel;
+    realtimeChannel = '';
+    realtimeConnectedChannel = '';
+    if (connectedChannel) {
+      disconnectRealtime(connectedChannel);
+    }
+  }
+
+  function connectToRealtimeChannel(channel) {
+    if (!channel || realtimeConnectedChannel === channel) {
+      return;
+    }
+    try {
+      connectRealtime({
+        channel,
+        onConnect(connectedChannel) {
+          realtimeConnectedChannel = connectedChannel;
+        },
+        onDisconnect(disconnectedChannel) {
+          if (disconnectedChannel === realtimeConnectedChannel) {
+            realtimeConnectedChannel = '';
+          }
+          if (disconnectedChannel === realtimeChannel) {
+            scheduleRealtimeReconnect(disconnectedChannel);
+          }
+        },
+        onMessage(message) {
+          if (!message || typeof message !== 'object' || message.type !== 'refresh') {
+            return;
+          }
+          void refreshFromRealtimeSignal();
+        },
+      });
+      realtimeConnectedChannel = channel;
+    } catch (error) {
+      console.log(`Realtime subscribe failed: ${error instanceof Error ? error.message : String(error)}`);
+      scheduleRealtimeReconnect(channel);
+    }
+  }
+
+  function syncRealtimeSubscription(nextChannel) {
+    const normalized = String(nextChannel || '').trim();
+    if (!normalized) {
+      closeRealtimeSubscription();
+      return;
+    }
+    if (realtimeReconnectTimerId) {
+      window.clearTimeout(realtimeReconnectTimerId);
+      realtimeReconnectTimerId = 0;
+    }
+    if (normalized === realtimeChannel && realtimeConnectedChannel === normalized) {
+      return;
+    }
+    const previousChannel = realtimeConnectedChannel;
+    realtimeChannel = normalized;
+    realtimeConnectedChannel = '';
+    if (previousChannel) {
+      disconnectRealtime(previousChannel);
+    }
+    connectToRealtimeChannel(normalized);
+  }
+
+  async function refreshFromRealtimeSignal() {
+    if (!realtimeChannel) {
+      return;
+    }
+    if (isBusy) {
+      realtimeRefreshQueued = true;
+      return;
+    }
+    if (realtimeRefreshInFlight) {
+      realtimeRefreshQueued = true;
+      return;
+    }
+    realtimeRefreshInFlight = true;
+    try {
+      applyPayload(await requestJson('/api/hub/state'));
+    } catch (error) {
+      console.log(`Realtime refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      realtimeRefreshInFlight = false;
+      if (realtimeRefreshQueued && !isBusy) {
+        realtimeRefreshQueued = false;
+        void refreshFromRealtimeSignal();
+      }
     }
   }
 
@@ -754,6 +870,7 @@ export function mountHub(options = {}) {
     if (!payload) {
       return;
     }
+    syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
     if (payload.toast?.text) {
       showToast(payload.toast.text, payload.toast.tone || 'info');
     }
@@ -790,12 +907,30 @@ export function mountHub(options = {}) {
       window.clearInterval(autoRefreshTimerId);
     }
     autoRefreshTimerId = window.setInterval(() => {
-      if (document.hidden || isBusy) {
+      if (document.hidden || isBusy || (realtimeChannel && realtimeConnectedChannel === realtimeChannel)) {
         return;
       }
       void refreshState({ silent: true });
     }, AUTO_REFRESH_INTERVAL_MS);
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || isBusy) {
+      return;
+    }
+    if (realtimeRefreshQueued && !realtimeRefreshInFlight) {
+      realtimeRefreshQueued = false;
+      void refreshFromRealtimeSignal();
+      return;
+    }
+    if (!(realtimeChannel && realtimeConnectedChannel === realtimeChannel)) {
+      void refreshState({ silent: true });
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    closeRealtimeSubscription();
+  });
 
   refs.modPanelBtn.addEventListener('click', (event) => {
     if (inline) {

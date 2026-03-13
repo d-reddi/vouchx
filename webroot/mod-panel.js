@@ -1290,8 +1290,9 @@ import { BUG_REPORT_URL } from './app-config.js';
       { url: item.photoThreeUrl, label: `u/${item.username} photo 3` },
     ];
     for (const photo of photos) {
-      if (typeof photo.url === 'string' && photo.url.trim()) {
-        imageGrid.appendChild(createPhotoWrap(photo.url, photo.label));
+      const safeUrl = normalizeExternalUrl(photo.url);
+      if (safeUrl) {
+        imageGrid.appendChild(createPhotoWrap(safeUrl, photo.label));
       }
     }
     card.appendChild(imageGrid);
@@ -2225,13 +2226,21 @@ import { BUG_REPORT_URL } from './app-config.js';
   function createPhotoWrap(url, alt) {
     const wrap = document.createElement('div');
     wrap.className = 'photo-wrap';
+    const safeUrl = normalizeExternalUrl(url);
+    if (!safeUrl) {
+      const invalidMessage = document.createElement('p');
+      invalidMessage.className = 'muted small';
+      invalidMessage.textContent = 'Photo URL is unavailable.';
+      wrap.appendChild(invalidMessage);
+      return wrap;
+    }
 
     const img = document.createElement('img');
     img.className = 'photo';
-    img.src = url;
+    img.src = safeUrl;
     img.alt = alt;
     img.loading = 'lazy';
-    img.addEventListener('click', () => openImage(url));
+    img.addEventListener('click', () => openImage(safeUrl));
     wrap.appendChild(img);
 
     const row = document.createElement('div');
@@ -2241,7 +2250,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     openBtn.className = 'btn btn-secondary';
     openBtn.textContent = 'Open';
     openBtn.addEventListener('click', () => {
-      post({ type: 'openExternalUrl', url });
+      post({ type: 'openExternalUrl', url: safeUrl });
     });
     row.appendChild(openBtn);
     wrap.appendChild(row);

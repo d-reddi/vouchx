@@ -33,6 +33,7 @@
   }
 
   if (palette) {
-    apply(palette.dark || palette.light);
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    apply(prefersDark ? palette.dark || palette.light : palette.light || palette.dark);
   }
 })();
