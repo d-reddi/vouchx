@@ -5,6 +5,7 @@ import {
   clearExpiredPendingClaim,
   ensureUserValidationSchedule,
   normalizeSubmittedPhotoUrl,
+  releaseRedisLockIfOwned,
   toPublicHubConfig,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
@@ -85,19 +86,89 @@ function buildRuntimeConfig(): RuntimeConfig {
   };
 }
 
-function createSchedulerFake(existingJobs: Array<{ name: string; data?: Record<string, unknown> }> = []) {
+function createSchedulerRegistrationContext(options?: {
+  existingJobs?: Array<{ name: string; data?: Record<string, unknown> }>;
+  initialLockValue?: string | null;
+  onRunJob?: (payload: Record<string, unknown>) => void | Promise<void>;
+}) {
   const runJobCalls: Array<Record<string, unknown>> = [];
+  const listJobsCalls: unknown[][] = [];
+  const setCalls: unknown[][] = [];
+  const getCalls: unknown[][] = [];
+  const delCalls: unknown[][] = [];
+  let currentLockValue = options?.initialLockValue ?? null;
+  const existingJobs = options?.existingJobs ?? [];
 
   return {
-    scheduler: {
-      async listJobs() {
-        return existingJobs;
+    context: {
+      scheduler: {
+        async listJobs(...args: unknown[]) {
+          listJobsCalls.push(args);
+          return existingJobs;
+        },
+        async runJob(payload: Record<string, unknown>) {
+          runJobCalls.push(payload);
+          await options?.onRunJob?.(payload);
+        },
       },
-      async runJob(payload: Record<string, unknown>) {
-        runJobCalls.push(payload);
+      redis: {
+        async set(...args: unknown[]) {
+          setCalls.push(args);
+          const value = String(args[1] ?? '');
+          const lockOptions = args[2] as { nx?: boolean } | undefined;
+          if (lockOptions?.nx && currentLockValue !== null) {
+            return null;
+          }
+          currentLockValue = value;
+          return 'OK';
+        },
+        async get(...args: unknown[]) {
+          getCalls.push(args);
+          return currentLockValue;
+        },
+        async del(...args: unknown[]) {
+          delCalls.push(args);
+          currentLockValue = null;
+        },
       },
     },
+    listJobsCalls,
     runJobCalls,
+    setCalls,
+    getCalls,
+    delCalls,
+    get currentLockValue() {
+      return currentLockValue;
+    },
+    setCurrentLockValue(value: string | null) {
+      currentLockValue = value;
+    },
+  };
+}
+
+function createRedisLockContext(initialValue: string | null) {
+  const getCalls: unknown[][] = [];
+  const delCalls: unknown[][] = [];
+  let currentLockValue = initialValue;
+
+  return {
+    context: {
+      redis: {
+        async get(...args: unknown[]) {
+          getCalls.push(args);
+          return currentLockValue;
+        },
+        async del(...args: unknown[]) {
+          delCalls.push(args);
+          currentLockValue = null;
+        },
+      },
+    },
+    getCalls,
+    delCalls,
+    get currentLockValue() {
+      return currentLockValue;
+    },
   };
 }
 
@@ -158,6 +229,36 @@ test('toPublicHubConfig omits moderator-only template content', () => {
     ],
   });
   assert.equal('template' in publicConfig.denyReasons[0], false);
+});
+
+test('releaseRedisLockIfOwned deletes the cleanup lock when the token matches', async () => {
+  const lockContext = createRedisLockContext('cleanup-lock-token');
+
+  await releaseRedisLockIfOwned(lockContext.context as never, 'cleanup:lock', 'cleanup-lock-token');
+
+  assert.deepEqual(lockContext.getCalls, [['cleanup:lock']]);
+  assert.deepEqual(lockContext.delCalls, [['cleanup:lock']]);
+  assert.equal(lockContext.currentLockValue, null);
+});
+
+test('releaseRedisLockIfOwned does not delete a newer cleanup lock token', async () => {
+  const lockContext = createRedisLockContext('newer-cleanup-lock-token');
+
+  await releaseRedisLockIfOwned(lockContext.context as never, 'cleanup:lock', 'older-cleanup-lock-token');
+
+  assert.deepEqual(lockContext.getCalls, [['cleanup:lock']]);
+  assert.deepEqual(lockContext.delCalls, []);
+  assert.equal(lockContext.currentLockValue, 'newer-cleanup-lock-token');
+});
+
+test('releaseRedisLockIfOwned does not delete a legacy cleanup lock value during rollout', async () => {
+  const lockContext = createRedisLockContext('1');
+
+  await releaseRedisLockIfOwned(lockContext.context as never, 'cleanup:lock', 'new-cleanup-lock-token');
+
+  assert.deepEqual(lockContext.getCalls, [['cleanup:lock']]);
+  assert.deepEqual(lockContext.delCalls, []);
+  assert.equal(lockContext.currentLockValue, '1');
 });
 
 test('withRedisLock releases the lock after a successful callback', async () => {
@@ -250,18 +351,17 @@ test('withRedisLock surfaces lock contention without running the callback', asyn
 });
 
 test('ensureUserValidationSchedule registers the user-validation scheduled job when missing', async () => {
-  const { scheduler, runJobCalls } = createSchedulerFake();
+  const schedulerContext = createSchedulerRegistrationContext();
 
   await ensureUserValidationSchedule(
-    {
-      scheduler,
-    } as never,
+    schedulerContext.context as never,
     'T5_Example',
     '/r/ExampleSub/'
   );
 
-  assert.equal(runJobCalls.length, 1);
-  assert.deepEqual(runJobCalls[0], {
+  assert.equal(schedulerContext.listJobsCalls.length, 1);
+  assert.equal(schedulerContext.runJobCalls.length, 1);
+  assert.deepEqual(schedulerContext.runJobCalls[0], {
     name: USER_VALIDATION_JOB_NAME,
     cron: USER_VALIDATION_CRON,
     data: {
@@ -269,26 +369,72 @@ test('ensureUserValidationSchedule registers the user-validation scheduled job w
       subredditName: 'examplesub',
     },
   });
+  assert.equal(schedulerContext.setCalls.length, 1);
+  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.delCalls.length, 1);
+  assert.equal(schedulerContext.currentLockValue, null);
 });
 
 test('ensureUserValidationSchedule does not register a duplicate when a matching job already exists', async () => {
-  const { scheduler, runJobCalls } = createSchedulerFake([
-    {
-      name: USER_VALIDATION_JOB_NAME,
-      data: {
-        subredditId: 't5_example',
-        subredditName: 'examplesub',
+  const schedulerContext = createSchedulerRegistrationContext({
+    existingJobs: [
+      {
+        name: USER_VALIDATION_JOB_NAME,
+        data: {
+          subredditId: 't5_example',
+          subredditName: 'examplesub',
+        },
       },
-    },
-  ]);
+    ],
+  });
 
   await ensureUserValidationSchedule(
-    {
-      scheduler,
-    } as never,
+    schedulerContext.context as never,
     'T5_Example',
     '/r/ExampleSub/'
   );
 
-  assert.equal(runJobCalls.length, 0);
+  assert.equal(schedulerContext.listJobsCalls.length, 1);
+  assert.equal(schedulerContext.runJobCalls.length, 0);
+  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.delCalls.length, 1);
+  assert.equal(schedulerContext.currentLockValue, null);
+});
+
+test('ensureUserValidationSchedule skips registration when another caller holds the schedule lock', async () => {
+  const schedulerContext = createSchedulerRegistrationContext({
+    initialLockValue: 'other-caller-lock-token',
+  });
+
+  await ensureUserValidationSchedule(
+    schedulerContext.context as never,
+    'T5_Example',
+    '/r/ExampleSub/'
+  );
+
+  assert.equal(schedulerContext.listJobsCalls.length, 0);
+  assert.equal(schedulerContext.runJobCalls.length, 0);
+  assert.equal(schedulerContext.getCalls.length, 0);
+  assert.equal(schedulerContext.delCalls.length, 0);
+  assert.equal(schedulerContext.currentLockValue, 'other-caller-lock-token');
+});
+
+test('ensureUserValidationSchedule does not delete a newer schedule lock it does not own', async () => {
+  const schedulerContext = createSchedulerRegistrationContext({
+    onRunJob: () => {
+      schedulerContext.setCurrentLockValue('newer-schedule-lock-token');
+    },
+  });
+
+  await ensureUserValidationSchedule(
+    schedulerContext.context as never,
+    'T5_Example',
+    '/r/ExampleSub/'
+  );
+
+  assert.equal(schedulerContext.listJobsCalls.length, 1);
+  assert.equal(schedulerContext.runJobCalls.length, 1);
+  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.delCalls.length, 0);
+  assert.equal(schedulerContext.currentLockValue, 'newer-schedule-lock-token');
 });

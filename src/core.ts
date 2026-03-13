@@ -228,7 +228,7 @@ type ValidationCheckResult =
 
 type RedisContext = Pick<Devvit.Context, 'redis'>;
 type RedditRedisContext = Pick<Devvit.Context, 'redis' | 'reddit'>;
-type SchedulerContext = Pick<Devvit.Context, 'scheduler'>;
+type SchedulerContext = Pick<Devvit.Context, 'redis' | 'scheduler'>;
 
 type FlairStepResult = {
   status: 'success' | 'failed' | 'skipped';
@@ -512,6 +512,7 @@ const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const USER_VALIDATION_CRON = '30 3 * * *';
 const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
+const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
 const STORAGE_METER_CAP_BYTES = 500 * 1024 * 1024;
 const BLOCKED_SUBMISSION_MESSAGE = "You cannot submit a verification request.";
 const VERIFICATIONS_DISABLED_MESSAGE = 'Verifications are temporarily disabled.  Please check back soon.';
@@ -1564,6 +1565,23 @@ function pendingClaimChanged(left: VerificationRecord, right: VerificationRecord
   return (left.claimedBy ?? null) !== (right.claimedBy ?? null) || (left.claimedAt ?? null) !== (right.claimedAt ?? null);
 }
 
+function createRedisLockToken(): string {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function releaseRedisLockIfOwned(
+  context: Pick<Devvit.Context, 'redis'>,
+  key: string,
+  lockToken: string
+): Promise<void> {
+  const currentLockToken = await context.redis.get(key);
+  if (currentLockToken === lockToken) {
+    await context.redis.del(key);
+  }
+}
+
 async function withRedisLock<T>(
   context: Pick<Devvit.Context, 'redis'>,
   key: string,
@@ -1571,10 +1589,7 @@ async function withRedisLock<T>(
   failureMessage: string,
   callback: () => Promise<T>
 ): Promise<T> {
-  const lockToken =
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const lockToken = createRedisLockToken();
   let lockAcquired = false;
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -1596,10 +1611,7 @@ async function withRedisLock<T>(
   try {
     return await callback();
   } finally {
-    const currentLockToken = await context.redis.get(key);
-    if (currentLockToken === lockToken) {
-      await context.redis.del(key);
-    }
+    await releaseRedisLockIfOwned(context, key, lockToken);
   }
 }
 
@@ -5026,6 +5038,10 @@ function validationRunLockKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:validation:lock`;
 }
 
+function validationScheduleLockKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:validation:schedule-lock`;
+}
+
 function verificationActionLockKey(subredditId: string, verificationId: string): string {
   return `${subredditScopePrefix(subredditId)}:verification-action-lock:${verificationId.trim()}`;
 }
@@ -5774,7 +5790,20 @@ async function ensureUserValidationSchedule(
     return;
   }
 
+  const lockKey = validationScheduleLockKey(normalizedSubredditId);
+  const lockToken = createRedisLockToken();
+  let lockAcquired = false;
+
   try {
+    const lock = await context.redis.set(lockKey, lockToken, {
+      nx: true,
+      expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_LOCK_TTL_MS),
+    });
+    if (lock !== 'OK') {
+      return;
+    }
+    lockAcquired = true;
+
     const jobs = await context.scheduler.listJobs();
     const alreadyScheduled = jobs.some((job) => {
       if (job.name !== USER_VALIDATION_JOB_NAME) {
@@ -5798,6 +5827,10 @@ async function ensureUserValidationSchedule(
     });
   } catch (error) {
     console.log(`[user-validation] Failed to schedule validation for r/${normalizedSubreddit}: ${errorText(error)}`);
+  } finally {
+    if (lockAcquired) {
+      await releaseRedisLockIfOwned(context, lockKey, lockToken);
+    }
   }
 }
 
@@ -5806,7 +5839,9 @@ async function reconcileApprovedUsersForRetention(
   subredditId: string,
   subredditName: string
 ): Promise<RetentionReconcileSummary> {
-  const lock = await context.redis.set(validationRunLockKey(subredditId), '1', {
+  const lockKey = validationRunLockKey(subredditId);
+  const lockToken = createRedisLockToken();
+  const lock = await context.redis.set(lockKey, lockToken, {
     nx: true,
     expiration: new Date(Date.now() + 5 * 60 * 1000),
   });
@@ -5930,7 +5965,7 @@ async function reconcileApprovedUsersForRetention(
       skipped: false,
     };
   } finally {
-    await context.redis.del(validationRunLockKey(subredditId));
+    await releaseRedisLockIfOwned(context, lockKey, lockToken);
   }
 }
 
@@ -6202,6 +6237,7 @@ export {
   clearExpiredPendingClaim,
   normalizeSubmittedPhotoUrl,
   toPublicHubConfig,
+  releaseRedisLockIfOwned,
   withRedisLock,
 };
 
