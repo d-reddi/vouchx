@@ -755,25 +755,27 @@ export function mountHub(options = {}) {
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
+    let statusClass = 'status-neutral';
     if (state.viewerVerifiedByFlair) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
-      refs.metaStatus.classList.add('status-verified');
+      statusClass = 'status-verified';
     } else if (isRestricted) {
       statusText = 'Blocked';
-      refs.metaStatus.classList.add('status-blocked');
+      statusClass = 'status-blocked';
     } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
       statusText = 'Pending Re-review';
-      refs.metaStatus.classList.add('status-warning');
+      statusClass = 'status-warning';
     } else if (state.userLatest?.status === 'pending') {
       statusText = 'Pending Review';
-      refs.metaStatus.classList.add('status-warning');
+      statusClass = 'status-warning';
     } else if (state.userLatest?.status === 'denied') {
       statusText = 'Denied - Resubmit';
-      refs.metaStatus.classList.add('status-danger');
+      statusClass = 'status-danger';
     } else if (state.userLatest?.status === 'removed') {
       statusText = 'Verification Removed';
-      refs.metaStatus.classList.add('status-danger');
+      statusClass = 'status-danger';
     }
+    refs.metaStatus.classList.add(statusClass);
     refs.metaStatus.textContent = statusText;
 
     refs.pendingBadge.textContent = state.pendingCount > 99 ? '99+' : String(state.pendingCount || 0);

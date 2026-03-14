@@ -11,6 +11,7 @@ import {
   deleteVerificationDataFormDefinition,
   denyVerification,
   errorText,
+  getModeratorAccessSnapshot,
   getCurrentSubredditNameCompat,
   loadHubDashboard,
   loadModDashboard,
@@ -125,20 +126,8 @@ async function requireModerator(appContext: Devvit.Context): Promise<{ moderator
   }
 
   const subredditName = await getCurrentSubredditNameCompat(appContext);
-
-  try {
-    const currentUser = await appContext.reddit.getCurrentUser();
-    if (!currentUser) {
-      throw httpError(403, 'You must be logged in as a moderator.');
-    }
-    const permissions = await currentUser.getModPermissionsForSubreddit(subredditName);
-    if (!Array.isArray(permissions) || permissions.length === 0) {
-      throw httpError(403, 'Only moderators can create verification posts.');
-    }
-  } catch (error) {
-    if (getStatus(error) === 403) {
-      throw error;
-    }
+  const access = await getModeratorAccessSnapshot(appContext, subredditName, moderator);
+  if (!access.isModerator) {
     throw httpError(403, 'Only moderators can create verification posts.');
   }
 

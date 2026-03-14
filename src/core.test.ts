@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   clearExpiredPendingClaim,
   ensureUserValidationSchedule,
+  getCurrentModeratorPermissionList,
+  getModeratorAccessSnapshot,
   normalizeSubmittedPhotoUrl,
   releaseRedisLockIfOwned,
   toPublicHubConfig,
@@ -172,6 +174,101 @@ function createRedisLockContext(initialValue: string | null) {
   };
 }
 
+function createModeratorLookupContext(options?: {
+  subredditId?: string;
+  currentUsername?: string | null;
+  permissionResponses?: Array<string[] | Error>;
+  broadModeratorResponses?: Array<Array<{ username: string }> | Error>;
+  filteredModeratorResponses?: Array<Array<{ username: string }> | Error>;
+}) {
+  const redisStore = new Map<string, string>();
+  const permissionResponses = options?.permissionResponses ?? [];
+  const broadModeratorResponses = options?.broadModeratorResponses ?? [];
+  const filteredModeratorResponses = options?.filteredModeratorResponses ?? [];
+  let permissionCallCount = 0;
+  let broadCallCount = 0;
+  let filteredCallCount = 0;
+
+  const nextPermissionResponse = (): string[] => {
+    const response = permissionResponses[Math.min(permissionCallCount, permissionResponses.length - 1)];
+    permissionCallCount += 1;
+    if (response instanceof Error) {
+      throw response;
+    }
+    return Array.isArray(response) ? response : [];
+  };
+
+  const nextModeratorsResponse = (
+    responses: Array<Array<{ username: string }> | Error>,
+    kind: 'broad' | 'filtered'
+  ): Array<{ username: string }> => {
+    if (kind === 'broad') {
+      broadCallCount += 1;
+    } else {
+      filteredCallCount += 1;
+    }
+    const index = kind === 'broad' ? broadCallCount - 1 : filteredCallCount - 1;
+    const response = responses[Math.min(index, responses.length - 1)];
+    if (response instanceof Error) {
+      throw response;
+    }
+    return Array.isArray(response) ? response : [];
+  };
+
+  return {
+    context: {
+      subredditId: options?.subredditId ?? 't5_example',
+      reddit: {
+        async getCurrentUsername() {
+          return options?.currentUsername ?? 'mod_one';
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return nextPermissionResponse();
+            },
+          };
+        },
+        getModerators(args: { username?: string }) {
+          return {
+            async all() {
+              return args.username
+                ? nextModeratorsResponse(filteredModeratorResponses, 'filtered')
+                : nextModeratorsResponse(broadModeratorResponses, 'broad');
+            },
+          };
+        },
+      },
+      redis: {
+        async set(key: string, value: string, options?: { nx?: boolean }) {
+          if (options?.nx && redisStore.has(key)) {
+            return null;
+          }
+          redisStore.set(key, value);
+          return 'OK';
+        },
+        async get(key: string) {
+          return redisStore.get(key) ?? null;
+        },
+        async del(...keys: string[]) {
+          for (const key of keys) {
+            redisStore.delete(key);
+          }
+        },
+      },
+    },
+    get permissionCallCount() {
+      return permissionCallCount;
+    },
+    get broadCallCount() {
+      return broadCallCount;
+    },
+    get filteredCallCount() {
+      return filteredCallCount;
+    },
+  };
+}
+
 test('normalizeSubmittedPhotoUrl accepts Reddit-hosted upload URLs', () => {
   assert.equal(
     normalizeSubmittedPhotoUrl('https://i.redd.it/example-photo.png'),
@@ -187,6 +284,46 @@ test('normalizeSubmittedPhotoUrl rejects non-Reddit or non-https URLs', () => {
   assert.equal(normalizeSubmittedPhotoUrl('https://example.com/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('http://i.redd.it/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('javascript:alert(1)'), null);
+});
+
+test('getCurrentModeratorPermissionList reuses cached permissions after a transient lookup failure', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [['access', 'config'], new Error('reddit 500')],
+  });
+
+  const first = await getCurrentModeratorPermissionList(lookupContext.context as never, 'ExampleSub', 'mod_one');
+  const second = await getCurrentModeratorPermissionList(lookupContext.context as never, 'ExampleSub', 'mod_one');
+
+  assert.deepEqual(first, ['access', 'config']);
+  assert.deepEqual(second, ['access', 'config']);
+  assert.equal(lookupContext.permissionCallCount, 2);
+  assert.equal(lookupContext.broadCallCount, 0);
+  assert.equal(lookupContext.filteredCallCount, 0);
+});
+
+test('getModeratorAccessSnapshot falls back to cached moderator role when moderator listings fail', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('reddit 500'), new Error('reddit 500')],
+    broadModeratorResponses: [[{ username: 'mod_one' }], new Error('reddit 500')],
+    filteredModeratorResponses: [new Error('reddit 500')],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const first = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+    const second = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+
+    assert.equal(first.isModerator, true);
+    assert.deepEqual(first.permissions, []);
+    assert.equal(second.isModerator, true);
+    assert.deepEqual(second.permissions, []);
+    assert.equal(lookupContext.permissionCallCount, 2);
+    assert.equal(lookupContext.broadCallCount, 2);
+    assert.equal(lookupContext.filteredCallCount, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
 });
 
 test('clearExpiredPendingClaim clears stale claims', () => {
