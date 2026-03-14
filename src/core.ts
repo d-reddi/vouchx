@@ -181,6 +181,11 @@ type ViewerFlairSnapshot = {
   userId: string;
 };
 
+type ModeratorAccessSnapshot = {
+  isModerator: boolean;
+  permissions: string[];
+};
+
 type SubmitVerificationValues = {
   is18Confirmed: boolean;
   adultOnlySelfPhotosConfirmed: boolean;
@@ -510,6 +515,9 @@ const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
   },
 ] as const;
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const MODERATOR_PERMISSION_CACHE_TTL_MS = 15 * 60 * 1000;
+const MODERATOR_ROLE_CACHE_TTL_MS = 15 * 60 * 1000;
+const MODERATOR_LOOKUP_LOG_COOLDOWN_MS = 15 * 60 * 1000;
 const USER_VALIDATION_CRON = '30 3 * * *';
 const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
 const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
@@ -2678,10 +2686,11 @@ async function loadDashboardData(
   const subredditName = await getCurrentSubredditNameCompat(context);
   await ensureUserValidationSchedule(context, subredditId, subredditName);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
-  const isModeratorUser = viewerUsername ? await isModerator(context, subredditName, viewerUsername) : false;
-  const moderatorPermissions = viewerUsername
-    ? await getCurrentModeratorPermissionList(context, subredditName, viewerUsername)
-    : [];
+  const moderatorAccess = viewerUsername
+    ? await getModeratorAccessSnapshot(context, subredditName, viewerUsername)
+    : { isModerator: false, permissions: [] };
+  const isModeratorUser = moderatorAccess.isModerator;
+  const moderatorPermissions = moderatorAccess.permissions;
   const canManageUsers = hasManageUsersPermissionInList(moderatorPermissions);
   const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
   const canOpenInstallSettings = hasAllModeratorPermissionInList(moderatorPermissions);
@@ -4270,45 +4279,71 @@ async function setRecord(context: RedisContext, subredditId: string, record: Ver
   });
 }
 
-async function isModerator(
+async function getModeratorAccessSnapshot(
   context: Devvit.Context,
   subredditName: string,
   username: string
-): Promise<boolean> {
+): Promise<ModeratorAccessSnapshot> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-
-  try {
-    const currentUsername = await context.reddit.getCurrentUsername();
-    if (currentUsername && normalizeUsername(currentUsername) === normalizeUsername(username)) {
-      const currentUser = await context.reddit.getCurrentUser();
-      if (currentUser) {
-        const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
-        if (permissions.length > 0) {
-          return true;
-        }
-      }
-    }
-  } catch (error) {
-    console.log(`Mod permission lookup failed (user permissions path): ${errorText(error)}`);
+  const permissions = await getCurrentModeratorPermissionList(context, sanitizedSubreddit, username);
+  if (permissions.length > 0) {
+    return {
+      isModerator: true,
+      permissions,
+    };
   }
 
+  const normalizedUsername = normalizeUsername(username);
+  const errors: string[] = [];
+
   try {
-    const normalizedUsername = normalizeUsername(username);
     const mods = await context.reddit.getModerators({ subredditName: sanitizedSubreddit, limit: 100 }).all();
-    return mods.some((modUser) => normalizeUsername(modUser.username) === normalizedUsername);
+    if (mods.some((modUser) => normalizeUsername(modUser.username) === normalizedUsername)) {
+      await cacheModeratorRole(context, username);
+      return {
+        isModerator: true,
+        permissions,
+      };
+    }
   } catch (error) {
-    console.log(`Mod permission lookup failed (broad moderators listing path): ${errorText(error)}`);
+    errors.push(`broad moderators listing path: ${errorText(error)}`);
   }
 
   try {
     const mods = await context.reddit
       .getModerators({ subredditName: sanitizedSubreddit, username, limit: 1 })
       .all();
-    return mods.some((modUser) => normalizeUsername(modUser.username) === normalizeUsername(username));
+    if (mods.some((modUser) => normalizeUsername(modUser.username) === normalizedUsername)) {
+      await cacheModeratorRole(context, username);
+      return {
+        isModerator: true,
+        permissions,
+      };
+    }
   } catch (error) {
-    console.log(`Mod permission lookup failed (moderators listing path): ${errorText(error)}`);
-    return false;
+    errors.push(`moderators listing path: ${errorText(error)}`);
   }
+
+  if (await getCachedModeratorRole(context, username)) {
+    return {
+      isModerator: true,
+      permissions,
+    };
+  }
+
+  if (errors.length > 0) {
+    await logModeratorLookupFailureWithCooldown(
+      context,
+      'membership',
+      username,
+      `Moderator membership lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errors.join(' | ')}`
+    );
+  }
+
+  return {
+    isModerator: false,
+    permissions,
+  };
 }
 
 async function assertCanReview(
@@ -4344,14 +4379,25 @@ async function getCurrentModeratorPermissionList(
   try {
     const currentUser = await context.reddit.getCurrentUser();
     if (!currentUser) {
-      return [];
+      return await getCachedModeratorPermissions(context, username);
     }
-    return await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
+    const permissions = normalizeModeratorPermissions(
+      await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit)
+    );
+    await cacheModeratorPermissions(context, username, permissions);
+    return permissions;
   } catch (error) {
-    console.log(
+    const cachedPermissions = await getCachedModeratorPermissions(context, username);
+    if (cachedPermissions.length > 0) {
+      return cachedPermissions;
+    }
+    await logModeratorLookupFailureWithCooldown(
+      context,
+      'permissions',
+      username,
       `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
-    return [];
+    return cachedPermissions;
   }
 }
 
@@ -4377,26 +4423,8 @@ async function hasManageUsersPermission(
   subredditName: string,
   username: string
 ): Promise<boolean> {
-  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsername(username);
-  const currentUsername = await context.reddit.getCurrentUsername();
-  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
-    return false;
-  }
-
-  try {
-    const currentUser = await context.reddit.getCurrentUser();
-    if (!currentUser) {
-      return false;
-    }
-    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
-    return hasManageUsersPermissionInList(permissions);
-  } catch (error) {
-    console.log(
-      `Manage Users permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
-    );
-    return false;
-  }
+  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
+  return hasManageUsersPermissionInList(permissions);
 }
 
 async function hasConfigAccessPermission(
@@ -4404,26 +4432,8 @@ async function hasConfigAccessPermission(
   subredditName: string,
   username: string
 ): Promise<boolean> {
-  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsername(username);
-  const currentUsername = await context.reddit.getCurrentUsername();
-  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
-    return false;
-  }
-
-  try {
-    const currentUser = await context.reddit.getCurrentUser();
-    if (!currentUser) {
-      return false;
-    }
-    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
-    return hasConfigAccessPermissionInList(permissions);
-  } catch (error) {
-    console.log(
-      `Config access permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
-    );
-    return false;
-  }
+  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
+  return hasConfigAccessPermissionInList(permissions);
 }
 
 async function hasAllModeratorPermission(
@@ -4431,26 +4441,8 @@ async function hasAllModeratorPermission(
   subredditName: string,
   username: string
 ): Promise<boolean> {
-  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsername(username);
-  const currentUsername = await context.reddit.getCurrentUsername();
-  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
-    return false;
-  }
-
-  try {
-    const currentUser = await context.reddit.getCurrentUser();
-    if (!currentUser) {
-      return false;
-    }
-    const permissions = await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit);
-    return hasAllModeratorPermissionInList(permissions);
-  } catch (error) {
-    console.log(
-      `All moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
-    );
-    return false;
-  }
+  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
+  return hasAllModeratorPermissionInList(permissions);
 }
 
 function hasManageUsersPermissionInList(permissions: string[]): boolean {
@@ -5090,6 +5082,18 @@ function modmailLockKey(subredditId: string, eventId: string): string {
   return `${subredditScopePrefix(subredditId)}:modmail:lock:${eventId}`;
 }
 
+function moderatorPermissionCacheKey(subredditId: string, username: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator:permissions:${normalizeUsername(username)}`;
+}
+
+function moderatorRoleCacheKey(subredditId: string, username: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator:role:${normalizeUsername(username)}`;
+}
+
+function moderatorLookupLogCooldownKey(subredditId: string, scope: string, username: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator:lookup-log:${scope}:${normalizeUsername(username) || 'unknown'}`;
+}
+
 function sanitizeSubredditId(input: string): string {
   return input.trim().toLowerCase();
 }
@@ -5124,6 +5128,133 @@ async function getCurrentSubredditNameCompat(
 
 function normalizeUsername(input: string): string {
   return input.trim().replace(/^u\//i, '').toLowerCase();
+}
+
+function normalizeModeratorPermissions(permissions: string[]): string[] {
+  return dedupeNonEmpty(permissions.map((permission) => String(permission ?? '').trim()));
+}
+
+function getModeratorCacheSubredditId(context: { subredditId?: string | null }): string {
+  return sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+}
+
+async function cacheModeratorRole(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  username: string
+): Promise<void> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const normalizedUsername = normalizeUsername(username);
+  if (!subredditId || !normalizedUsername) {
+    return;
+  }
+
+  try {
+    await context.redis.set(moderatorRoleCacheKey(subredditId, normalizedUsername), '1', {
+      expiration: new Date(Date.now() + MODERATOR_ROLE_CACHE_TTL_MS),
+    });
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
+async function getCachedModeratorRole(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  username: string
+): Promise<boolean> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const normalizedUsername = normalizeUsername(username);
+  if (!subredditId || !normalizedUsername) {
+    return false;
+  }
+
+  try {
+    return Boolean(await context.redis.get(moderatorRoleCacheKey(subredditId, normalizedUsername)));
+  } catch {
+    return false;
+  }
+}
+
+async function cacheModeratorPermissions(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  username: string,
+  permissions: string[]
+): Promise<void> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedPermissions = normalizeModeratorPermissions(permissions);
+  if (!subredditId || !normalizedUsername || normalizedPermissions.length === 0) {
+    return;
+  }
+
+  try {
+    await context.redis.set(
+      moderatorPermissionCacheKey(subredditId, normalizedUsername),
+      JSON.stringify(normalizedPermissions),
+      {
+        expiration: new Date(Date.now() + MODERATOR_PERMISSION_CACHE_TTL_MS),
+      }
+    );
+  } catch {
+    // Best-effort cache only.
+  }
+
+  await cacheModeratorRole(context, normalizedUsername);
+}
+
+async function getCachedModeratorPermissions(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  username: string
+): Promise<string[]> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const normalizedUsername = normalizeUsername(username);
+  if (!subredditId || !normalizedUsername) {
+    return [];
+  }
+
+  try {
+    const payload = await context.redis.get(moderatorPermissionCacheKey(subredditId, normalizedUsername));
+    if (!payload) {
+      return [];
+    }
+    const parsed = JSON.parse(payload) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeModeratorPermissions(parsed.filter((value): value is string => typeof value === 'string'));
+  } catch {
+    return [];
+  }
+}
+
+async function logModeratorLookupFailureWithCooldown(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  scope: string,
+  username: string,
+  message: string
+): Promise<void> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const normalizedUsername = normalizeUsername(username);
+  if (!subredditId || !normalizedUsername) {
+    return;
+  }
+
+  try {
+    const shouldLog = await context.redis.set(
+      moderatorLookupLogCooldownKey(subredditId, scope, normalizedUsername),
+      '1',
+      {
+        nx: true,
+        expiration: new Date(Date.now() + MODERATOR_LOOKUP_LOG_COOLDOWN_MS),
+      }
+    );
+    if (shouldLog !== 'OK') {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  console.log(message);
 }
 
 function approvedPrefixFromUsername(username: string): string {
@@ -6219,6 +6350,8 @@ export {
   searchHistoryRecords,
   searchApprovedRecords,
   searchAuditEntries,
+  getCurrentModeratorPermissionList,
+  getModeratorAccessSnapshot,
   unblockUserForModerator,
   blockUserForModerator,
   onSaveFlairTemplateValues,
