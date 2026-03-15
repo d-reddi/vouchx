@@ -424,6 +424,7 @@ export function mountHub(options = {}) {
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
     ...(howToUseUrl ? [{ label: 'How to use this app', url: howToUseUrl }] : []),
   ];
+  const submitWarningLinks = legalLinks.filter((item) => item.label !== 'How to use this app');
 
   if (refs.brandLogo) {
     refs.brandLogo.src = brandLogoUrl;
@@ -459,7 +460,7 @@ export function mountHub(options = {}) {
 
   if (refs.submitWarningLinks) {
     refs.submitWarningLinks.classList.remove('hidden');
-    for (const item of legalLinks) {
+    for (const item of submitWarningLinks) {
       refs.submitWarningLinks.appendChild(createExternalLink(item));
     }
   }
