@@ -94,9 +94,9 @@ function createShell(root, inline) {
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card">
-          <h2>Photo Instructions</h2>
+          <h2>Photo Requirements</h2>
           <p class="meta">
-            Review these instructions before opening the upload form.
+            Review these instructions carefully before submitting your photos.
           </p>
           <div data-el="photo-instructions-scroll-shell" class="hub-scroll-shell" data-scroll-overflow="false" data-scroll-bottom="true">
             <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
@@ -886,7 +886,7 @@ export function mountHub(options = {}) {
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
       refs.actionRow.appendChild(
-        makeButton('Photo Instructions', 'btn-secondary', () => {
+        makeButton('Photo Requirements', 'btn-secondary', () => {
           openPhotoInstructionsModal();
         })
       );
