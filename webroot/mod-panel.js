@@ -147,6 +147,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   let readyRetries = 0;
   let readyTimerId = 0;
   let isBusy = false;
+  let isSavingFlairSettings = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
   let activeHistoryView = 'records';
@@ -515,43 +516,52 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   async function saveFlairSettings() {
+    if (isSavingFlairSettings || isBusy) {
+      return;
+    }
+    isSavingFlairSettings = true;
+    syncSaveFlairButtonState();
     const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
-    let validation;
     try {
-      validation = await validateFlairTemplateInputValue(flairTemplateId);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-      return;
-    }
-    if (!validation.isValid) {
-      setFlairTemplateValidationOverride(validation);
-      showToast(validation.message, 'error');
-      return;
-    }
-    clearFlairTemplateValidationOverride();
-    setBusy(true);
-    try {
-      applyApiState(
-        await requestJson('/api/mod/settings/flair', {
-          type: 'saveFlair',
-          flairTemplateId,
-          flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
-          verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
-          requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
-          photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
-        })
-      );
-    } catch (error) {
-      setBusy(false);
       try {
-        const failedValidation = await validateFlairTemplateInputValue(flairTemplateId);
-        if (!failedValidation.isValid) {
-          setFlairTemplateValidationOverride(failedValidation);
+        const validation = await validateFlairTemplateInputValue(flairTemplateId);
+        if (!validation.isValid) {
+          setFlairTemplateValidationOverride(validation);
+          showToast(validation.message, 'error');
+          return;
         }
-      } catch {
-        // Keep the current field value and surface the original save error.
+        clearFlairTemplateValidationOverride();
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+        return;
       }
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      setBusy(true);
+      try {
+        applyApiState(
+          await requestJson('/api/mod/settings/flair', {
+            type: 'saveFlair',
+            flairTemplateId,
+            flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+            verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
+            requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+            photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+          })
+        );
+      } catch (error) {
+        setBusy(false);
+        try {
+          const failedValidation = await validateFlairTemplateInputValue(flairTemplateId);
+          if (!failedValidation.isValid) {
+            setFlairTemplateValidationOverride(failedValidation);
+          }
+        } catch {
+          // Keep the current field value and surface the original save error.
+        }
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    } finally {
+      isSavingFlairSettings = false;
+      syncSaveFlairButtonState();
     }
   }
 
@@ -988,10 +998,18 @@ import { BUG_REPORT_URL } from './app-config.js';
         button.disabled = true;
       }
     }
+    syncSaveFlairButtonState();
     if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
       void refreshFromRealtimeSignal();
     }
+  }
+
+  function syncSaveFlairButtonState() {
+    if (!saveFlairBtn) {
+      return;
+    }
+    saveFlairBtn.disabled = isBusy || isSavingFlairSettings;
   }
 
   function postWithBusy(message) {

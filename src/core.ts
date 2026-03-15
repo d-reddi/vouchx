@@ -147,6 +147,7 @@ type DashboardData = {
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
   flairTemplateValidation: FlairTemplateValidationState;
+  requiresInitialSetup: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -430,6 +431,7 @@ type HubStatePayload = {
   subredditName: string;
   isModerator: boolean;
   canReview: boolean;
+  requiresInitialSetup: boolean;
   config: PublicHubConfig;
   viewerVerifiedByFlair: boolean;
   viewerFlairCheckSource: string;
@@ -940,6 +942,7 @@ function toHubState(dashboard: DashboardData): HubStatePayload {
     subredditName: dashboard.subredditName,
     isModerator: dashboard.isModerator,
     canReview: dashboard.canReview,
+    requiresInitialSetup: dashboard.requiresInitialSetup,
     config: toPublicHubConfig(dashboard.config),
     viewerVerifiedByFlair: dashboard.viewerVerifiedByFlair,
     viewerFlairCheckSource: dashboard.viewerFlairCheckSource,
@@ -2707,6 +2710,7 @@ async function loadDashboardData(
   if (canReviewUser && options.includeModData) {
     flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
+  const requiresInitialSetup = !config.flairTemplateId.trim();
 
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
   if (viewerUsername && userLatest) {
@@ -2837,6 +2841,7 @@ async function loadDashboardData(
     hasConfigAccess,
     canAccessSettingsTab,
     flairTemplateValidation,
+    requiresInitialSetup,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,

@@ -9,6 +9,7 @@ import {
   normalizeSubmittedPhotoUrl,
   releaseRedisLockIfOwned,
   toPublicHubConfig,
+  toHubState,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
   validateFlairTemplateId,
@@ -88,6 +89,56 @@ function buildRuntimeConfig(): RuntimeConfig {
     customPrimary: '',
     customAccent: '',
     customBackground: '',
+  };
+}
+
+function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]> = {}): Parameters<typeof toHubState>[0] {
+  return {
+    viewerUsername: 'example_user',
+    subredditName: 'example',
+    isModerator: false,
+    canReview: false,
+    canManageUsers: false,
+    canOpenInstallSettings: false,
+    hasConfigAccess: false,
+    canAccessSettingsTab: false,
+    flairTemplateValidation: {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    },
+    requiresInitialSetup: false,
+    config: buildRuntimeConfig(),
+    viewerSnapshot: {
+      accountAgeDays: 365,
+      totalKarma: 1000,
+    },
+    viewerVerifiedByFlair: false,
+    viewerFlairConfiguredTemplateId: '',
+    viewerFlairDetectedTemplateId: '',
+    viewerFlairCheckSource: 'none',
+    viewerFlairCheckError: null,
+    viewerCurrentFlairText: '',
+    viewerCurrentFlairCssClass: '',
+    userLatest: null,
+    viewerBlocked: null,
+    pendingCount: 0,
+    pending: [],
+    approved: [],
+    blocked: [],
+    auditLog: [],
+    storage: {
+      estimatedBytes: 0,
+      capBytes: 0,
+      percent: 0,
+      recordCount: 0,
+      auditCount: 0,
+      blockedCount: 0,
+      deniedCountEntries: 0,
+    },
+    approvedHasMore: false,
+    auditHasMore: false,
+    ...overrides,
   };
 }
 
@@ -402,6 +453,35 @@ test('toPublicHubConfig omits moderator-only template content', () => {
     ],
   });
   assert.equal('template' in publicConfig.denyReasons[0], false);
+});
+
+test('toHubState marks initial setup required when flair template ID is blank', () => {
+  const hubState = toHubState(
+    buildDashboardData({
+      requiresInitialSetup: true,
+      config: {
+        ...buildRuntimeConfig(),
+        flairTemplateId: '',
+      },
+    })
+  );
+
+  assert.equal(hubState.requiresInitialSetup, true);
+  assert.equal('flairTemplateId' in hubState.config, false);
+});
+
+test('toHubState does not mark initial setup required when flair template ID is non-empty', () => {
+  const hubState = toHubState(
+    buildDashboardData({
+      requiresInitialSetup: false,
+      config: {
+        ...buildRuntimeConfig(),
+        flairTemplateId: 'template-id-present',
+      },
+    })
+  );
+
+  assert.equal(hubState.requiresInitialSetup, false);
 });
 
 test('releaseRedisLockIfOwned deletes the cleanup lock when the token matches', async () => {

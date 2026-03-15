@@ -100,7 +100,7 @@ function createShell(root, inline) {
           </p>
           <div data-el="photo-instructions-scroll-shell" class="hub-scroll-shell" data-scroll-overflow="false" data-scroll-bottom="true">
             <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
-            <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Drag ↓</div>
+            <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Scroll Down ↓</div>
           </div>
           <div class="row">
             <button data-el="photo-instructions-continue" class="btn-primary hidden" type="button">Continue to Submission</button>
@@ -868,6 +868,11 @@ export function mountHub(options = {}) {
       if (state.userLatest.removedAt) {
         infoText = `Removed ${formatTimestamp(state.userLatest.removedAt)}.`;
       }
+    } else if (state.requiresInitialSetup) {
+      commandTitle = 'Setup required';
+      infoText = state.canReview
+        ? 'Setup is required. Open the Mod Panel > Settings and set a flair template ID to get started. If you do not see the Settings tab in the mod panel, ask a moderator with \"config\" permissions to complete setup.'
+        : 'Verification setup is still in progress. Please check back later.';
     }
 
     refs.commandTitle.textContent = commandTitle;
@@ -883,6 +888,7 @@ export function mountHub(options = {}) {
     if (
       !state.viewerVerifiedByFlair &&
       !isRestricted &&
+      !state.requiresInitialSetup &&
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
