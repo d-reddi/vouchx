@@ -28,6 +28,14 @@ type BlockedUserEntry = {
   reason: string;
 };
 
+type PendingAccountDetailsSnapshot = {
+  capturedAt: string;
+  accountCreatedAt: string | null;
+  subredditKarma: number | null;
+  previousDeniedAttempts: number;
+  banStatus: 'banned' | 'not_banned' | 'unknown';
+};
+
 type VerificationRecord = {
   id: string;
   username: string;
@@ -50,6 +58,7 @@ type VerificationRecord = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
+  accountDetails?: PendingAccountDetailsSnapshot | null;
   removedAt?: string | null;
   removedBy?: string | null;
   lastValidatedAt?: string | null;
@@ -343,6 +352,7 @@ type PendingPanelItem = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
+  accountDetails?: PendingAccountDetailsSnapshot | null;
 };
 
 type ApprovedSearchPanelItem = {
@@ -968,6 +978,191 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     claimedAt: normalizedRecord.claimedAt ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
+    accountDetails: normalizedRecord.accountDetails ?? null,
+  };
+}
+
+function normalizeOptionalIsoTimestamp(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const parsedMs = new Date(value).getTime();
+  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : null;
+}
+
+function normalizeOptionalWholeNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+function normalizeNonNegativeWholeNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizePendingBanStatus(value: unknown): PendingAccountDetailsSnapshot['banStatus'] {
+  return value === 'banned' || value === 'not_banned' || value === 'unknown' ? value : 'unknown';
+}
+
+function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetailsSnapshot | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const parsed = value as {
+    capturedAt?: unknown;
+    accountCreatedAt?: unknown;
+    subredditKarma?: unknown;
+    previousDeniedAttempts?: unknown;
+    banStatus?: unknown;
+  };
+
+  const capturedAt = normalizeOptionalIsoTimestamp(parsed.capturedAt);
+  if (!capturedAt) {
+    return null;
+  }
+
+  return {
+    capturedAt,
+    accountCreatedAt: normalizeOptionalIsoTimestamp(parsed.accountCreatedAt),
+    subredditKarma: normalizeOptionalWholeNumber(parsed.subredditKarma),
+    previousDeniedAttempts: normalizeNonNegativeWholeNumber(parsed.previousDeniedAttempts),
+    banStatus: normalizePendingBanStatus(parsed.banStatus),
+  };
+}
+
+function normalizeSubredditKarmaValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const parsed = value as {
+    total?: unknown;
+    karma?: unknown;
+    totalKarma?: unknown;
+    fromComments?: unknown;
+    fromPosts?: unknown;
+    commentKarma?: unknown;
+    postKarma?: unknown;
+    linkKarma?: unknown;
+  };
+
+  const directTotal = normalizeOptionalWholeNumber(parsed.total ?? parsed.karma ?? parsed.totalKarma);
+  if (directTotal !== null) {
+    return directTotal;
+  }
+
+  const commentKarma = normalizeOptionalWholeNumber(parsed.commentKarma ?? parsed.fromComments);
+  const postKarma = normalizeOptionalWholeNumber(parsed.postKarma ?? parsed.linkKarma ?? parsed.fromPosts);
+  if (commentKarma === null && postKarma === null) {
+    return null;
+  }
+
+  return (commentKarma ?? 0) + (postKarma ?? 0);
+}
+
+async function getStoredDenialCount(context: RedisContext, subredditId: string, username: string): Promise<number> {
+  const currentRaw = await context.redis.hGet(denialCountKey(subredditId), normalizeUsername(username));
+  const current = Number.parseInt(currentRaw ?? '0', 10);
+  return Number.isFinite(current) && current > 0 ? current : 0;
+}
+
+async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    console.log(`${label} failed on first attempt: ${errorText(error)}`);
+  }
+
+  try {
+    return await fn();
+  } catch (error) {
+    console.log(`${label} failed on retry: ${errorText(error)}`);
+    return fallbackValue;
+  }
+}
+
+async function collectPendingAccountDetailsSnapshot(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  username: string,
+  capturedAt: string
+): Promise<PendingAccountDetailsSnapshot> {
+  const normalizedUsername = normalizeUsername(username);
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+
+  const userSnapshotTask = withSingleRetry(
+    `Pending account details user snapshot lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
+    { accountCreatedAt: null, subredditKarma: null },
+    async () => {
+      const user = await context.reddit.getUserByUsername(normalizedUsername);
+      if (!user) {
+        return { accountCreatedAt: null, subredditKarma: null };
+      }
+      const userWithKarma = user as typeof user & {
+        getUserKarmaFromCurrentSubreddit?: () => Promise<unknown>;
+      };
+      const rawKarma =
+        typeof userWithKarma.getUserKarmaFromCurrentSubreddit === 'function'
+          ? await userWithKarma.getUserKarmaFromCurrentSubreddit()
+          : null;
+      return {
+        accountCreatedAt: normalizeOptionalIsoTimestamp(user.createdAt),
+        subredditKarma: normalizeSubredditKarmaValue(rawKarma),
+      };
+    }
+  );
+
+  const banStatusTask = withSingleRetry(
+    `Pending account details ban lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
+    'unknown' as const,
+    async () => {
+      const redditClient = context.reddit as Devvit.Context['reddit'] & {
+        getBannedUsers?: (options: {
+          subredditName?: string;
+          username?: string;
+          limit?: number;
+          pageSize?: number;
+        }) => { all: () => Promise<unknown[]> };
+      };
+      if (typeof redditClient.getBannedUsers !== 'function') {
+        return 'unknown';
+      }
+      const bannedUsers = await redditClient
+        .getBannedUsers({
+          subredditName: sanitizedSubreddit,
+          username: normalizedUsername,
+          limit: 1,
+          pageSize: 1,
+        })
+        .all();
+      return bannedUsers.length > 0 ? 'banned' : 'not_banned';
+    }
+  );
+
+  const [userSnapshot, banStatus, previousDeniedAttempts] = await Promise.all([
+    userSnapshotTask,
+    banStatusTask,
+    getStoredDenialCount(context, subredditId, username),
+  ]);
+
+  return {
+    capturedAt,
+    accountCreatedAt: userSnapshot.accountCreatedAt,
+    subredditKarma: userSnapshot.subredditKarma,
+    previousDeniedAttempts,
+    banStatus,
   };
 }
 
@@ -1046,6 +1241,13 @@ async function submitVerification(
 
   const verificationId = makeVerificationId(now);
   const acknowledgedAt = now.toISOString();
+  const accountDetails = await collectPendingAccountDetailsSnapshot(
+    context,
+    subredditId,
+    subredditName,
+    username,
+    acknowledgedAt
+  );
 
   const record: VerificationRecord = {
     id: verificationId,
@@ -1067,6 +1269,7 @@ async function submitVerification(
     claimedAt: null,
     parentVerificationId: null,
     isResubmission,
+    accountDetails,
     removedAt: null,
     removedBy: null,
     lastValidatedAt: null,
@@ -1765,6 +1968,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
       claimedBy: null,
       claimedAt: null,
       parentVerificationId: null,
+      accountDetails: null,
       photoOneUrl: '',
       photoTwoUrl: '',
       photoThreeUrl: '',
@@ -1991,6 +2195,7 @@ async function denyVerification(
       denyNotes: moderatorNotes ?? null,
       claimedBy: null,
       claimedAt: null,
+      accountDetails: null,
       removedAt: null,
       removedBy: null,
       lastValidatedAt: null,
@@ -2128,6 +2333,14 @@ async function reopenDeniedVerification(
     }
 
     const now = new Date();
+    const reopenedAt = now.toISOString();
+    const accountDetails = await collectPendingAccountDetailsSnapshot(
+      context,
+      subredditId,
+      subredditName,
+      deniedRecord.username,
+      reopenedAt
+    );
     const reopenedId = makeVerificationId(now);
     const reopenedRecord: VerificationRecord = {
       ...deniedRecord,
@@ -2139,8 +2352,9 @@ async function reopenDeniedVerification(
       denyNotes: null,
       claimedBy: null,
       claimedAt: null,
-      submittedAt: now.toISOString(),
+      submittedAt: reopenedAt,
       parentVerificationId: deniedRecord.id,
+      accountDetails,
       removedAt: null,
       removedBy: null,
       lastValidatedAt: null,
@@ -3735,9 +3949,7 @@ async function isUserBlocked(context: Devvit.Context, subredditId: string, usern
 async function incrementDenialCount(context: Devvit.Context, subredditId: string, username: string): Promise<number> {
   const key = denialCountKey(subredditId);
   const normalizedUsername = normalizeUsername(username);
-  const currentRaw = await context.redis.hGet(key, normalizedUsername);
-  const current = Number.parseInt(currentRaw ?? '0', 10);
-  const next = Number.isFinite(current) && current > 0 ? current + 1 : 1;
+  const next = (await getStoredDenialCount(context, subredditId, normalizedUsername)) + 1;
   await context.redis.hSet(key, { [normalizedUsername]: `${next}` });
   return next;
 }
@@ -3810,9 +4022,7 @@ async function blockUserForModerator(
     return { alreadyBlocked: true, entry: existing };
   }
 
-  const currentCountRaw = await context.redis.hGet(denialCountKey(subredditId), normalizedUsername);
-  const currentCount = Number.parseInt(currentCountRaw ?? '0', 10);
-  const deniedCount = Number.isFinite(currentCount) && currentCount > 0 ? currentCount : 0;
+  const deniedCount = await getStoredDenialCount(context, subredditId, normalizedUsername);
 
   const entry: BlockedUserEntry = {
     username: normalizedUsername,
@@ -4935,6 +5145,7 @@ function parseRecord(payload: string): VerificationRecord | null {
       claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
       parentVerificationId: typeof parsed.parentVerificationId === 'string' ? parsed.parentVerificationId : null,
       isResubmission: parsed.isResubmission === true,
+      accountDetails: parsePendingAccountDetailsSnapshot(parsed.accountDetails),
       removedAt: typeof parsed.removedAt === 'string' ? parsed.removedAt : null,
       removedBy: typeof parsed.removedBy === 'string' ? parsed.removedBy : null,
       lastValidatedAt: typeof parsed.lastValidatedAt === 'string' ? parsed.lastValidatedAt : null,
@@ -6467,12 +6678,14 @@ export {
   sanitizeSubredditName,
   getCurrentSubredditNameCompat,
   parseDenyReason,
+  parseRecord,
   errorText,
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,
   validateMaxDenialsBeforeBlockSetting,
   resolveThemePalette,
   clearExpiredPendingClaim,
+  collectPendingAccountDetailsSnapshot,
   normalizeSubmittedPhotoUrl,
   toPublicHubConfig,
   releaseRedisLockIfOwned,
@@ -6490,6 +6703,7 @@ export type {
   FlairTemplateValidationState,
   HubStatePayload,
   ModPanelStatePayload,
+  PendingAccountDetailsSnapshot,
   PublicHubConfig,
   PurgeUserDataFormValues,
   RuntimeConfig,

@@ -549,6 +549,34 @@
       <img id="image-preview" src="" alt="Verification preview" />
     </div>
 
+    <div id="stats-modal" class="dialog-modal hidden">
+      <div class="dialog-card stats-dialog-card">
+        <div class="stats-dialog-head">
+          <div>
+            <h3 id="stats-username">Account details</h3>
+            <p id="stats-captured-at" class="muted small">Snapshot unavailable for this pending record.</p>
+          </div>
+          <button id="stats-close-btn" class="btn btn-secondary" type="button">Close</button>
+        </div>
+        <div class="stats-section">
+          <div class="stats-primary-row">
+            <span class="stats-label">Subreddit Karma</span>
+            <span id="stats-subreddit-karma" class="stats-primary-value">Unknown</span>
+          </div>
+          <div class="stats-list">
+            <div class="stats-row">
+              <span class="stats-label">Previous denied attempts</span>
+              <span id="stats-previous-denials" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Ban status</span>
+              <span id="stats-ban-status" class="stats-value">Unknown</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="block-modal" class="dialog-modal hidden">
       <div class="dialog-card">
         <h3>Block user</h3>

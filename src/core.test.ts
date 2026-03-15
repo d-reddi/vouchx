@@ -3,11 +3,14 @@ import test from 'node:test';
 
 import {
   clearExpiredPendingClaim,
+  collectPendingAccountDetailsSnapshot,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   normalizeSubmittedPhotoUrl,
+  parseRecord,
   releaseRedisLockIfOwned,
+  toModPanelState,
   toPublicHubConfig,
   toHubState,
   USER_VALIDATION_CRON,
@@ -48,6 +51,17 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
     lastTtlBumpAt: null,
     lastAppliedFlairTemplateId: null,
     lastFlairReconcileAt: null,
+    ...overrides,
+  };
+}
+
+function buildPendingAccountDetailsSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    capturedAt: '2026-03-11T12:00:00.000Z',
+    accountCreatedAt: '2026-03-01T12:00:00.000Z',
+    subredditKarma: 42,
+    previousDeniedAttempts: 2,
+    banStatus: 'not_banned' as const,
     ...overrides,
   };
 }
@@ -323,6 +337,79 @@ function createModeratorLookupContext(options?: {
   };
 }
 
+function createPendingAccountDetailsContext(options?: {
+  userResponses?: Array<{ createdAt: Date } | null | Error>;
+  karmaResponses?: Array<unknown | Error>;
+  bannedResponses?: Array<unknown[] | Error>;
+  denialCount?: string | null;
+}) {
+  const userResponses = options?.userResponses ?? [];
+  const karmaResponses = options?.karmaResponses ?? [];
+  const bannedResponses = options?.bannedResponses ?? [];
+  let userCallCount = 0;
+  let karmaCallCount = 0;
+  let bannedCallCount = 0;
+  let denialCountCallCount = 0;
+
+  return {
+    context: {
+      reddit: {
+        async getUserByUsername() {
+          const response = userResponses[Math.min(userCallCount, userResponses.length - 1)];
+          userCallCount += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+          if (!response) {
+            return null;
+          }
+          return {
+            createdAt: response.createdAt,
+            async getUserKarmaFromCurrentSubreddit() {
+              const karmaResponse = karmaResponses[Math.min(karmaCallCount, karmaResponses.length - 1)];
+              karmaCallCount += 1;
+              if (karmaResponse instanceof Error) {
+                throw karmaResponse;
+              }
+              return karmaResponse ?? null;
+            },
+          };
+        },
+        getBannedUsers() {
+          return {
+            async all() {
+              const response = bannedResponses[Math.min(bannedCallCount, bannedResponses.length - 1)];
+              bannedCallCount += 1;
+              if (response instanceof Error) {
+                throw response;
+              }
+              return Array.isArray(response) ? response : [];
+            },
+          };
+        },
+      },
+      redis: {
+        async hGet() {
+          denialCountCallCount += 1;
+          return options?.denialCount ?? null;
+        },
+      },
+    },
+    get userCallCount() {
+      return userCallCount;
+    },
+    get karmaCallCount() {
+      return karmaCallCount;
+    },
+    get bannedCallCount() {
+      return bannedCallCount;
+    },
+    get denialCountCallCount() {
+      return denialCountCallCount;
+    },
+  };
+}
+
 test('normalizeSubmittedPhotoUrl accepts Reddit-hosted upload URLs', () => {
   assert.equal(
     normalizeSubmittedPhotoUrl('https://i.redd.it/example-photo.png'),
@@ -433,6 +520,110 @@ test('clearExpiredPendingClaim keeps active claims', () => {
   const result = clearExpiredPendingClaim(activeRecord, Date.parse('2026-03-11T12:00:00.000Z'));
   assert.equal(result.claimedBy, 'mod_one');
   assert.equal(result.claimedAt, '2026-03-11T11:55:00.000Z');
+});
+
+test('parseRecord preserves valid pending account details snapshots', () => {
+  const parsed = parseRecord(
+    JSON.stringify(
+      buildRecord({
+        accountDetails: buildPendingAccountDetailsSnapshot(),
+      })
+    )
+  );
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.accountDetails, buildPendingAccountDetailsSnapshot());
+});
+
+test('parseRecord collapses malformed pending account details snapshots to null', () => {
+  const parsed = parseRecord(
+    JSON.stringify(
+      buildRecord({
+        accountDetails: {
+          capturedAt: 123,
+          previousDeniedAttempts: 'bad-data',
+        },
+      })
+    )
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.accountDetails, null);
+});
+
+test('toModPanelState includes account details on pending items', () => {
+  const accountDetails = buildPendingAccountDetailsSnapshot();
+  const modState = toModPanelState(
+    buildDashboardData({
+      pendingCount: 1,
+      pending: [buildRecord({ accountDetails }) as never],
+    })
+  );
+
+  assert.equal(modState.pending.length, 1);
+  assert.deepEqual(modState.pending[0].accountDetails, accountDetails);
+});
+
+test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [new Error('temporary user lookup failure'), { createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    karmaResponses: [{ fromComments: 4, fromPosts: 5 }],
+    bannedResponses: [new Error('temporary ban lookup failure'), []],
+    denialCount: '2',
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const snapshot = await collectPendingAccountDetailsSnapshot(
+      snapshotContext.context as never,
+      't5_example',
+      'example',
+      'example_user',
+      '2026-03-11T12:00:00.000Z'
+    );
+
+    assert.equal(snapshot.capturedAt, '2026-03-11T12:00:00.000Z');
+    assert.equal(snapshot.accountCreatedAt, '2026-03-01T12:00:00.000Z');
+    assert.equal(snapshot.subredditKarma, 9);
+    assert.equal(snapshot.previousDeniedAttempts, 2);
+    assert.equal(snapshot.banStatus, 'not_banned');
+    assert.equal(snapshotContext.userCallCount, 2);
+    assert.equal(snapshotContext.karmaCallCount, 1);
+    assert.equal(snapshotContext.bannedCallCount, 2);
+    assert.equal(snapshotContext.denialCountCallCount, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('collectPendingAccountDetailsSnapshot falls back to partial values after retry exhaustion', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [new Error('lookup failure'), new Error('lookup failure')],
+    bannedResponses: [new Error('ban failure'), new Error('ban failure')],
+    denialCount: '3',
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const snapshot = await collectPendingAccountDetailsSnapshot(
+      snapshotContext.context as never,
+      't5_example',
+      'example',
+      'example_user',
+      '2026-03-11T12:00:00.000Z'
+    );
+
+    assert.equal(snapshot.accountCreatedAt, null);
+    assert.equal(snapshot.subredditKarma, null);
+    assert.equal(snapshot.banStatus, 'unknown');
+    assert.equal(snapshot.previousDeniedAttempts, 3);
+    assert.equal(snapshotContext.userCallCount, 2);
+    assert.equal(snapshotContext.bannedCallCount, 2);
+  } finally {
+    console.log = originalConsoleLog;
+  }
 });
 
 test('toPublicHubConfig omits moderator-only template content', () => {

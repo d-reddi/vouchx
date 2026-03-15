@@ -136,6 +136,13 @@ import { BUG_REPORT_URL } from './app-config.js';
   const imageModal = document.getElementById('image-modal');
   const imagePreview = document.getElementById('image-preview');
   const imageClose = document.getElementById('image-close');
+  const statsModal = document.getElementById('stats-modal');
+  const statsCloseBtn = document.getElementById('stats-close-btn');
+  const statsUsername = document.getElementById('stats-username');
+  const statsCapturedAt = document.getElementById('stats-captured-at');
+  const statsSubredditKarma = document.getElementById('stats-subreddit-karma');
+  const statsPreviousDenials = document.getElementById('stats-previous-denials');
+  const statsBanStatus = document.getElementById('stats-ban-status');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
@@ -179,6 +186,8 @@ import { BUG_REPORT_URL } from './app-config.js';
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
+  const ACCOUNT_AGE_WARNING_DAYS = 14;
+  const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
   const prefersDarkMedia =
     typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -1382,6 +1391,26 @@ import { BUG_REPORT_URL } from './app-config.js';
     return badge;
   }
 
+  function createPendingAccountAgeMeta(item) {
+    const meta = document.createElement('p');
+    meta.className = 'item-meta pending-account-meta';
+
+    const label = document.createElement('span');
+    label.textContent = 'Account age:';
+    meta.appendChild(label);
+
+    const value = document.createElement('span');
+    value.className = 'pending-account-age-chip';
+    const ageDays = getPendingAccountAgeDays(item);
+    value.textContent = formatDayCount(ageDays);
+    if (ageDays !== null && ageDays < ACCOUNT_AGE_WARNING_DAYS) {
+      value.classList.add('pending-account-age-chip-warn');
+    }
+    meta.appendChild(value);
+
+    return meta;
+  }
+
   function buildPendingCard(item) {
     const card = document.createElement('article');
     card.className = 'item';
@@ -1396,7 +1425,7 @@ import { BUG_REPORT_URL } from './app-config.js';
 
     const titleRow = document.createElement('div');
     titleRow.className = 'pending-title-row';
-    titleRow.appendChild(createUsernameHeading(item.username));
+    titleRow.appendChild(createPendingTitlePrimary(item));
     const badgeRow = document.createElement('div');
     badgeRow.className = 'pending-badge-row';
     const ageBadge = createPendingAgeBadge(item.submittedAt);
@@ -1424,6 +1453,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       submitted.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
     }
     card.appendChild(submitted);
+    card.appendChild(createPendingAccountAgeMeta(item));
 
     appendSubmissionAcknowledgementMeta(card, item);
 
@@ -2441,6 +2471,21 @@ import { BUG_REPORT_URL } from './app-config.js';
     return title;
   }
 
+  function createPendingTitlePrimary(item) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pending-title-primary';
+    wrap.appendChild(createUsernameHeading(item.username));
+
+    const statsBtn = document.createElement('button');
+    statsBtn.type = 'button';
+    statsBtn.className = 'pending-stats-btn';
+    statsBtn.textContent = 'Stats';
+    statsBtn.addEventListener('click', () => openStatsModal(item));
+    wrap.appendChild(statsBtn);
+
+    return wrap;
+  }
+
   function openImage(url) {
     imagePreview.src = url;
     imageModal.classList.remove('hidden');
@@ -2487,6 +2532,84 @@ import { BUG_REPORT_URL } from './app-config.js';
       return iso;
     }
     return date.toLocaleString();
+  }
+
+  function normalizePendingAccountDetails(item) {
+    return item && item.accountDetails && typeof item.accountDetails === 'object' ? item.accountDetails : null;
+  }
+
+  function getPendingAccountAgeDays(item) {
+    const accountDetails = normalizePendingAccountDetails(item);
+    const createdAt = accountDetails && typeof accountDetails.accountCreatedAt === 'string' ? accountDetails.accountCreatedAt : '';
+    if (!createdAt) {
+      return null;
+    }
+    const createdAtMs = new Date(createdAt).getTime();
+    if (!Number.isFinite(createdAtMs)) {
+      return null;
+    }
+    return Math.max(0, Math.floor((Date.now() - createdAtMs) / MILLIS_PER_DAY));
+  }
+
+  function formatDayCount(days) {
+    if (typeof days !== 'number' || !Number.isFinite(days)) {
+      return 'Unknown';
+    }
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+
+  function formatStatCount(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unknown';
+  }
+
+  function formatBanStatus(value) {
+    if (value === 'banned') {
+      return 'banned';
+    }
+    if (value === 'not_banned') {
+      return 'not banned';
+    }
+    return 'unknown';
+  }
+
+  function openStatsModal(item) {
+    if (!statsModal) {
+      return;
+    }
+    const normalizedUsername = String(item && item.username ? item.username : '').trim().replace(/^u\//i, '');
+    const accountDetails = normalizePendingAccountDetails(item);
+
+    if (statsUsername) {
+      statsUsername.textContent = normalizedUsername ? `u/${normalizedUsername}` : 'Account details';
+    }
+    if (statsCapturedAt) {
+      statsCapturedAt.textContent =
+        accountDetails && accountDetails.capturedAt
+          ? `Snapshot captured ${formatTime(accountDetails.capturedAt)}`
+          : 'Snapshot unavailable for this pending record.';
+    }
+    if (statsSubredditKarma) {
+      statsSubredditKarma.textContent = accountDetails ? formatStatCount(accountDetails.subredditKarma) : 'Unknown';
+    }
+    if (statsPreviousDenials) {
+      statsPreviousDenials.textContent =
+        accountDetails ? formatStatCount(accountDetails.previousDeniedAttempts) : 'Unknown';
+    }
+    if (statsBanStatus) {
+      statsBanStatus.textContent = accountDetails ? formatBanStatus(accountDetails.banStatus) : 'unknown';
+    }
+
+    statsModal.classList.remove('hidden');
+    if (statsCloseBtn) {
+      window.setTimeout(() => statsCloseBtn.focus(), 0);
+    }
+  }
+
+  function closeStatsModal() {
+    if (!statsModal) {
+      return;
+    }
+    statsModal.classList.add('hidden');
   }
 
   function appendAcknowledgementMeta(container, label, iso) {
@@ -3071,6 +3194,17 @@ import { BUG_REPORT_URL } from './app-config.js';
       closeImage();
     }
   });
+
+  if (statsCloseBtn) {
+    statsCloseBtn.addEventListener('click', closeStatsModal);
+  }
+  if (statsModal) {
+    statsModal.addEventListener('click', (event) => {
+      if (event.target === statsModal) {
+        closeStatsModal();
+      }
+    });
+  }
 
   if (blockCancelBtn) {
     blockCancelBtn.addEventListener('click', closeBlockModal);

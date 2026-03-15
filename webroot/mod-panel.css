@@ -749,6 +749,14 @@ textarea {
   gap: 12px;
 }
 
+.pending-title-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .pending-badge-row {
   display: inline-flex;
   align-items: center;
@@ -777,6 +785,53 @@ textarea {
 
 .username-link:hover {
   color: var(--primary-strong);
+}
+
+.pending-stats-btn {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 86%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.pending-stats-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--panel-border) 78%);
+}
+
+.pending-account-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pending-account-age-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-surface-soft) 88%, transparent);
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pending-account-age-chip-warn {
+  color: #735400;
+  background: rgba(249, 219, 110, 0.28);
+  border-color: rgba(217, 174, 29, 0.38);
 }
 
 .reopened-warning {
@@ -1190,6 +1245,78 @@ textarea {
   letter-spacing: -0.03em;
 }
 
+.stats-dialog-card {
+  width: min(560px, 100%);
+}
+
+.stats-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stats-section {
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 84%, transparent);
+  background: color-mix(in srgb, var(--panel-surface-soft) 92%, transparent);
+  overflow: hidden;
+}
+
+.stats-primary-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-surface-strong) 82%, var(--primary-soft) 18%), transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+}
+
+.stats-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.stats-row + .stats-row {
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 72%, transparent);
+}
+
+.stats-label {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stats-primary-value {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  font-weight: 820;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.stats-value {
+  color: var(--text);
+  font-size: 1.02rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
 @media (max-width: 960px) {
   .toolbar-grid,
   .settings-grid {
@@ -1442,6 +1569,13 @@ textarea {
 @media (max-width: 560px) {
   .queue-section-head {
     gap: 8px;
+  }
+
+  .stats-dialog-head,
+  .stats-primary-row,
+  .stats-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .panel-warning {
