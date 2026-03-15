@@ -60,6 +60,13 @@
         "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
         "defaultValue": true
       },
+      "max_denials_before_block": {
+        "type": "number",
+        "label": "Max denials before auto-block",
+        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter a whole number of 2 or greater.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
+      },
       "show_photo_instructions_before_submit": {
         "type": "boolean",
         "label": "Show photo instructions before verification submission",

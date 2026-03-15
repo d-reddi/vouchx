@@ -55,6 +55,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
     autoFlairReconcileEnabled: true,
+    maxDenialsBeforeBlock: 3,
     requiredPhotoCount: 2,
     photoInstructions: 'Follow the instructions.',
     showPhotoInstructionsBeforeSubmit: true,

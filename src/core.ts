@@ -78,6 +78,7 @@ type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
   autoFlairReconcileEnabled: boolean;
+  maxDenialsBeforeBlock: number;
   requiredPhotoCount: number;
   photoInstructions: string;
   showPhotoInstructionsBeforeSubmit: boolean;
@@ -448,7 +449,8 @@ const SUBREDDIT_KEY_PREFIX = 'subreddit';
 
 const MAX_PENDING_TO_LOAD = 150;
 const SELF_DELETE_INDEX_SCAN_LIMIT = 1000;
-const MAX_DENIALS_BEFORE_BLOCK = 3;
+const MIN_MAX_DENIALS_BEFORE_BLOCK = 2;
+const DEFAULT_MAX_DENIALS_BEFORE_BLOCK = 3;
 const VALIDATION_CHECK_INTERVAL_DAYS = 30;
 const VALIDATION_HARD_EXPIRY_DAYS = 45;
 const VALIDATION_BATCH_SIZE = 50;
@@ -467,6 +469,7 @@ const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
+const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
@@ -2032,7 +2035,7 @@ async function denyVerification(
 
     const denialCount = await incrementDenialCount(context, subredditId, record.username);
     let userBlocked = false;
-    if (denialCount >= MAX_DENIALS_BEFORE_BLOCK) {
+    if (denialCount >= config.maxDenialsBeforeBlock) {
       const blockedEntry: BlockedUserEntry = {
         username: record.username,
         blockedAt: new Date().toISOString(),
@@ -3671,11 +3674,12 @@ async function searchAuditEntries(
 
 async function listBlockedUsers(context: Devvit.Context, subredditId: string): Promise<BlockedUserEntry[]> {
   const blockedMap = await context.redis.hGetAll(blockedUsersKey(subredditId));
+  const config = await getRuntimeConfig(context, subredditId);
   const blockedUsers: BlockedUserEntry[] = [];
   const staleUsers: string[] = [];
 
   for (const [normalizedUsername, payload] of Object.entries(blockedMap)) {
-    const parsed = parseBlockedUserEntry(normalizedUsername, payload);
+    const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
     if (!parsed) {
       staleUsers.push(normalizedUsername);
       continue;
@@ -3701,6 +3705,7 @@ async function getBlockedUser(
   subredditId: string,
   username: string
 ): Promise<BlockedUserEntry | null> {
+  const config = await getRuntimeConfig(context, subredditId);
   const normalizedUsername = normalizeUsername(username);
   const key = blockedUsersKey(subredditId);
   const legacyUsername = `u/${normalizedUsername}`;
@@ -3708,7 +3713,7 @@ async function getBlockedUser(
   if (!payload) {
     return null;
   }
-  const parsed = parseBlockedUserEntry(normalizedUsername, payload);
+  const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
   if (!parsed) {
     await context.redis.hDel(key, [normalizedUsername, legacyUsername]);
     return null;
@@ -4649,6 +4654,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawMaxDenialsBeforeBlock = await context.settings.get<number | string>(INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK);
   const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
     INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
   );
@@ -4661,6 +4667,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const maxDenialsBeforeBlock = normalizeMaxDenialsBeforeBlockSetting(rawMaxDenialsBeforeBlock);
   const showPhotoInstructionsBeforeSubmit =
     typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
       ? rawShowPhotoInstructionsBeforeSubmit
@@ -4684,6 +4691,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
     autoFlairReconcileEnabled,
+    maxDenialsBeforeBlock,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
     showPhotoInstructionsBeforeSubmit,
@@ -4758,6 +4766,29 @@ function parsePositiveInt(value: string | undefined, fallback: number): number |
     return null;
   }
   return parsed;
+}
+
+function normalizeMaxDenialsBeforeBlockSetting(value: number | string | undefined | null): number {
+  const parsed =
+    typeof value === 'number'
+      ? Number.isFinite(value) && Number.isInteger(value)
+        ? value
+        : null
+      : typeof value === 'string'
+        ? parsePositiveInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
+        : null;
+  return parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK
+    ? parsed
+    : DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+}
+
+function validateMaxDenialsBeforeBlockSetting(value: unknown): string | undefined {
+  if (value === undefined) {
+    return;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_MAX_DENIALS_BEFORE_BLOCK || !Number.isInteger(value)) {
+    return `Enter a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
+  }
 }
 
 function parseNonNegativeInt(value: string | undefined | null, fallback: number | null): number | null {
@@ -4925,7 +4956,11 @@ function parseRecord(payload: string): VerificationRecord | null {
   }
 }
 
-function parseBlockedUserEntry(normalizedUsername: string, payload: string): BlockedUserEntry | null {
+function parseBlockedUserEntry(
+  normalizedUsername: string,
+  payload: string,
+  fallbackDeniedCount: number
+): BlockedUserEntry | null {
   try {
     const parsed = JSON.parse(payload) as Partial<BlockedUserEntry>;
     if (!parsed || typeof parsed.blockedAt !== 'string') {
@@ -4933,7 +4968,7 @@ function parseBlockedUserEntry(normalizedUsername: string, payload: string): Blo
     }
     const deniedCountRaw = Number.parseInt(`${parsed.deniedCount ?? ''}`, 10);
     const deniedCount =
-      Number.isFinite(deniedCountRaw) && deniedCountRaw >= 0 ? deniedCountRaw : MAX_DENIALS_BEFORE_BLOCK;
+      Number.isFinite(deniedCountRaw) && deniedCountRaw >= 0 ? deniedCountRaw : fallbackDeniedCount;
     const username = normalizeUsername(parsed.username ?? normalizedUsername).replace(/^u\//i, '');
     if (!username) {
       return null;
@@ -6424,6 +6459,7 @@ export {
   errorText,
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,
+  validateMaxDenialsBeforeBlockSetting,
   resolveThemePalette,
   clearExpiredPendingClaim,
   normalizeSubmittedPhotoUrl,

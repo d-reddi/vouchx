@@ -32,6 +32,7 @@ import {
   unblockUserForModerator,
   withdrawCurrentUserPendingVerification,
   validateFlairTemplateIdForSubreddit,
+  validateMaxDenialsBeforeBlockSetting,
   parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
@@ -236,6 +237,11 @@ app.get('/api/hub/state', async (_req, res) => {
 app.post('/internal/settings/validate/mod-menu-audit-purge-days', (req, res) => {
   const body = (req.body ?? {}) as Partial<SettingsValidationRequest<number>>;
   res.json(toSettingsValidationResponse(validateAuditPurgeDays(body.value)));
+});
+
+app.post('/internal/settings/validate/max-denials-before-block', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<number>>;
+  res.json(toSettingsValidationResponse(validateMaxDenialsBeforeBlockSetting(body.value)));
 });
 
 app.post('/internal/settings/validate/verifications-disabled-message', (req, res) => {
