@@ -12,6 +12,7 @@ import {
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
   validateFlairTemplateId,
+  validateMaxDenialsBeforeBlockSetting,
   withRedisLock,
   type RuntimeConfig,
 } from './core.ts';
@@ -304,6 +305,21 @@ test('validateFlairTemplateId accepts template IDs with a digit and hyphen', () 
   const validation = validateFlairTemplateId('ABC-123');
   assert.equal(validation.isValid, true);
   assert.equal(validation.code, 'valid');
+});
+
+test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting(0), undefined);
+});
+
+test('validateMaxDenialsBeforeBlockSetting rejects 1', () => {
+  assert.equal(
+    validateMaxDenialsBeforeBlockSetting(1),
+    'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
+  );
+});
+
+test('validateMaxDenialsBeforeBlockSetting allows 2', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting(2), undefined);
 });
 
 test('getCurrentModeratorPermissionList reuses cached permissions after a transient lookup failure', async () => {

@@ -40,13 +40,6 @@
   },
   "settings": {
     "subreddit": {
-      "mod_menu_audit_purge_days": {
-        "type": "number",
-        "label": "Purge audit log data older than XX days",
-        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
-        "defaultValue": 3,
-        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
-      },
       "verifications_disabled_message": {
         "type": "string",
         "label": "Verifications disabled message",
@@ -54,18 +47,18 @@
         "defaultValue": "Verifications are temporarily disabled.  Please check back soon.",
         "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
       },
+      "max_denials_before_block": {
+        "type": "number",
+        "label": "Max denials before auto-block",
+        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter 0 to disable auto-block, or a whole number of 2 or greater.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
+      },
       "auto_flair_reconcile_enabled": {
         "type": "boolean",
         "label": "Automatically repair verification flair",
         "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
         "defaultValue": true
-      },
-      "max_denials_before_block": {
-        "type": "number",
-        "label": "Max denials before auto-block",
-        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter a whole number of 2 or greater.",
-        "defaultValue": 3,
-        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
       },
       "show_photo_instructions_before_submit": {
         "type": "boolean",
@@ -78,6 +71,13 @@
         "label": "Restrict Settings tab to mods with config/settings access",
         "helpText": "When enabled, only moderators with config/settings access can see and use the Settings tab in the moderator panel. Review queue access is unchanged.",
         "defaultValue": false
+      },
+      "mod_menu_audit_purge_days": {
+        "type": "number",
+        "label": "Purge audit log data older than (days)",
+        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
       },
       "deny_reason_1_label": {
         "type": "string",

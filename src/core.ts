@@ -2035,7 +2035,7 @@ async function denyVerification(
 
     const denialCount = await incrementDenialCount(context, subredditId, record.username);
     let userBlocked = false;
-    if (denialCount >= config.maxDenialsBeforeBlock) {
+    if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
       const blockedEntry: BlockedUserEntry = {
         username: record.username,
         blockedAt: new Date().toISOString(),
@@ -4775,9 +4775,9 @@ function normalizeMaxDenialsBeforeBlockSetting(value: number | string | undefine
         ? value
         : null
       : typeof value === 'string'
-        ? parsePositiveInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
+        ? parseNonNegativeInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
         : null;
-  return parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK
+  return parsed === 0 || (parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK)
     ? parsed
     : DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
 }
@@ -4786,8 +4786,14 @@ function validateMaxDenialsBeforeBlockSetting(value: unknown): string | undefine
   if (value === undefined) {
     return;
   }
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_MAX_DENIALS_BEFORE_BLOCK || !Number.isInteger(value)) {
-    return `Enter a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value === 1
+  ) {
+    return `Enter 0 to disable auto-block, or a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
   }
 }
 
