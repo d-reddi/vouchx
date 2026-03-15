@@ -48,6 +48,10 @@ body.hub-inline {
   min-height: 100%;
 }
 
+body.hub-photo-instructions-step-open {
+  overscroll-behavior: none;
+}
+
 .shell {
   max-width: 760px;
   margin: 0 auto;
@@ -498,6 +502,59 @@ button:not(:disabled):hover {
   box-shadow: var(--shadow);
 }
 
+[data-el="photo-instructions-modal"].hub-photo-instructions-step {
+  display: block;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  background: var(--bg);
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-modal-card {
+  width: min(760px, 100%);
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--card) 95%, white 5%), color-mix(in srgb, var(--card) 88%, var(--bg) 12%)),
+    color-mix(in srgb, var(--card) 92%, var(--bg) 8%);
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 18px calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell::before,
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell::after,
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-hint {
+  display: none;
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-modal-copy {
+  max-height: none;
+  overflow: visible;
+  padding: 0 0 20px;
+  scrollbar-gutter: auto;
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell {
+  flex: 1 1 auto;
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .row {
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .row button {
+  flex: 1 1 100%;
+}
+
 .hub-scroll-shell {
   position: relative;
   margin-top: 16px;
@@ -667,6 +724,17 @@ button:not(:disabled):hover {
     left: 50%;
     bottom: 5px;
     padding: 4px 8px;
+  }
+
+  [data-el="photo-instructions-modal"].hub-photo-instructions-step {
+    padding: 0;
+  }
+
+  [data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-modal-card {
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: calc(18px + env(safe-area-inset-top, 0px)) 16px calc(22px + env(safe-area-inset-bottom, 0px));
   }
 }
 
