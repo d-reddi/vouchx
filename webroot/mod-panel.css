@@ -825,7 +825,7 @@ textarea {
   color: var(--text);
   font-size: 0.76rem;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.35;
 }
 
 .pending-account-age-chip-warn {
@@ -1258,21 +1258,17 @@ textarea {
 }
 
 .stats-section {
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 84%, transparent);
-  background: color-mix(in srgb, var(--panel-surface-soft) 92%, transparent);
-  overflow: hidden;
+  margin-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 78%, transparent);
+  padding-top: 8px;
 }
 
 .stats-primary-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 16px 18px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-surface-strong) 82%, var(--primary-soft) 18%), transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+  gap: 12px;
+  padding: 14px 0;
 }
 
 .stats-list {
@@ -1285,9 +1281,10 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 14px 0;
 }
 
+.stats-primary-row + .stats-list,
 .stats-row + .stats-row {
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 72%, transparent);
 }
@@ -1303,11 +1300,9 @@ textarea {
 
 .stats-primary-value {
   color: var(--text);
-  font-family: var(--font-display);
-  font-size: 1.9rem;
-  font-weight: 820;
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-size: 1.02rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
 }
 
 .stats-value {

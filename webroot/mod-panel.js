@@ -1402,7 +1402,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     const value = document.createElement('span');
     value.className = 'pending-account-age-chip';
     const ageDays = getPendingAccountAgeDays(item);
-    value.textContent = formatDayCount(ageDays);
+    value.textContent = formatAccountAge(item);
     if (ageDays !== null && ageDays < ACCOUNT_AGE_WARNING_DAYS) {
       value.classList.add('pending-account-age-chip-warn');
     }
@@ -2551,11 +2551,59 @@ import { BUG_REPORT_URL } from './app-config.js';
     return Math.max(0, Math.floor((Date.now() - createdAtMs) / MILLIS_PER_DAY));
   }
 
-  function formatDayCount(days) {
-    if (typeof days !== 'number' || !Number.isFinite(days)) {
+  function formatAccountAge(item) {
+    const accountDetails = normalizePendingAccountDetails(item);
+    const createdAt = accountDetails && typeof accountDetails.accountCreatedAt === 'string' ? accountDetails.accountCreatedAt : '';
+    if (!createdAt) {
       return 'Unknown';
     }
-    return `${days} day${days === 1 ? '' : 's'}`;
+
+    const createdDate = new Date(createdAt);
+    if (!Number.isFinite(createdDate.getTime())) {
+      return 'Unknown';
+    }
+
+    const now = new Date();
+    const start = new Date(Date.UTC(
+      createdDate.getUTCFullYear(),
+      createdDate.getUTCMonth(),
+      createdDate.getUTCDate()
+    ));
+    const end = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate()
+    ));
+
+    if (end.getTime() < start.getTime()) {
+      return '0 days';
+    }
+
+    let years = end.getUTCFullYear() - start.getUTCFullYear();
+    let months = end.getUTCMonth() - start.getUTCMonth();
+    let days = end.getUTCDate() - start.getUTCDate();
+
+    if (days < 0) {
+      months -= 1;
+      days += new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 0)).getUTCDate();
+    }
+
+    if (months < 0) {
+      years -= 1;
+      months += 12;
+    }
+
+    const parts = [];
+    if (years > 0) {
+      parts.push(`${years} year${years === 1 ? '' : 's'}`);
+    }
+    if (months > 0) {
+      parts.push(`${months} month${months === 1 ? '' : 's'}`);
+    }
+    if (days > 0 || parts.length === 0) {
+      parts.push(`${days} day${days === 1 ? '' : 's'}`);
+    }
+    return parts.join(' ');
   }
 
   function formatStatCount(value) {
