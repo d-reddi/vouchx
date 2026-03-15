@@ -52,6 +52,15 @@
               <p class="section-copy muted">Review pending verification requests.</p>
             </div>
           </div>
+          <div id="pending-flair-warning" class="content-card panel-warning panel-warning-error hidden" role="alert">
+            <div class="panel-warning-body">
+              <p class="panel-warning-title">Approvals are disabled</p>
+              <p id="pending-flair-warning-text" class="panel-warning-copy"></p>
+            </div>
+            <div class="row panel-warning-actions">
+              <button id="pending-flair-warning-settings-btn" class="btn btn-secondary hidden" type="button">Open Settings</button>
+            </div>
+          </div>
           <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
             <div class="content-card queue-filter-card">
               <div class="toolbar-grid">
@@ -257,6 +266,7 @@
                   <div class="field-stack">
                     <label class="field-label" for="flair-template-id">Flair template ID</label>
                     <input id="flair-template-id" class="field-input" type="text" />
+                    <p id="flair-template-validation-feedback" class="field-feedback small hidden" aria-live="polite"></p>
                   </div>
                   <div class="field-stack">
                     <label class="field-label" for="flair-css-class">Flair CSS substring to match (optional)</label>

@@ -326,6 +326,42 @@ textarea {
     0 10px 24px rgba(0, 0, 0, 0.14);
 }
 
+.panel-warning {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.panel-warning-error {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--panel-border) 68%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--danger-soft) 24%, var(--panel-surface-strong) 76%), var(--panel-surface));
+}
+
+.panel-warning-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.panel-warning-title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-weight: 780;
+  letter-spacing: -0.02em;
+}
+
+.panel-warning-copy {
+  margin-top: 6px;
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  line-height: 1.52;
+}
+
+.panel-warning-actions {
+  flex: 0 0 auto;
+}
+
 .card-head {
   display: flex;
   align-items: flex-start;
@@ -486,6 +522,21 @@ textarea {
 .field-textarea:focus {
   border-color: color-mix(in srgb, var(--primary) 56%, var(--panel-border) 44%);
   background: color-mix(in srgb, var(--panel-surface-soft) 94%, var(--primary-soft) 6%);
+}
+
+.field-input-invalid,
+.field-input-invalid:hover,
+.field-input-invalid:focus {
+  border-color: color-mix(in srgb, var(--danger) 54%, var(--panel-border) 46%);
+  background: color-mix(in srgb, var(--panel-surface-soft) 90%, var(--danger-soft) 10%);
+}
+
+.field-feedback {
+  margin-top: 8px;
+}
+
+.field-feedback-error {
+  color: color-mix(in srgb, var(--danger) 78%, white 22%);
 }
 
 .toggle-row {
@@ -1391,6 +1442,10 @@ textarea {
 @media (max-width: 560px) {
   .queue-section-head {
     gap: 8px;
+  }
+
+  .panel-warning {
+    flex-direction: column;
   }
 
   .panel-heading h1 {

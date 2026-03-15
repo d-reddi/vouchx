@@ -31,6 +31,7 @@ import {
   toModPanelState,
   unblockUserForModerator,
   withdrawCurrentUserPendingVerification,
+  validateFlairTemplateIdForSubreddit,
   parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
@@ -245,6 +246,18 @@ app.post('/internal/settings/validate/verifications-disabled-message', (req, res
 app.post('/internal/settings/validate/deny-reason-label', (req, res) => {
   const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
   res.json(toSettingsValidationResponse(validateDenyReasonLabel(body.value)));
+});
+
+app.post('/api/mod/settings/flair/validate', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    const { subredditName } = await requireReviewAccess(appContext);
+    const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+    const validation = await validateFlairTemplateIdForSubreddit(appContext, subredditName, body.value);
+    res.json(toSettingsValidationResponse(validation.isValid ? undefined : validation.message));
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 app.post('/api/hub/submit', async (req, res) => {

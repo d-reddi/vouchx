@@ -98,7 +98,10 @@ function createShell(root, inline) {
           <p class="meta">
             Review these instructions before opening the upload form.
           </p>
-          <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+          <div data-el="photo-instructions-scroll-shell" class="hub-scroll-shell" data-scroll-overflow="false" data-scroll-bottom="true">
+            <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+            <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Drag ↓</div>
+          </div>
           <div class="row">
             <button data-el="photo-instructions-continue" class="btn-primary hidden" type="button">Continue to Submission</button>
             <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
@@ -127,7 +130,9 @@ function createShell(root, inline) {
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsScrollShell: root.querySelector('[data-el="photo-instructions-scroll-shell"]'),
     photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
+    photoInstructionsScrollHint: root.querySelector('[data-el="photo-instructions-scroll-hint"]'),
     photoInstructionsContinue: root.querySelector('[data-el="photo-instructions-continue"]'),
     photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
   };
@@ -369,20 +374,31 @@ function formatPendingTurnaroundDays(days) {
   return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
 }
 
-function renderInstructionTemplate(value, state) {
+  function renderInstructionTemplate(value, state) {
   const replacements = {
     subreddit: String(state?.subredditName || '').trim(),
     days: formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays),
   };
 
-  return String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey) => {
-    const normalizedKey = String(rawKey || '')
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, '_');
-    return replacements[normalizedKey] ?? '';
-  });
-}
+    return String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey) => {
+      const normalizedKey = String(rawKey || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+      return replacements[normalizedKey] ?? '';
+    });
+  }
+
+  function buildInternalNavigationUrl(targetPath) {
+    const currentUrl = new URL(window.location.href);
+    const targetUrl = new URL(String(targetPath || './hub.html'), currentUrl);
+    const mergedParams = new URLSearchParams(currentUrl.search);
+    for (const [key, value] of new URLSearchParams(targetUrl.search)) {
+      mergedParams.set(key, value);
+    }
+    targetUrl.search = mergedParams.toString();
+    return targetUrl.toString();
+  }
 
 export function mountHub(options = {}) {
   const { rootId = 'app-root', inline = false } = options;
@@ -465,6 +481,37 @@ export function mountHub(options = {}) {
       navigateTo(url);
     });
   }
+
+  function updatePhotoInstructionsScrollAffordance() {
+    if (!refs.photoInstructionsBody || !refs.photoInstructionsScrollShell) {
+      return;
+    }
+    const overflow = refs.photoInstructionsBody.scrollHeight - refs.photoInstructionsBody.clientHeight > 8;
+    const atBottom =
+      refs.photoInstructionsBody.scrollTop + refs.photoInstructionsBody.clientHeight >=
+      refs.photoInstructionsBody.scrollHeight - 6;
+    const nearTop = refs.photoInstructionsBody.scrollTop <= 10;
+    refs.photoInstructionsScrollShell.dataset.scrollOverflow = overflow ? 'true' : 'false';
+    refs.photoInstructionsScrollShell.dataset.scrollBottom = atBottom ? 'true' : 'false';
+    if (refs.photoInstructionsScrollHint) {
+      refs.photoInstructionsScrollHint.classList.toggle(
+        'hidden',
+        !overflow || !nearTop
+      );
+    }
+  }
+
+  if (refs.photoInstructionsBody) {
+    refs.photoInstructionsBody.addEventListener('scroll', () => {
+      updatePhotoInstructionsScrollAffordance();
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    if (refs.photoInstructionsModal && !refs.photoInstructionsModal.classList.contains('hidden')) {
+      updatePhotoInstructionsScrollAffordance();
+    }
+  });
 
   function setBusy(next) {
     isBusy = Boolean(next);
@@ -706,6 +753,7 @@ export function mountHub(options = {}) {
       refs.photoInstructionsBody.innerHTML = renderMarkdown(
         renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
       );
+      refs.photoInstructionsBody.scrollTop = 0;
       refs.photoInstructionsContinue.classList.toggle('hidden', !requireContinue);
 
       const close = (result) => {
@@ -735,6 +783,10 @@ export function mountHub(options = {}) {
       refs.photoInstructionsContinue.addEventListener('click', onContinue);
       refs.photoInstructionsModal.addEventListener('click', onBackdrop);
       refs.photoInstructionsModal.classList.remove('hidden');
+      // Wait until the modal is visible so overflow measurements reflect the final layout.
+      window.requestAnimationFrame(() => {
+        updatePhotoInstructionsScrollAffordance();
+      });
     });
   }
 
@@ -769,7 +821,7 @@ export function mountHub(options = {}) {
       statusText = 'Pending Review';
       statusClass = 'status-warning';
     } else if (state.userLatest?.status === 'denied') {
-      statusText = 'Denied - Resubmit';
+      statusText = 'Denied';
       statusClass = 'status-danger';
     } else if (state.userLatest?.status === 'removed') {
       statusText = 'Verification Removed';
@@ -945,7 +997,7 @@ export function mountHub(options = {}) {
         showToast(error instanceof Error ? error.message : String(error), 'error');
       }
     }
-    window.location.assign(modPanelPath || './mod-panel.html');
+    window.location.replace(buildInternalNavigationUrl(modPanelPath || './mod-panel.html'));
   });
 
   scheduleAutoRefresh();

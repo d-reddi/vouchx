@@ -145,6 +145,7 @@ type DashboardData = {
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
+  flairTemplateValidation: FlairTemplateValidationState;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -307,6 +308,12 @@ type ThemeSettingsValues = {
   customBackground?: string;
 };
 
+type FlairTemplateValidationState = {
+  isValid: boolean;
+  code: 'valid' | 'missing' | 'invalid_format' | 'not_found' | 'lookup_failed';
+  message: string;
+};
+
 type FlairApplyResult = {
   applied: boolean;
   error?: string;
@@ -394,6 +401,7 @@ type ModPanelStatePayload = {
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
+  flairTemplateValidation: FlairTemplateValidationState;
   pendingCount: number;
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
@@ -893,6 +901,7 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
     hasConfigAccess: dashboard.hasConfigAccess,
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
+    flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
     approved: dashboard.approved,
@@ -1728,16 +1737,6 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     const parentDeniedId = record.parentVerificationId?.trim() ?? '';
 
     const config = await getRuntimeConfig(context, subredditId);
-    if (!config.flairTemplateId.trim()) {
-      return {
-        flair: {
-          status: 'failed',
-          reason: 'Set a Flair template ID in Verification Settings before approving submissions.',
-        },
-        modmail: { status: 'skipped', reason: 'flair not applied' },
-        modNote: { status: 'skipped', reason: 'flair not applied' },
-      };
-    }
     const flairResult = await applyApprovalFlairWithFallbacks(context, record, config);
     const flair: FlairStepResult = flairResult.applied
       ? { status: 'success' }
@@ -2698,8 +2697,12 @@ async function loadDashboardData(
   const canReviewUser = isModeratorUser && canManageUsers;
   const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
+  let flairTemplateValidation = validateFlairTemplateId(config.flairTemplateId);
   if (viewerUsername && config.flairTemplateId.trim()) {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
+  }
+  if (canReviewUser && options.includeModData) {
+    flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
 
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
@@ -2830,6 +2833,7 @@ async function loadDashboardData(
     canOpenInstallSettings,
     hasConfigAccess,
     canAccessSettingsTab,
+    flairTemplateValidation,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,
@@ -2965,6 +2969,44 @@ async function fetchConfiguredFlairTemplateTextFromSelector(
   } catch (error) {
     console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
     return null;
+  }
+}
+
+async function validateFlairTemplateIdForSubreddit(
+  context: Devvit.Context,
+  subredditName: string,
+  flairTemplateId: string | null | undefined
+): Promise<FlairTemplateValidationState> {
+  const formatValidation = validateFlairTemplateId(flairTemplateId);
+  if (!formatValidation.isValid) {
+    return formatValidation;
+  }
+
+  const normalizedSubredditName = sanitizeSubredditName(subredditName);
+  const normalizedTemplateId = normalizeTemplateId(String(flairTemplateId ?? ''));
+  try {
+    const subreddit = await context.reddit.getSubredditByName(normalizedSubredditName);
+    const flairTemplates = await subreddit.getUserFlairTemplates();
+    const exists = flairTemplates.some((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
+    if (!exists) {
+      return {
+        isValid: false,
+        code: 'not_found',
+        message: `Flair template ID was not found in r/${normalizedSubredditName}.`,
+      };
+    }
+    return {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    };
+  } catch (error) {
+    console.log(`Flair template validation lookup failed for r/${normalizedSubredditName}: ${errorText(error)}`);
+    return {
+      isValid: false,
+      code: 'lookup_failed',
+      message: `Unable to verify the flair template ID in r/${normalizedSubredditName}.`,
+    };
   }
 }
 
@@ -4480,11 +4522,9 @@ async function onSaveFlairTemplateValues(
       ? existingConfig.requiredPhotoCount
       : parseRequiredPhotoCount(values.requiredPhotoCount, existingConfig.requiredPhotoCount);
   const flairTemplateId = values.flairTemplateId?.trim() ?? '';
-  if (!flairTemplateId) {
-    throw new Error('Flair template ID is required to save verification settings.');
-  }
-  if (!isLikelyFlairTemplateId(flairTemplateId)) {
-    throw new Error('Flair template ID must include letters/numbers, at least one digit, and a hyphen.');
+  const flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, flairTemplateId);
+  if (!flairTemplateValidation.isValid) {
+    throw new Error(flairTemplateValidation.message);
   }
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
 
@@ -5720,15 +5760,31 @@ function asAuditAction(value: string | undefined): AuditAction | null {
     : null;
 }
 
-function isLikelyFlairTemplateId(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
+function validateFlairTemplateId(value: string | null | undefined): FlairTemplateValidationState {
+  const normalized = normalizeTemplateId(String(value ?? ''));
   if (!normalized) {
-    return false;
+    return {
+      isValid: false,
+      code: 'missing',
+      message: 'Flair template ID is required.',
+    };
   }
-  if (!/^[a-z0-9-]+$/.test(normalized)) {
-    return false;
+  if (!/^[a-z0-9-]+$/.test(normalized) || !/\d/.test(normalized) || !normalized.includes('-')) {
+    return {
+      isValid: false,
+      code: 'invalid_format',
+      message: 'Flair template ID must include letters or numbers, at least one digit, and a hyphen.',
+    };
   }
-  return /\d/.test(normalized) && normalized.includes('-');
+  return {
+    isValid: true,
+    code: 'valid',
+    message: 'Flair template ID looks valid.',
+  };
+}
+
+function isLikelyFlairTemplateId(value: string): boolean {
+  return validateFlairTemplateId(value).isValid;
 }
 
 function buildModmailSubject(template: string, values: Record<string, string>): string {
@@ -6366,6 +6422,8 @@ export {
   getCurrentSubredditNameCompat,
   parseDenyReason,
   errorText,
+  validateFlairTemplateId,
+  validateFlairTemplateIdForSubreddit,
   resolveThemePalette,
   clearExpiredPendingClaim,
   normalizeSubmittedPhotoUrl,
@@ -6382,6 +6440,7 @@ export type {
   DeleteDataConfirmValues,
   DeleteDataResult,
   DenyReason,
+  FlairTemplateValidationState,
   HubStatePayload,
   ModPanelStatePayload,
   PublicHubConfig,

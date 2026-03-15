@@ -11,6 +11,7 @@ import {
   toPublicHubConfig,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
+  validateFlairTemplateId,
   withRedisLock,
   type RuntimeConfig,
 } from './core.ts';
@@ -284,6 +285,24 @@ test('normalizeSubmittedPhotoUrl rejects non-Reddit or non-https URLs', () => {
   assert.equal(normalizeSubmittedPhotoUrl('https://example.com/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('http://i.redd.it/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('javascript:alert(1)'), null);
+});
+
+test('validateFlairTemplateId rejects missing template IDs', () => {
+  const validation = validateFlairTemplateId('');
+  assert.equal(validation.isValid, false);
+  assert.equal(validation.code, 'missing');
+});
+
+test('validateFlairTemplateId rejects malformed template IDs', () => {
+  const validation = validateFlairTemplateId('abc123');
+  assert.equal(validation.isValid, false);
+  assert.equal(validation.code, 'invalid_format');
+});
+
+test('validateFlairTemplateId accepts template IDs with a digit and hyphen', () => {
+  const validation = validateFlairTemplateId('ABC-123');
+  assert.equal(validation.isValid, true);
+  assert.equal(validation.code, 'valid');
 });
 
 test('getCurrentModeratorPermissionList reuses cached permissions after a transient lookup failure', async () => {

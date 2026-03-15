@@ -24,6 +24,9 @@ import { BUG_REPORT_URL } from './app-config.js';
   const heroSubreddit = document.getElementById('hero-subreddit');
   const heroQueueStatus = document.getElementById('hero-queue-status');
   const heroUpdated = document.getElementById('hero-updated');
+  const pendingFlairWarning = document.getElementById('pending-flair-warning');
+  const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
+  const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
   const pendingLayout = document.getElementById('pending-layout');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
@@ -75,6 +78,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   const resetThemeBtn = document.getElementById('reset-theme-btn');
 
   const flairTemplateInput = document.getElementById('flair-template-id');
+  const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
@@ -170,6 +174,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let flairTemplateValidationOverride = null;
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
@@ -416,6 +421,150 @@ import { BUG_REPORT_URL } from './app-config.js';
   function getDenyReasonTemplate(reasonId) {
     const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
     return match && typeof match.template === 'string' ? match.template : '';
+  }
+
+  function getSavedFlairTemplateValidation() {
+    if (state && state.flairTemplateValidation && typeof state.flairTemplateValidation === 'object') {
+      return state.flairTemplateValidation;
+    }
+    return {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    };
+  }
+
+  function canApprovePendingItems() {
+    return Boolean(getSavedFlairTemplateValidation().isValid);
+  }
+
+  function buildPendingFlairWarningText(validation) {
+    const baseMessage = validation && validation.message ? validation.message : 'Flair template ID is invalid.';
+    if (canAccessSettingsTab()) {
+      return `${baseMessage} Open Settings > General to update the flair template ID before approving requests.`;
+    }
+    return `${baseMessage} A moderator with settings access must update Settings > General before approvals can continue.`;
+  }
+
+  function buildApproveBlockedMessage() {
+    return buildPendingFlairWarningText(getSavedFlairTemplateValidation());
+  }
+
+  function setFlairTemplateValidationOverride(validation) {
+    flairTemplateValidationOverride =
+      validation && typeof validation === 'object' ? { ...validation, source: 'draft' } : null;
+    renderFlairTemplateValidationFeedback();
+  }
+
+  function clearFlairTemplateValidationOverride() {
+    flairTemplateValidationOverride = null;
+    renderFlairTemplateValidationFeedback();
+  }
+
+  function renderPendingFlairWarning() {
+    if (!pendingFlairWarning || !pendingFlairWarningText) {
+      return;
+    }
+    const validation = getSavedFlairTemplateValidation();
+    const shouldShow = !validation.isValid;
+    pendingFlairWarning.classList.toggle('hidden', !shouldShow);
+    pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
+    if (pendingFlairWarningSettingsBtn) {
+      pendingFlairWarningSettingsBtn.classList.toggle('hidden', !shouldShow || !canAccessSettingsTab());
+    }
+  }
+
+  function renderFlairTemplateValidationFeedback() {
+    if (!flairTemplateInput || !flairTemplateValidationFeedback) {
+      return;
+    }
+    const savedValidation = getSavedFlairTemplateValidation();
+    const validation = flairTemplateValidationOverride || savedValidation;
+    const shouldShow = Boolean(validation && !validation.isValid);
+    flairTemplateValidationFeedback.classList.toggle('hidden', !shouldShow);
+    flairTemplateValidationFeedback.classList.toggle('field-feedback-error', shouldShow);
+    flairTemplateValidationFeedback.textContent = shouldShow
+      ? `${validation.message}${
+          savedValidation.isValid ? ' This value has not been saved.' : ' Approvals stay blocked until this field is valid.'
+        }`
+      : '';
+    flairTemplateInput.classList.toggle('field-input-invalid', shouldShow);
+    flairTemplateInput.setAttribute('aria-invalid', shouldShow ? 'true' : 'false');
+  }
+
+  async function validateFlairTemplateInputValue(value) {
+    const payload = await requestJson('/api/mod/settings/flair/validate', {
+      value: String(value || ''),
+      isEditing: true,
+    });
+    if (payload && payload.success) {
+      return {
+        isValid: true,
+        code: 'valid',
+        message: 'Flair template ID looks valid.',
+      };
+    }
+    return {
+      isValid: false,
+      code: String(value || '').trim() ? 'invalid_format' : 'missing',
+      message:
+        typeof payload.error === 'string' && payload.error
+          ? payload.error
+          : 'Flair template ID is invalid.',
+    };
+  }
+
+  async function saveFlairSettings() {
+    const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
+    let validation;
+    try {
+      validation = await validateFlairTemplateInputValue(flairTemplateId);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+      return;
+    }
+    if (!validation.isValid) {
+      setFlairTemplateValidationOverride(validation);
+      showToast(validation.message, 'error');
+      return;
+    }
+    clearFlairTemplateValidationOverride();
+    setBusy(true);
+    try {
+      applyApiState(
+        await requestJson('/api/mod/settings/flair', {
+          type: 'saveFlair',
+          flairTemplateId,
+          flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+          verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
+          requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+          photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+        })
+      );
+    } catch (error) {
+      setBusy(false);
+      try {
+        const failedValidation = await validateFlairTemplateInputValue(flairTemplateId);
+        if (!failedValidation.isValid) {
+          setFlairTemplateValidationOverride(failedValidation);
+        }
+      } catch {
+        // Keep the current field value and surface the original save error.
+      }
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  }
+
+  function openFlairSettingsSection() {
+    const activeTab = setTab('settings');
+    if (activeTab !== 'settings') {
+      showToast('Only moderators with settings access can update the flair template ID.', 'error');
+      return;
+    }
+    setSettingsTab('general');
+    if (flairTemplateInput) {
+      window.setTimeout(() => flairTemplateInput.focus(), 0);
+    }
   }
 
   function capturePendingReviewDrafts() {
@@ -835,6 +984,9 @@ import { BUG_REPORT_URL } from './app-config.js';
         continue;
       }
       button.disabled = isBusy;
+      if (!isBusy && button.dataset.disableWhenApprovalBlocked === 'true' && !canApprovePendingItems()) {
+        button.disabled = true;
+      }
     }
     if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
@@ -890,6 +1042,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       const uiDrafts = captureUiDrafts();
       const hadPriorState = stateInitialized;
       state = message.payload;
+      flairTemplateValidationOverride = null;
       lastStateUpdatedAt = Date.now();
       if (hadPriorState) {
         invalidateHistoryCaches();
@@ -914,6 +1067,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       }
       renderAll();
       restoreUiDrafts(uiDrafts);
+      renderFlairTemplateValidationFeedback();
       if (tabPanels.history && !tabPanels.history.classList.contains('hidden')) {
         if (activeHistoryView === 'records') {
           runHistoryRecordsSearchWithInputGuard(true);
@@ -1092,17 +1246,6 @@ import { BUG_REPORT_URL } from './app-config.js';
       .trim()
       .replace(/^u\//i, '')
       .toLowerCase();
-  }
-
-  function isLikelyFlairTemplateId(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized) {
-      return false;
-    }
-    if (!/^[a-z0-9-]+$/.test(normalized)) {
-      return false;
-    }
-    return /\d/.test(normalized) && normalized.includes('-');
   }
 
   function isShortNonEmptyPrefix(value) {
@@ -1336,12 +1479,22 @@ import { BUG_REPORT_URL } from './app-config.js';
 
     const row = document.createElement('div');
     row.className = 'row';
+    const approvalsAllowed = canApprovePendingItems();
 
     if (!isClaimedByOther) {
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn btn-success';
       approveBtn.textContent = 'Approve';
+      approveBtn.dataset.disableWhenApprovalBlocked = 'true';
+      approveBtn.disabled = !approvalsAllowed;
+      if (!approvalsAllowed) {
+        approveBtn.title = buildApproveBlockedMessage();
+      }
       approveBtn.addEventListener('click', () => {
+        if (!approvalsAllowed) {
+          showToast(buildApproveBlockedMessage(), 'error');
+          return;
+        }
         if (denyReason && denyReason.value) {
           showToast('You selected a denial reason. Clear the denial reason before approving.', 'error');
           return;
@@ -1438,16 +1591,6 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     if (!hasPendingItems) {
       renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
-      return;
-    }
-
-    const flairTemplateId = String((state.config && state.config.flairTemplateId) || '').trim();
-    if (!flairTemplateId) {
-      renderEmptyState(
-        pendingList,
-        'Queue unavailable',
-        'Set a flair template ID in Verification Settings before processing approvals or denials.'
-      );
       return;
     }
 
@@ -1727,6 +1870,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     if (photoInstructionsInput) {
       photoInstructionsInput.value = state.config.photoInstructions || '';
     }
+    renderFlairTemplateValidationFeedback();
   }
 
   function renderTemplates() {
@@ -2200,6 +2344,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     renderPrimaryTabs();
     updateHeroMeta();
+    renderPendingFlairWarning();
     renderPending();
     renderBlocked();
     setHistoryView(activeHistoryView);
@@ -2403,8 +2548,10 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   function buildHubPath() {
-    const search = window.location.search || '';
-    return `./hub.html${search}`;
+    const currentUrl = new URL(window.location.href);
+    const targetUrl = new URL('./hub.html', currentUrl);
+    targetUrl.search = currentUrl.search;
+    return targetUrl.toString();
   }
 
   function runHistoryRecordsSearch(reset) {
@@ -2516,7 +2663,7 @@ import { BUG_REPORT_URL } from './app-config.js';
           showToast(error instanceof Error ? error.message : String(error), 'error');
         }
       }
-      window.location.assign(buildHubPath());
+      window.location.replace(buildHubPath());
     });
   }
 
@@ -2529,6 +2676,20 @@ import { BUG_REPORT_URL } from './app-config.js';
         return;
       }
       post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (pendingFlairWarningSettingsBtn) {
+    pendingFlairWarningSettingsBtn.addEventListener('click', () => {
+      openFlairSettingsSection();
+    });
+  }
+
+  if (flairTemplateInput) {
+    flairTemplateInput.addEventListener('input', () => {
+      if (flairTemplateValidationOverride) {
+        clearFlairTemplateValidationOverride();
+      }
     });
   }
 
@@ -2784,23 +2945,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   saveFlairBtn.addEventListener('click', () => {
-    const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
-    if (!flairTemplateId) {
-      showToast('Flair template ID is required to save verification settings.', 'error');
-      return;
-    }
-    if (!isLikelyFlairTemplateId(flairTemplateId)) {
-      showToast('Flair template ID is invalid, renter and save again.', 'error');
-      return;
-    }
-    postWithBusy({
-      type: 'saveFlair',
-      flairTemplateId,
-      flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
-      verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
-      requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
-      photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
-    });
+    void saveFlairSettings();
   });
 
   saveTemplatesBtn.addEventListener('click', () => {
