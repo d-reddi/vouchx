@@ -10,7 +10,7 @@ import { EffectType } from '@devvit/protos/json/devvit/ui/effects/v1alpha/effect
 import { WebViewImmersiveMode } from '@devvit/protos/json/devvit/ui/effects/web_view/v1alpha/immersive_mode.js';
 import { emitEffect } from '@devvit/shared-types/client/emit-effect.js';
 import brandLogoUrl from './logo.png';
-import { HOW_TO_USE_APP_URL } from './app-config.js';
+import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
@@ -498,11 +498,13 @@ export function mountHub(options = {}) {
   let autoRefreshTimerId = 0;
   let realtimeChannel = '';
   let realtimeConnectedChannel = '';
+  let realtimeLiveChannel = '';
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
   let photoInstructionsOnlyHandled = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
+  const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
@@ -708,6 +710,7 @@ export function mountHub(options = {}) {
     const connectedChannel = realtimeConnectedChannel;
     realtimeChannel = '';
     realtimeConnectedChannel = '';
+    realtimeLiveChannel = '';
     if (connectedChannel) {
       disconnectRealtime(connectedChannel);
     }
@@ -721,11 +724,19 @@ export function mountHub(options = {}) {
       connectRealtime({
         channel,
         onConnect(connectedChannel) {
+          if (channel !== realtimeChannel) {
+            disconnectRealtime(connectedChannel);
+            return;
+          }
           realtimeConnectedChannel = connectedChannel;
+          realtimeLiveChannel = connectedChannel;
         },
         onDisconnect(disconnectedChannel) {
           if (disconnectedChannel === realtimeConnectedChannel) {
             realtimeConnectedChannel = '';
+          }
+          if (disconnectedChannel === realtimeLiveChannel) {
+            realtimeLiveChannel = '';
           }
           if (disconnectedChannel === realtimeChannel) {
             scheduleRealtimeReconnect(disconnectedChannel);
@@ -761,6 +772,7 @@ export function mountHub(options = {}) {
     const previousChannel = realtimeConnectedChannel;
     realtimeChannel = normalized;
     realtimeConnectedChannel = '';
+    realtimeLiveChannel = '';
     if (previousChannel) {
       disconnectRealtime(previousChannel);
     }
@@ -1113,6 +1125,14 @@ export function mountHub(options = {}) {
         ? 'Resubmit Verification'
         : 'Submit Verification';
 
+    if (state.requiresInitialSetup && moderatorQuickStartUrl) {
+      refs.actionRow.appendChild(
+        makeButton('Moderator Quick Start', 'btn-secondary', () => {
+          navigateTo(moderatorQuickStartUrl);
+        })
+      );
+    }
+
     if (
       !state.viewerVerifiedByFlair &&
       !isRestricted &&
@@ -1205,7 +1225,7 @@ export function mountHub(options = {}) {
       window.clearInterval(autoRefreshTimerId);
     }
     autoRefreshTimerId = window.setInterval(() => {
-      if (document.hidden || isBusy || (realtimeChannel && realtimeConnectedChannel === realtimeChannel)) {
+      if (document.hidden || isBusy || (realtimeChannel && realtimeLiveChannel === realtimeChannel)) {
         return;
       }
       void refreshState({ silent: true });
@@ -1221,7 +1241,7 @@ export function mountHub(options = {}) {
       void refreshFromRealtimeSignal();
       return;
     }
-    if (!(realtimeChannel && realtimeConnectedChannel === realtimeChannel)) {
+    if (!(realtimeChannel && realtimeLiveChannel === realtimeChannel)) {
       void refreshState({ silent: true });
     }
   });

@@ -1,6 +1,6 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
-import { BUG_REPORT_URL } from './app-config.js';
+import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -35,6 +35,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   const pendingFlairWarning = document.getElementById('pending-flair-warning');
   const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
   const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
+  const pendingFlairWarningGuideBtn = document.getElementById('pending-flair-warning-guide-btn');
   const pendingLayout = document.getElementById('pending-layout');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
@@ -197,6 +198,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+  const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
   const prefersDarkMedia =
     typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -544,6 +546,9 @@ import { BUG_REPORT_URL } from './app-config.js';
     pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
     if (pendingFlairWarningSettingsBtn) {
       pendingFlairWarningSettingsBtn.classList.toggle('hidden', !shouldShow || !canAccessSettingsTab());
+    }
+    if (pendingFlairWarningGuideBtn) {
+      pendingFlairWarningGuideBtn.classList.toggle('hidden', !shouldShow || !moderatorQuickStartUrl);
     }
   }
 
@@ -3043,6 +3048,16 @@ import { BUG_REPORT_URL } from './app-config.js';
   if (pendingFlairWarningSettingsBtn) {
     pendingFlairWarningSettingsBtn.addEventListener('click', () => {
       openFlairSettingsSection();
+    });
+  }
+
+  if (pendingFlairWarningGuideBtn) {
+    pendingFlairWarningGuideBtn.addEventListener('click', () => {
+      if (!moderatorQuickStartUrl) {
+        showToast('Moderator quick start URL is not configured.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url: moderatorQuickStartUrl });
     });
   }
 

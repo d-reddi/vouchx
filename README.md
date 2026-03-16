@@ -354,7 +354,7 @@ These actions delete the user’s verification records and associated audit entr
 
 # Changelog
 
-## v1.2.0
+## v1.2.1
 
 - Account age now shown on pending queue cards
 - New Stats button showing subreddit karma, previous denials, and ban status
