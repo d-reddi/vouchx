@@ -13,6 +13,10 @@
         "entry": "webroot/hub.html",
         "height": "tall"
       },
+      "photoInstructions": {
+        "entry": "webroot/photo-instructions.html",
+        "height": "tall"
+      },
       "modPanel": {
         "entry": "webroot/mod-panel.html",
         "height": "tall"
@@ -39,20 +43,52 @@
     "media": true
   },
   "settings": {
-    "subreddit": {
-      "mod_menu_audit_purge_days": {
-        "type": "number",
-        "label": "Purge audit log data older than XX days",
-        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
-        "defaultValue": 3,
-        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
+    "global": {
+      "latest_release_version": {
+        "type": "string",
+        "label": "Latest release version",
+        "helpText": "Set this after publishing a new VouchX release so older installations can show an in-app update notice to moderators.",
+        "defaultValue": ""
       },
+      "latest_release_title": {
+        "type": "string",
+        "label": "Latest release title",
+        "helpText": "Optional short heading shown in the moderator panel update notice.",
+        "defaultValue": ""
+      },
+      "latest_release_notes": {
+        "type": "string",
+        "label": "Latest release notes",
+        "helpText": "Optional short summary shown to moderators when an update is available.",
+        "defaultValue": ""
+      },
+      "latest_release_link": {
+        "type": "string",
+        "label": "Latest release link",
+        "helpText": "Optional changelog or help URL shown in the moderator panel update notice.",
+        "defaultValue": ""
+      },
+      "latest_release_severity": {
+        "type": "string",
+        "label": "Latest release severity",
+        "helpText": "Set to \"critical\" to force repeated reminders, or \"normal\" for the standard 7-day dismissal behavior. Leave blank for the standard behavior.",
+        "defaultValue": ""
+      }
+    },
+    "subreddit": {
       "verifications_disabled_message": {
         "type": "string",
         "label": "Verifications disabled message",
         "helpText": "Shown to users in this subreddit when submissions are turned off. If cleared, the app falls back to the built-in default message.",
         "defaultValue": "Verifications are temporarily disabled.  Please check back soon.",
         "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
+      },
+      "max_denials_before_block": {
+        "type": "number",
+        "label": "Max denials before auto-block",
+        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter 0 to disable auto-block, or a whole number of 2 or greater.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
       },
       "auto_flair_reconcile_enabled": {
         "type": "boolean",
@@ -71,6 +107,13 @@
         "label": "Restrict Settings tab to mods with config/settings access",
         "helpText": "When enabled, only moderators with config/settings access can see and use the Settings tab in the moderator panel. Review queue access is unchanged.",
         "defaultValue": false
+      },
+      "mod_menu_audit_purge_days": {
+        "type": "number",
+        "label": "Purge audit log data older than (days)",
+        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
       },
       "deny_reason_1_label": {
         "type": "string",

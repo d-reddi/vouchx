@@ -1,5 +1,5 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
-import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL } from './app-config.js';
 
 (function () {
@@ -24,6 +24,17 @@ import { BUG_REPORT_URL } from './app-config.js';
   const heroSubreddit = document.getElementById('hero-subreddit');
   const heroQueueStatus = document.getElementById('hero-queue-status');
   const heroUpdated = document.getElementById('hero-updated');
+  const updateNotice = document.getElementById('update-notice');
+  const updateNoticeKicker = document.getElementById('update-notice-kicker');
+  const updateNoticeTitle = document.getElementById('update-notice-title');
+  const updateNoticeCopy = document.getElementById('update-notice-copy');
+  const updateNoticeNotes = document.getElementById('update-notice-notes');
+  const updateNoticeOpenAppBtn = document.getElementById('update-notice-open-app-btn');
+  const updateNoticeReleaseLinkBtn = document.getElementById('update-notice-release-link-btn');
+  const updateNoticeDismissBtn = document.getElementById('update-notice-dismiss-btn');
+  const pendingFlairWarning = document.getElementById('pending-flair-warning');
+  const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
+  const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
   const pendingLayout = document.getElementById('pending-layout');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
@@ -75,6 +86,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   const resetThemeBtn = document.getElementById('reset-theme-btn');
 
   const flairTemplateInput = document.getElementById('flair-template-id');
+  const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
@@ -132,6 +144,13 @@ import { BUG_REPORT_URL } from './app-config.js';
   const imageModal = document.getElementById('image-modal');
   const imagePreview = document.getElementById('image-preview');
   const imageClose = document.getElementById('image-close');
+  const statsModal = document.getElementById('stats-modal');
+  const statsCloseBtn = document.getElementById('stats-close-btn');
+  const statsUsername = document.getElementById('stats-username');
+  const statsCapturedAt = document.getElementById('stats-captured-at');
+  const statsSubredditKarma = document.getElementById('stats-subreddit-karma');
+  const statsPreviousDenials = document.getElementById('stats-previous-denials');
+  const statsBanStatus = document.getElementById('stats-ban-status');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
@@ -143,6 +162,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   let readyRetries = 0;
   let readyTimerId = 0;
   let isBusy = false;
+  let isSavingFlairSettings = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
   let activeHistoryView = 'records';
@@ -170,9 +190,13 @@ import { BUG_REPORT_URL } from './app-config.js';
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let flairTemplateValidationOverride = null;
+  const hiddenCriticalUpdateNoticeKeys = new Set();
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
+  const ACCOUNT_AGE_WARNING_DAYS = 14;
+  const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
   const prefersDarkMedia =
     typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -396,6 +420,60 @@ import { BUG_REPORT_URL } from './app-config.js';
     return `https://developers.reddit.com/r/${encodeURIComponent(subredditName)}/apps/vouchx`;
   }
 
+  function getUpdateNoticeState() {
+    if (!state || !state.updateNotice || typeof state.updateNotice !== 'object') {
+      return null;
+    }
+    const targetVersion = String(state.updateNotice.targetVersion || '').trim();
+    if (!targetVersion) {
+      return null;
+    }
+    return {
+      targetVersion,
+      critical: state.updateNotice.critical === true,
+      title: String(state.updateNotice.title || '').trim(),
+      notes: decodeUpdateNoticeNotes(state.updateNotice.notes || ''),
+      linkUrl: normalizeExternalUrl(state.updateNotice.linkUrl || ''),
+    };
+  }
+
+  function decodeUpdateNoticeNotes(value) {
+    return String(value || '')
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\n')
+      .trim();
+  }
+
+  function updateNoticeDismissKey(notice) {
+    if (!notice || !notice.targetVersion) {
+      return '';
+    }
+    const subreddit = normalizeSubredditName(state && state.subredditName ? state.subredditName : themeSubredditScope)
+      .trim()
+      .toLowerCase() || 'unknown';
+    const viewer = String(state && state.viewerUsername ? state.viewerUsername : 'unknown')
+      .trim()
+      .toLowerCase() || 'unknown';
+    return `${subreddit}:${viewer}:${notice.targetVersion}`;
+  }
+
+  function isCriticalUpdateNoticeDismissedForSession(notice) {
+    if (!notice || !notice.critical) {
+      return false;
+    }
+    const key = updateNoticeDismissKey(notice);
+    return key ? hiddenCriticalUpdateNoticeKeys.has(key) : false;
+  }
+
+  function dismissCriticalUpdateNoticeForSession(notice) {
+    const key = updateNoticeDismissKey(notice);
+    if (!key) {
+      return;
+    }
+    hiddenCriticalUpdateNoticeKeys.add(key);
+  }
+
   function getConfiguredDenyReasons() {
     if (!state || !state.config || !Array.isArray(state.config.denyReasons)) {
       return [];
@@ -416,6 +494,209 @@ import { BUG_REPORT_URL } from './app-config.js';
   function getDenyReasonTemplate(reasonId) {
     const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
     return match && typeof match.template === 'string' ? match.template : '';
+  }
+
+  function getSavedFlairTemplateValidation() {
+    if (state && state.flairTemplateValidation && typeof state.flairTemplateValidation === 'object') {
+      return state.flairTemplateValidation;
+    }
+    return {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    };
+  }
+
+  function canApprovePendingItems() {
+    return Boolean(getSavedFlairTemplateValidation().isValid);
+  }
+
+  function buildPendingFlairWarningText(validation) {
+    const baseMessage = validation && validation.message ? validation.message : 'Flair template ID is invalid.';
+    if (canAccessSettingsTab()) {
+      return `${baseMessage} Open Settings > General to update the flair template ID before approving requests.`;
+    }
+    return `${baseMessage} A moderator with settings access must update Settings > General before approvals can continue.`;
+  }
+
+  function buildApproveBlockedMessage() {
+    return buildPendingFlairWarningText(getSavedFlairTemplateValidation());
+  }
+
+  function setFlairTemplateValidationOverride(validation) {
+    flairTemplateValidationOverride =
+      validation && typeof validation === 'object' ? { ...validation, source: 'draft' } : null;
+    renderFlairTemplateValidationFeedback();
+  }
+
+  function clearFlairTemplateValidationOverride() {
+    flairTemplateValidationOverride = null;
+    renderFlairTemplateValidationFeedback();
+  }
+
+  function renderPendingFlairWarning() {
+    if (!pendingFlairWarning || !pendingFlairWarningText) {
+      return;
+    }
+    const validation = getSavedFlairTemplateValidation();
+    const shouldShow = !validation.isValid;
+    pendingFlairWarning.classList.toggle('hidden', !shouldShow);
+    pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
+    if (pendingFlairWarningSettingsBtn) {
+      pendingFlairWarningSettingsBtn.classList.toggle('hidden', !shouldShow || !canAccessSettingsTab());
+    }
+  }
+
+  function renderUpdateNotice() {
+    if (!updateNotice || !updateNoticeTitle || !updateNoticeCopy) {
+      return;
+    }
+    const notice = getUpdateNoticeState();
+    const appPageUrl = buildInstallSettingsUrl();
+    const canUpdateNow = Boolean(state && state.canOpenInstallSettings === true && appPageUrl);
+    const sessionDismissed = Boolean(notice && isCriticalUpdateNoticeDismissedForSession(notice));
+    const isVisible = Boolean(notice && !sessionDismissed);
+    const isCriticalCopy = Boolean(notice && notice.critical && canUpdateNow);
+    const title = notice && notice.title ? notice.title : '';
+    const copy = notice
+      ? canUpdateNow
+        ? notice.critical
+          ? 'This is a critical fix update. This notification will continue to appear until upgraded.'
+          : 'Update to access new features and improvements.'
+        : 'Ask a moderator with all permissions to update VouchX.'
+      : '';
+
+    updateNotice.classList.toggle('hidden', !isVisible);
+    document.body.classList.toggle('update-notice-visible', isVisible);
+    if (updateNoticeKicker) {
+      updateNoticeKicker.textContent = notice
+        ? `VouchX update available (${notice.targetVersion})`
+        : 'VouchX update available';
+    }
+    updateNoticeTitle.textContent = title;
+    updateNoticeTitle.classList.toggle('hidden', !(notice && title));
+    updateNoticeCopy.textContent = copy;
+    updateNoticeCopy.classList.toggle('update-notice-copy-critical', isCriticalCopy);
+
+    if (updateNoticeNotes) {
+      updateNoticeNotes.textContent = notice && notice.notes ? `Release notes:\n${notice.notes}` : '';
+      updateNoticeNotes.classList.toggle('hidden', !(notice && notice.notes));
+    }
+
+    if (updateNoticeOpenAppBtn) {
+      updateNoticeOpenAppBtn.classList.toggle('hidden', !(notice && canUpdateNow));
+    }
+
+    if (updateNoticeReleaseLinkBtn) {
+      updateNoticeReleaseLinkBtn.classList.toggle('hidden', !(notice && notice.linkUrl));
+    }
+
+    if (updateNoticeDismissBtn) {
+      updateNoticeDismissBtn.classList.toggle('hidden', !notice || sessionDismissed);
+      updateNoticeDismissBtn.disabled = isBusy;
+    }
+  }
+
+  function renderFlairTemplateValidationFeedback() {
+    if (!flairTemplateInput || !flairTemplateValidationFeedback) {
+      return;
+    }
+    const savedValidation = getSavedFlairTemplateValidation();
+    const validation = flairTemplateValidationOverride || savedValidation;
+    const shouldShow = Boolean(validation && !validation.isValid);
+    flairTemplateValidationFeedback.classList.toggle('hidden', !shouldShow);
+    flairTemplateValidationFeedback.classList.toggle('field-feedback-error', shouldShow);
+    flairTemplateValidationFeedback.textContent = shouldShow
+      ? `${validation.message}${
+          savedValidation.isValid ? ' This value has not been saved.' : ' Approvals stay blocked until this field is valid.'
+        }`
+      : '';
+    flairTemplateInput.classList.toggle('field-input-invalid', shouldShow);
+    flairTemplateInput.setAttribute('aria-invalid', shouldShow ? 'true' : 'false');
+  }
+
+  async function validateFlairTemplateInputValue(value) {
+    const payload = await requestJson('/api/mod/settings/flair/validate', {
+      value: String(value || ''),
+      isEditing: true,
+    });
+    if (payload && payload.success) {
+      return {
+        isValid: true,
+        code: 'valid',
+        message: 'Flair template ID looks valid.',
+      };
+    }
+    return {
+      isValid: false,
+      code: String(value || '').trim() ? 'invalid_format' : 'missing',
+      message:
+        typeof payload.error === 'string' && payload.error
+          ? payload.error
+          : 'Flair template ID is invalid.',
+    };
+  }
+
+  async function saveFlairSettings() {
+    if (isSavingFlairSettings || isBusy) {
+      return;
+    }
+    isSavingFlairSettings = true;
+    syncSaveFlairButtonState();
+    const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
+    try {
+      try {
+        const validation = await validateFlairTemplateInputValue(flairTemplateId);
+        if (!validation.isValid) {
+          setFlairTemplateValidationOverride(validation);
+          showToast(validation.message, 'error');
+          return;
+        }
+        clearFlairTemplateValidationOverride();
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+        return;
+      }
+      setBusy(true);
+      try {
+        applyApiState(
+          await requestJson('/api/mod/settings/flair', {
+            type: 'saveFlair',
+            flairTemplateId,
+            flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+            verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
+            requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+            photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+          })
+        );
+      } catch (error) {
+        setBusy(false);
+        try {
+          const failedValidation = await validateFlairTemplateInputValue(flairTemplateId);
+          if (!failedValidation.isValid) {
+            setFlairTemplateValidationOverride(failedValidation);
+          }
+        } catch {
+          // Keep the current field value and surface the original save error.
+        }
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    } finally {
+      isSavingFlairSettings = false;
+      syncSaveFlairButtonState();
+    }
+  }
+
+  function openFlairSettingsSection() {
+    const activeTab = setTab('settings');
+    if (activeTab !== 'settings') {
+      showToast('Only moderators with settings access can update the flair template ID.', 'error');
+      return;
+    }
+    setSettingsTab('general');
+    if (flairTemplateInput) {
+      window.setTimeout(() => flairTemplateInput.focus(), 0);
+    }
   }
 
   function capturePendingReviewDrafts() {
@@ -714,6 +995,14 @@ import { BUG_REPORT_URL } from './app-config.js';
         return;
       }
 
+      if (message.type === 'dismissUpdateNotice') {
+        const payload = await requestJson('/api/mod/update-notice/dismiss', {
+          targetVersion: message.targetVersion,
+        });
+        applyApiState(payload);
+        return;
+      }
+
       if (message.type === 'approve') {
         applyApiState(await requestJson('/api/mod/approve', { verificationId: message.verificationId }));
         return;
@@ -835,11 +1124,22 @@ import { BUG_REPORT_URL } from './app-config.js';
         continue;
       }
       button.disabled = isBusy;
+      if (!isBusy && button.dataset.disableWhenApprovalBlocked === 'true' && !canApprovePendingItems()) {
+        button.disabled = true;
+      }
     }
+    syncSaveFlairButtonState();
     if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
       void refreshFromRealtimeSignal();
     }
+  }
+
+  function syncSaveFlairButtonState() {
+    if (!saveFlairBtn) {
+      return;
+    }
+    saveFlairBtn.disabled = isBusy || isSavingFlairSettings;
   }
 
   function postWithBusy(message) {
@@ -848,10 +1148,6 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   function showToast(text, tone) {
-    devvitShowToast({
-      text,
-      appearance: tone === 'error' ? 'neutral' : tone === 'success' ? 'success' : 'neutral',
-    });
     toastEl.textContent = text;
     toastEl.classList.remove('hidden', 'toast-success', 'toast-error');
     if (tone === 'success') {
@@ -890,6 +1186,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       const uiDrafts = captureUiDrafts();
       const hadPriorState = stateInitialized;
       state = message.payload;
+      flairTemplateValidationOverride = null;
       lastStateUpdatedAt = Date.now();
       if (hadPriorState) {
         invalidateHistoryCaches();
@@ -914,6 +1211,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       }
       renderAll();
       restoreUiDrafts(uiDrafts);
+      renderFlairTemplateValidationFeedback();
       if (tabPanels.history && !tabPanels.history.classList.contains('hidden')) {
         if (activeHistoryView === 'records') {
           runHistoryRecordsSearchWithInputGuard(true);
@@ -1094,17 +1392,6 @@ import { BUG_REPORT_URL } from './app-config.js';
       .toLowerCase();
   }
 
-  function isLikelyFlairTemplateId(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized) {
-      return false;
-    }
-    if (!/^[a-z0-9-]+$/.test(normalized)) {
-      return false;
-    }
-    return /\d/.test(normalized) && normalized.includes('-');
-  }
-
   function isShortNonEmptyPrefix(value) {
     const normalized = normalizeUsernameForCompare(value);
     return normalized.length > 0 && normalized.length < 3;
@@ -1221,6 +1508,26 @@ import { BUG_REPORT_URL } from './app-config.js';
     return badge;
   }
 
+  function createPendingAccountAgeMeta(item) {
+    const meta = document.createElement('p');
+    meta.className = 'item-meta pending-account-meta';
+
+    const label = document.createElement('span');
+    label.textContent = 'Account age:';
+    meta.appendChild(label);
+
+    const value = document.createElement('span');
+    value.className = 'pending-account-age-chip';
+    const ageDays = getPendingAccountAgeDays(item);
+    value.textContent = formatAccountAge(item);
+    if (ageDays !== null && ageDays < ACCOUNT_AGE_WARNING_DAYS) {
+      value.classList.add('pending-account-age-chip-warn');
+    }
+    meta.appendChild(value);
+
+    return meta;
+  }
+
   function buildPendingCard(item) {
     const card = document.createElement('article');
     card.className = 'item';
@@ -1235,7 +1542,7 @@ import { BUG_REPORT_URL } from './app-config.js';
 
     const titleRow = document.createElement('div');
     titleRow.className = 'pending-title-row';
-    titleRow.appendChild(createUsernameHeading(item.username));
+    titleRow.appendChild(createPendingTitlePrimary(item));
     const badgeRow = document.createElement('div');
     badgeRow.className = 'pending-badge-row';
     const ageBadge = createPendingAgeBadge(item.submittedAt);
@@ -1263,6 +1570,7 @@ import { BUG_REPORT_URL } from './app-config.js';
       submitted.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
     }
     card.appendChild(submitted);
+    card.appendChild(createPendingAccountAgeMeta(item));
 
     appendSubmissionAcknowledgementMeta(card, item);
 
@@ -1336,12 +1644,22 @@ import { BUG_REPORT_URL } from './app-config.js';
 
     const row = document.createElement('div');
     row.className = 'row';
+    const approvalsAllowed = canApprovePendingItems();
 
     if (!isClaimedByOther) {
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn btn-success';
       approveBtn.textContent = 'Approve';
+      approveBtn.dataset.disableWhenApprovalBlocked = 'true';
+      approveBtn.disabled = !approvalsAllowed;
+      if (!approvalsAllowed) {
+        approveBtn.title = buildApproveBlockedMessage();
+      }
       approveBtn.addEventListener('click', () => {
+        if (!approvalsAllowed) {
+          showToast(buildApproveBlockedMessage(), 'error');
+          return;
+        }
         if (denyReason && denyReason.value) {
           showToast('You selected a denial reason. Clear the denial reason before approving.', 'error');
           return;
@@ -1438,16 +1756,6 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     if (!hasPendingItems) {
       renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
-      return;
-    }
-
-    const flairTemplateId = String((state.config && state.config.flairTemplateId) || '').trim();
-    if (!flairTemplateId) {
-      renderEmptyState(
-        pendingList,
-        'Queue unavailable',
-        'Set a flair template ID in Verification Settings before processing approvals or denials.'
-      );
       return;
     }
 
@@ -1727,6 +2035,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     if (photoInstructionsInput) {
       photoInstructionsInput.value = state.config.photoInstructions || '';
     }
+    renderFlairTemplateValidationFeedback();
   }
 
   function renderTemplates() {
@@ -2200,6 +2509,8 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     renderPrimaryTabs();
     updateHeroMeta();
+    renderUpdateNotice();
+    renderPendingFlairWarning();
     renderPending();
     renderBlocked();
     setHistoryView(activeHistoryView);
@@ -2278,6 +2589,21 @@ import { BUG_REPORT_URL } from './app-config.js';
     return title;
   }
 
+  function createPendingTitlePrimary(item) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pending-title-primary';
+    wrap.appendChild(createUsernameHeading(item.username));
+
+    const statsBtn = document.createElement('button');
+    statsBtn.type = 'button';
+    statsBtn.className = 'pending-stats-btn';
+    statsBtn.textContent = 'Stats';
+    statsBtn.addEventListener('click', () => openStatsModal(item));
+    wrap.appendChild(statsBtn);
+
+    return wrap;
+  }
+
   function openImage(url) {
     imagePreview.src = url;
     imageModal.classList.remove('hidden');
@@ -2324,6 +2650,132 @@ import { BUG_REPORT_URL } from './app-config.js';
       return iso;
     }
     return date.toLocaleString();
+  }
+
+  function normalizePendingAccountDetails(item) {
+    return item && item.accountDetails && typeof item.accountDetails === 'object' ? item.accountDetails : null;
+  }
+
+  function getPendingAccountAgeDays(item) {
+    const accountDetails = normalizePendingAccountDetails(item);
+    const createdAt = accountDetails && typeof accountDetails.accountCreatedAt === 'string' ? accountDetails.accountCreatedAt : '';
+    if (!createdAt) {
+      return null;
+    }
+    const createdAtMs = new Date(createdAt).getTime();
+    if (!Number.isFinite(createdAtMs)) {
+      return null;
+    }
+    return Math.max(0, Math.floor((Date.now() - createdAtMs) / MILLIS_PER_DAY));
+  }
+
+  function formatAccountAge(item) {
+    const accountDetails = normalizePendingAccountDetails(item);
+    const createdAt = accountDetails && typeof accountDetails.accountCreatedAt === 'string' ? accountDetails.accountCreatedAt : '';
+    if (!createdAt) {
+      return 'Unknown';
+    }
+
+    const createdDate = new Date(createdAt);
+    if (!Number.isFinite(createdDate.getTime())) {
+      return 'Unknown';
+    }
+
+    const now = new Date();
+    const start = new Date(Date.UTC(
+      createdDate.getUTCFullYear(),
+      createdDate.getUTCMonth(),
+      createdDate.getUTCDate()
+    ));
+    const end = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate()
+    ));
+
+    if (end.getTime() < start.getTime()) {
+      return '0 days';
+    }
+
+    let years = end.getUTCFullYear() - start.getUTCFullYear();
+    let months = end.getUTCMonth() - start.getUTCMonth();
+    let days = end.getUTCDate() - start.getUTCDate();
+
+    if (days < 0) {
+      months -= 1;
+      days += new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 0)).getUTCDate();
+    }
+
+    if (months < 0) {
+      years -= 1;
+      months += 12;
+    }
+
+    const parts = [];
+    if (years > 0) {
+      parts.push(`${years} year${years === 1 ? '' : 's'}`);
+    }
+    if (months > 0) {
+      parts.push(`${months} month${months === 1 ? '' : 's'}`);
+    }
+    if (days > 0 || parts.length === 0) {
+      parts.push(`${days} day${days === 1 ? '' : 's'}`);
+    }
+    return parts.join(' ');
+  }
+
+  function formatStatCount(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unknown';
+  }
+
+  function formatBanStatus(value) {
+    if (value === 'banned') {
+      return 'banned';
+    }
+    if (value === 'not_banned') {
+      return 'not banned';
+    }
+    return 'unknown';
+  }
+
+  function openStatsModal(item) {
+    if (!statsModal) {
+      return;
+    }
+    const normalizedUsername = String(item && item.username ? item.username : '').trim().replace(/^u\//i, '');
+    const accountDetails = normalizePendingAccountDetails(item);
+
+    if (statsUsername) {
+      statsUsername.textContent = normalizedUsername ? `u/${normalizedUsername}` : 'Account details';
+    }
+    if (statsCapturedAt) {
+      statsCapturedAt.textContent =
+        accountDetails && accountDetails.capturedAt
+          ? `Snapshot captured ${formatTime(accountDetails.capturedAt)}`
+          : 'Snapshot unavailable for this pending record.';
+    }
+    if (statsSubredditKarma) {
+      statsSubredditKarma.textContent = accountDetails ? formatStatCount(accountDetails.subredditKarma) : 'Unknown';
+    }
+    if (statsPreviousDenials) {
+      statsPreviousDenials.textContent =
+        accountDetails ? formatStatCount(accountDetails.previousDeniedAttempts) : 'Unknown';
+    }
+    if (statsBanStatus) {
+      statsBanStatus.textContent = accountDetails ? formatBanStatus(accountDetails.banStatus) : 'unknown';
+    }
+
+    statsModal.classList.remove('hidden');
+    if (statsCloseBtn) {
+      window.setTimeout(() => statsCloseBtn.focus(), 0);
+    }
+  }
+
+  function closeStatsModal() {
+    if (!statsModal) {
+      return;
+    }
+    statsModal.classList.add('hidden');
   }
 
   function appendAcknowledgementMeta(container, label, iso) {
@@ -2403,8 +2855,10 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   function buildHubPath() {
-    const search = window.location.search || '';
-    return `./hub.html${search}`;
+    const currentUrl = new URL(window.location.href);
+    const targetUrl = new URL('./hub.html', currentUrl);
+    targetUrl.search = currentUrl.search;
+    return targetUrl.toString();
   }
 
   function runHistoryRecordsSearch(reset) {
@@ -2516,7 +2970,7 @@ import { BUG_REPORT_URL } from './app-config.js';
           showToast(error instanceof Error ? error.message : String(error), 'error');
         }
       }
-      window.location.assign(buildHubPath());
+      window.location.replace(buildHubPath());
     });
   }
 
@@ -2529,6 +2983,74 @@ import { BUG_REPORT_URL } from './app-config.js';
         return;
       }
       post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (updateNoticeOpenAppBtn) {
+    updateNoticeOpenAppBtn.addEventListener('click', () => {
+      if (!(state && state.canOpenInstallSettings === true)) {
+        showToast('Ask a moderator with all permissions to update VouchX.', 'info');
+        return;
+      }
+      const url = buildInstallSettingsUrl();
+      if (!url) {
+        showToast('Unable to resolve the app page URL.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (updateNoticeReleaseLinkBtn) {
+    updateNoticeReleaseLinkBtn.addEventListener('click', () => {
+      const notice = getUpdateNoticeState();
+      if (!notice || !notice.linkUrl) {
+        showToast('Release notes are not configured for this update.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url: notice.linkUrl });
+    });
+  }
+
+  if (updateNoticeDismissBtn) {
+    updateNoticeDismissBtn.addEventListener('click', () => {
+      const notice = getUpdateNoticeState();
+      if (!notice) {
+        return;
+      }
+      if (notice.critical) {
+        setBusy(true);
+        void requestJson('/api/mod/update-notice/dismiss', {
+          targetVersion: notice.targetVersion,
+        })
+          .then(() => {
+            dismissCriticalUpdateNoticeForSession(notice);
+            renderUpdateNotice();
+            showToast("This is a critical update. We'll notify you again when the panel reloads.", 'info');
+          })
+          .catch((error) => {
+            showToast(error instanceof Error ? error.message : String(error), 'error');
+          })
+          .finally(() => {
+            setBusy(false);
+          });
+        return;
+      }
+      postWithBusy({ type: 'dismissUpdateNotice', targetVersion: notice.targetVersion });
+    });
+  }
+
+  if (pendingFlairWarningSettingsBtn) {
+    pendingFlairWarningSettingsBtn.addEventListener('click', () => {
+      openFlairSettingsSection();
+    });
+  }
+
+  if (flairTemplateInput) {
+    flairTemplateInput.addEventListener('input', () => {
+      if (flairTemplateValidationOverride) {
+        clearFlairTemplateValidationOverride();
+      }
     });
   }
 
@@ -2784,23 +3306,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   saveFlairBtn.addEventListener('click', () => {
-    const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
-    if (!flairTemplateId) {
-      showToast('Flair template ID is required to save verification settings.', 'error');
-      return;
-    }
-    if (!isLikelyFlairTemplateId(flairTemplateId)) {
-      showToast('Flair template ID is invalid, renter and save again.', 'error');
-      return;
-    }
-    postWithBusy({
-      type: 'saveFlair',
-      flairTemplateId,
-      flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
-      verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
-      requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
-      photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
-    });
+    void saveFlairSettings();
   });
 
   saveTemplatesBtn.addEventListener('click', () => {
@@ -2908,6 +3414,17 @@ import { BUG_REPORT_URL } from './app-config.js';
       closeImage();
     }
   });
+
+  if (statsCloseBtn) {
+    statsCloseBtn.addEventListener('click', closeStatsModal);
+  }
+  if (statsModal) {
+    statsModal.addEventListener('click', (event) => {
+      if (event.target === statsModal) {
+        closeStatsModal();
+      }
+    });
+  }
 
   if (blockCancelBtn) {
     blockCancelBtn.addEventListener('click', closeBlockModal);

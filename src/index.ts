@@ -5,10 +5,12 @@ import { context, createServer, getServerPort, realtime, reddit, redis, schedule
 import {
   assertCanReview,
   blockUserForModerator,
+  buildModeratorUpdateNotice,
   buildSubmitVerificationForm,
   cancelReopenedVerification,
   deleteCurrentUserVerificationData,
   deleteVerificationDataFormDefinition,
+  dismissModeratorUpdateNotice,
   denyVerification,
   errorText,
   getModeratorAccessSnapshot,
@@ -31,6 +33,8 @@ import {
   toModPanelState,
   unblockUserForModerator,
   withdrawCurrentUserPendingVerification,
+  validateFlairTemplateIdForSubreddit,
+  validateMaxDenialsBeforeBlockSetting,
   parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
@@ -74,6 +78,7 @@ function currentContext(): Devvit.Context {
     subredditName: context.subredditName ?? '',
     userId: context.userId ?? '',
     postId: context.postId ?? '',
+    appVersion: context.appVersion ?? '',
   } as unknown as Devvit.Context;
 }
 
@@ -162,8 +167,12 @@ async function buildModPayload(appContext: Devvit.Context) {
   if (!dashboard.canReview) {
     throw httpError(403, 'Only moderators with Manage Users permission can use the moderator panel.');
   }
+  const updateNotice = dashboard.viewerUsername ? await buildModeratorUpdateNotice(appContext, dashboard.viewerUsername) : null;
   return {
-    state: toModPanelState(dashboard),
+    state: {
+      ...toModPanelState(dashboard),
+      updateNotice,
+    },
     realtimeChannel: modRealtimeChannel(appContext),
   };
 }
@@ -237,6 +246,11 @@ app.post('/internal/settings/validate/mod-menu-audit-purge-days', (req, res) => 
   res.json(toSettingsValidationResponse(validateAuditPurgeDays(body.value)));
 });
 
+app.post('/internal/settings/validate/max-denials-before-block', (req, res) => {
+  const body = (req.body ?? {}) as Partial<SettingsValidationRequest<number>>;
+  res.json(toSettingsValidationResponse(validateMaxDenialsBeforeBlockSetting(body.value)));
+});
+
 app.post('/internal/settings/validate/verifications-disabled-message', (req, res) => {
   const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
   res.json(toSettingsValidationResponse(validateVerificationsDisabledMessage(body.value)));
@@ -245,6 +259,18 @@ app.post('/internal/settings/validate/verifications-disabled-message', (req, res
 app.post('/internal/settings/validate/deny-reason-label', (req, res) => {
   const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
   res.json(toSettingsValidationResponse(validateDenyReasonLabel(body.value)));
+});
+
+app.post('/api/mod/settings/flair/validate', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    const { subredditName } = await requireReviewAccess(appContext);
+    const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
+    const validation = await validateFlairTemplateIdForSubreddit(appContext, subredditName, body.value);
+    res.json(toSettingsValidationResponse(validation.isValid ? undefined : validation.message));
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 app.post('/api/hub/submit', async (req, res) => {
@@ -619,6 +645,24 @@ app.post('/api/mod/settings/theme', async (req, res) => {
     res.json({
       ...(await buildModPayload(appContext)),
       toast: { text: 'Saved theme settings.', tone: 'success' },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/update-notice/dismiss', async (req, res) => {
+  try {
+    const targetVersion = String(req.body?.targetVersion ?? '').trim();
+    if (!targetVersion) {
+      throw httpError(400, 'Missing target version.');
+    }
+    const appContext = currentContext();
+    const { moderator } = await requireReviewAccess(appContext);
+    await dismissModeratorUpdateNotice(appContext, moderator, targetVersion);
+    res.json({
+      ...(await buildModPayload(appContext)),
+      toast: { text: `We'll remind you about ${targetVersion} again in 7 days.`, tone: 'success' },
     });
   } catch (error) {
     sendError(res, error);
