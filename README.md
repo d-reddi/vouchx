@@ -49,6 +49,7 @@ Possible status messages include:
 - Pending re-review
 - Blocked
 - Not verified
+- Denied
 
 If submissions are disabled, users will see the configured disabled message.
 
@@ -76,6 +77,7 @@ Users may be automatically blocked after repeated denials.
 # Quick Setup (Moderator)
 
 Getting started takes less than a minute.
+A built in onboarding walks through the process. 
 
 1. Install **VouchX** in your subreddit.
 2. Use the moderator menu action **Create Verification Hub (NSFW)**.
@@ -351,6 +353,25 @@ These actions delete the user’s verification records and associated audit entr
 ---
 
 # Changelog
+
+## v1.2.0
+
+- Account age now shown on pending queue cards
+- New Stats button showing subreddit karma, previous denials, and ban status
+- Clearer color-coded status badges and improved action instructions
+- Install setting to restrict Settings tab to mods with config/everything permissions
+- Install setting to require viewing photo instructions before submission
+- Optional submission limits (block after X submissions or disable resubmits)
+- Main verification hub now updates live when status changes
+- Improved mod note handling
+- Simpler first-time setup flow
+- Flair Template ID verification before save
+- Android fix for photo instructions scrolling
+- Performance improvements for moderators and users
+- Report a Bug / Request a Feature link added to the mod panel
+- How to Use This App link added to the hub
+- Clearer status instructions for users
+- Notifications for updates, and critical update messages
 
 ## v1.1.2
 
