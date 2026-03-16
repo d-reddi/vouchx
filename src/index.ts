@@ -183,22 +183,23 @@ function normalizeRealtimeChannelPart(value: string): string {
     .replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
-function modRealtimeChannel(appContext: Devvit.Context): string {
+function realtimeChannelsForContext(appContext: Devvit.Context, prefix: string): string[] {
+  const channels = new Set<string>();
   const subredditId = sanitizeSubredditId(appContext.subredditId);
   if (subredditId) {
-    return `vouchx_mod_refresh_${normalizeRealtimeChannelPart(subredditId)}`;
+    channels.add(`${prefix}_${normalizeRealtimeChannelPart(subredditId)}`);
   }
   const subredditName = String(appContext.subredditName ?? '').trim().toLowerCase();
-  return `vouchx_mod_refresh_name_${normalizeRealtimeChannelPart(subredditName || 'unknown')}`;
+  channels.add(`${prefix}_name_${normalizeRealtimeChannelPart(subredditName || 'unknown')}`);
+  return Array.from(channels);
+}
+
+function modRealtimeChannel(appContext: Devvit.Context): string {
+  return realtimeChannelsForContext(appContext, 'vouchx_mod_refresh')[0];
 }
 
 function hubRealtimeChannel(appContext: Devvit.Context): string {
-  const subredditId = sanitizeSubredditId(appContext.subredditId);
-  if (subredditId) {
-    return `vouchx_hub_refresh_${normalizeRealtimeChannelPart(subredditId)}`;
-  }
-  const subredditName = String(appContext.subredditName ?? '').trim().toLowerCase();
-  return `vouchx_hub_refresh_name_${normalizeRealtimeChannelPart(subredditName || 'unknown')}`;
+  return realtimeChannelsForContext(appContext, 'vouchx_hub_refresh')[0];
 }
 
 async function sendRealtimeRefreshSignal(channel: string): Promise<void> {
@@ -210,10 +211,11 @@ async function sendRealtimeRefreshSignal(channel: string): Promise<void> {
 }
 
 async function sendRefreshSignals(appContext: Devvit.Context): Promise<void> {
-  await Promise.allSettled([
-    sendRealtimeRefreshSignal(modRealtimeChannel(appContext)),
-    sendRealtimeRefreshSignal(hubRealtimeChannel(appContext)),
-  ]);
+  const channels = [
+    ...realtimeChannelsForContext(appContext, 'vouchx_mod_refresh'),
+    ...realtimeChannelsForContext(appContext, 'vouchx_hub_refresh'),
+  ];
+  await Promise.allSettled(channels.map((channel) => sendRealtimeRefreshSignal(channel)));
 }
 
 function submitToast(result: Awaited<ReturnType<typeof submitVerification>>): ToastPayload {
