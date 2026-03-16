@@ -28,6 +28,14 @@ type BlockedUserEntry = {
   reason: string;
 };
 
+type PendingAccountDetailsSnapshot = {
+  capturedAt: string;
+  accountCreatedAt: string | null;
+  subredditKarma: number | null;
+  previousDeniedAttempts: number;
+  banStatus: 'banned' | 'not_banned' | 'unknown';
+};
+
 type VerificationRecord = {
   id: string;
   username: string;
@@ -50,6 +58,7 @@ type VerificationRecord = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
+  accountDetails?: PendingAccountDetailsSnapshot | null;
   removedAt?: string | null;
   removedBy?: string | null;
   lastValidatedAt?: string | null;
@@ -78,6 +87,7 @@ type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
   autoFlairReconcileEnabled: boolean;
+  maxDenialsBeforeBlock: number;
   requiredPhotoCount: number;
   photoInstructions: string;
   showPhotoInstructionsBeforeSubmit: boolean;
@@ -145,6 +155,8 @@ type DashboardData = {
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
+  flairTemplateValidation: FlairTemplateValidationState;
+  requiresInitialSetup: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerVerifiedByFlair: boolean;
@@ -307,6 +319,12 @@ type ThemeSettingsValues = {
   customBackground?: string;
 };
 
+type FlairTemplateValidationState = {
+  isValid: boolean;
+  code: 'valid' | 'missing' | 'invalid_format' | 'not_found' | 'lookup_failed';
+  message: string;
+};
+
 type FlairApplyResult = {
   applied: boolean;
   error?: string;
@@ -334,6 +352,7 @@ type PendingPanelItem = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
+  accountDetails?: PendingAccountDetailsSnapshot | null;
 };
 
 type ApprovedSearchPanelItem = {
@@ -394,6 +413,7 @@ type ModPanelStatePayload = {
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
+  flairTemplateValidation: FlairTemplateValidationState;
   pendingCount: number;
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
@@ -405,6 +425,15 @@ type ModPanelStatePayload = {
   config: RuntimeConfig;
   resolvedTheme: ThemePalette;
   themePresets: Record<ThemePresetName, ThemePalette>;
+  updateNotice?: UpdateNoticeState | null;
+};
+
+type UpdateNoticeState = {
+  targetVersion: string;
+  critical: boolean;
+  title: string | null;
+  notes: string | null;
+  linkUrl: string | null;
 };
 
 type PublicHubConfig = {
@@ -421,6 +450,7 @@ type HubStatePayload = {
   subredditName: string;
   isModerator: boolean;
   canReview: boolean;
+  requiresInitialSetup: boolean;
   config: PublicHubConfig;
   viewerVerifiedByFlair: boolean;
   viewerFlairCheckSource: string;
@@ -429,6 +459,14 @@ type HubStatePayload = {
   pendingCount: number;
   resolvedTheme: ThemePalette;
   themePresets: Record<ThemePresetName, ThemePalette>;
+};
+
+type ReleaseMetadata = {
+  version: string;
+  critical: boolean;
+  title: string | null;
+  notes: string | null;
+  linkUrl: string | null;
 };
 
 type SubmitVerificationResult = {
@@ -440,13 +478,15 @@ const SUBREDDIT_KEY_PREFIX = 'subreddit';
 
 const MAX_PENDING_TO_LOAD = 150;
 const SELF_DELETE_INDEX_SCAN_LIMIT = 1000;
-const MAX_DENIALS_BEFORE_BLOCK = 3;
+const MIN_MAX_DENIALS_BEFORE_BLOCK = 2;
+const DEFAULT_MAX_DENIALS_BEFORE_BLOCK = 3;
 const VALIDATION_CHECK_INTERVAL_DAYS = 30;
 const VALIDATION_HARD_EXPIRY_DAYS = 45;
 const VALIDATION_BATCH_SIZE = 50;
 const NON_APPROVED_VALIDATION_BATCH_SIZE = 25;
 const NON_APPROVED_VALIDATION_SCAN_MULTIPLIER = 4;
 const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
+const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
 const APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER = 4;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const HISTORY_RETENTION_DAYS = 45;
@@ -459,8 +499,14 @@ const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
+const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
+const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
+const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
+const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
+const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
+const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -893,6 +939,7 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
     hasConfigAccess: dashboard.hasConfigAccess,
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
+    flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
     approved: dashboard.approved,
@@ -928,6 +975,7 @@ function toHubState(dashboard: DashboardData): HubStatePayload {
     subredditName: dashboard.subredditName,
     isModerator: dashboard.isModerator,
     canReview: dashboard.canReview,
+    requiresInitialSetup: dashboard.requiresInitialSetup,
     config: toPublicHubConfig(dashboard.config),
     viewerVerifiedByFlair: dashboard.viewerVerifiedByFlair,
     viewerFlairCheckSource: dashboard.viewerFlairCheckSource,
@@ -953,6 +1001,345 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     claimedAt: normalizedRecord.claimedAt ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
+    accountDetails: normalizedRecord.accountDetails ?? null,
+  };
+}
+
+function normalizeUpdateNoticeText(value: unknown): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized ? normalized : null;
+}
+
+function normalizeUpdateNoticeUrl(value: unknown): string | null {
+  const normalized = normalizeUpdateNoticeText(value);
+  if (!normalized) {
+    return null;
+  }
+  try {
+    const parsed = new URL(normalized);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeReleaseSeverity(value: unknown): 'critical' | 'normal' | null {
+  const normalized = normalizeUpdateNoticeText(value)?.toLowerCase() ?? null;
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'critical') {
+    return 'critical';
+  }
+  if (normalized === 'normal') {
+    return 'normal';
+  }
+  return null;
+}
+
+type ParsedVersion = {
+  major: number;
+  minor: number;
+  patch: number;
+  playtestRevision: number;
+  normalized: string;
+};
+
+function parseVersion(value: unknown): ParsedVersion | null {
+  const normalized = typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
+  if (!normalized) {
+    return null;
+  }
+  const parts = normalized.split('.');
+  if (parts.length !== 3 && parts.length !== 4) {
+    return null;
+  }
+  if (!parts.every((part) => /^\d+$/.test(part))) {
+    return null;
+  }
+  const [major, minor, patch, playtestRevision = 0] = parts.map((part) => Number(part));
+  if (![major, minor, patch, playtestRevision].every((part) => Number.isSafeInteger(part) && part >= 0)) {
+    return null;
+  }
+  return {
+    major,
+    minor,
+    patch,
+    playtestRevision,
+    normalized: parts.length === 4 ? `${major}.${minor}.${patch}.${playtestRevision}` : `${major}.${minor}.${patch}`,
+  };
+}
+
+function compareVersions(left: ParsedVersion, right: ParsedVersion): number {
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+  if (left.patch !== right.patch) {
+    return left.patch - right.patch;
+  }
+  return left.playtestRevision - right.playtestRevision;
+}
+
+async function readLatestReleaseMetadata(context: Pick<Devvit.Context, 'settings'>): Promise<ReleaseMetadata | null> {
+  const [rawVersion, rawSeverity, rawTitle, rawNotes, rawLink] = await Promise.all([
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_VERSION),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_SEVERITY),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_TITLE),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_NOTES),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_LINK),
+  ]);
+  const parsedVersion = parseVersion(rawVersion);
+  if (!parsedVersion) {
+    return null;
+  }
+  const normalizedSeverity = normalizeReleaseSeverity(rawSeverity);
+  return {
+    version: parsedVersion.normalized,
+    critical: normalizedSeverity === 'critical',
+    title: normalizeUpdateNoticeText(rawTitle),
+    notes: normalizeUpdateNoticeText(rawNotes),
+    linkUrl: normalizeUpdateNoticeUrl(rawLink),
+  };
+}
+
+async function buildModeratorUpdateNotice(
+  context: Pick<Devvit.Context, 'settings' | 'redis'> & { subredditId?: string | null; appVersion?: string | null },
+  moderator: string
+): Promise<UpdateNoticeState | null> {
+  try {
+    const installedVersion = parseVersion(context.appVersion);
+    const latestRelease = await readLatestReleaseMetadata(context);
+    const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+    if (!installedVersion || !latestRelease || !subredditId) {
+      return null;
+    }
+    const latestVersion = parseVersion(latestRelease.version);
+    if (!latestVersion || compareVersions(latestVersion, installedVersion) <= 0) {
+      return null;
+    }
+    const dismissalKey = updateNoticeDismissalKey(subredditId, moderator, latestRelease.version);
+    const dismissedAt = (await context.redis.get(dismissalKey)) ?? null;
+    if (!latestRelease.critical) {
+      if (dismissedAt) {
+        return null;
+      }
+    }
+    return {
+      targetVersion: latestRelease.version,
+      critical: latestRelease.critical,
+      title: latestRelease.title,
+      notes: latestRelease.notes,
+      linkUrl: latestRelease.linkUrl,
+    };
+  } catch (error) {
+    console.log(`Update notice lookup failed: ${errorText(error)}`);
+    return null;
+  }
+}
+
+async function dismissModeratorUpdateNotice(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  moderator: string,
+  targetVersion: string
+): Promise<void> {
+  const parsedVersion = parseVersion(targetVersion);
+  const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+  if (!parsedVersion || !subredditId) {
+    throw new Error('Missing update notice version.');
+  }
+  await context.redis.set(
+    updateNoticeDismissalKey(subredditId, moderator, parsedVersion.normalized),
+    new Date().toISOString(),
+    {
+      expiration: new Date(Date.now() + UPDATE_NOTICE_DISMISS_TTL_DAYS * MILLIS_PER_DAY),
+    }
+  );
+}
+
+function normalizeOptionalIsoTimestamp(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const parsedMs = new Date(value).getTime();
+  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : null;
+}
+
+function normalizeOptionalWholeNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+function normalizeNonNegativeWholeNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizePendingBanStatus(value: unknown): PendingAccountDetailsSnapshot['banStatus'] {
+  return value === 'banned' || value === 'not_banned' || value === 'unknown' ? value : 'unknown';
+}
+
+function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetailsSnapshot | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const parsed = value as {
+    capturedAt?: unknown;
+    accountCreatedAt?: unknown;
+    subredditKarma?: unknown;
+    previousDeniedAttempts?: unknown;
+    banStatus?: unknown;
+  };
+
+  const capturedAt = normalizeOptionalIsoTimestamp(parsed.capturedAt);
+  if (!capturedAt) {
+    return null;
+  }
+
+  return {
+    capturedAt,
+    accountCreatedAt: normalizeOptionalIsoTimestamp(parsed.accountCreatedAt),
+    subredditKarma: normalizeOptionalWholeNumber(parsed.subredditKarma),
+    previousDeniedAttempts: normalizeNonNegativeWholeNumber(parsed.previousDeniedAttempts),
+    banStatus: normalizePendingBanStatus(parsed.banStatus),
+  };
+}
+
+function normalizeSubredditKarmaValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const parsed = value as {
+    total?: unknown;
+    karma?: unknown;
+    totalKarma?: unknown;
+    fromComments?: unknown;
+    fromPosts?: unknown;
+    commentKarma?: unknown;
+    postKarma?: unknown;
+    linkKarma?: unknown;
+  };
+
+  const directTotal = normalizeOptionalWholeNumber(parsed.total ?? parsed.karma ?? parsed.totalKarma);
+  if (directTotal !== null) {
+    return directTotal;
+  }
+
+  const commentKarma = normalizeOptionalWholeNumber(parsed.commentKarma ?? parsed.fromComments);
+  const postKarma = normalizeOptionalWholeNumber(parsed.postKarma ?? parsed.linkKarma ?? parsed.fromPosts);
+  if (commentKarma === null && postKarma === null) {
+    return null;
+  }
+
+  return (commentKarma ?? 0) + (postKarma ?? 0);
+}
+
+async function getStoredDenialCount(context: RedisContext, subredditId: string, username: string): Promise<number> {
+  const currentRaw = await context.redis.hGet(denialCountKey(subredditId), normalizeUsername(username));
+  const current = Number.parseInt(currentRaw ?? '0', 10);
+  return Number.isFinite(current) && current > 0 ? current : 0;
+}
+
+async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    console.log(`${label} failed on first attempt: ${errorText(error)}`);
+  }
+
+  try {
+    return await fn();
+  } catch (error) {
+    console.log(`${label} failed on retry: ${errorText(error)}`);
+    return fallbackValue;
+  }
+}
+
+async function collectPendingAccountDetailsSnapshot(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  username: string,
+  capturedAt: string
+): Promise<PendingAccountDetailsSnapshot> {
+  const normalizedUsername = normalizeUsername(username);
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+
+  const userSnapshotTask = withSingleRetry(
+    `Pending account details user snapshot lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
+    { accountCreatedAt: null, subredditKarma: null },
+    async () => {
+      const user = await context.reddit.getUserByUsername(normalizedUsername);
+      if (!user) {
+        return { accountCreatedAt: null, subredditKarma: null };
+      }
+      const userWithKarma = user as typeof user & {
+        getUserKarmaFromCurrentSubreddit?: () => Promise<unknown>;
+      };
+      const rawKarma =
+        typeof userWithKarma.getUserKarmaFromCurrentSubreddit === 'function'
+          ? await userWithKarma.getUserKarmaFromCurrentSubreddit()
+          : null;
+      return {
+        accountCreatedAt: normalizeOptionalIsoTimestamp(user.createdAt),
+        subredditKarma: normalizeSubredditKarmaValue(rawKarma),
+      };
+    }
+  );
+
+  const banStatusTask = withSingleRetry(
+    `Pending account details ban lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
+    'unknown' as const,
+    async () => {
+      const redditClient = context.reddit as Devvit.Context['reddit'] & {
+        getBannedUsers?: (options: {
+          subredditName?: string;
+          username?: string;
+          limit?: number;
+          pageSize?: number;
+        }) => { all: () => Promise<unknown[]> };
+      };
+      if (typeof redditClient.getBannedUsers !== 'function') {
+        return 'unknown';
+      }
+      const bannedUsers = await redditClient
+        .getBannedUsers({
+          subredditName: sanitizedSubreddit,
+          username: normalizedUsername,
+          limit: 1,
+          pageSize: 1,
+        })
+        .all();
+      return bannedUsers.length > 0 ? 'banned' : 'not_banned';
+    }
+  );
+
+  const [userSnapshot, banStatus, previousDeniedAttempts] = await Promise.all([
+    userSnapshotTask,
+    banStatusTask,
+    getStoredDenialCount(context, subredditId, username),
+  ]);
+
+  return {
+    capturedAt,
+    accountCreatedAt: userSnapshot.accountCreatedAt,
+    subredditKarma: userSnapshot.subredditKarma,
+    previousDeniedAttempts,
+    banStatus,
   };
 }
 
@@ -1031,6 +1418,13 @@ async function submitVerification(
 
   const verificationId = makeVerificationId(now);
   const acknowledgedAt = now.toISOString();
+  const accountDetails = await collectPendingAccountDetailsSnapshot(
+    context,
+    subredditId,
+    subredditName,
+    username,
+    acknowledgedAt
+  );
 
   const record: VerificationRecord = {
     id: verificationId,
@@ -1052,6 +1446,7 @@ async function submitVerification(
     claimedAt: null,
     parentVerificationId: null,
     isResubmission,
+    accountDetails,
     removedAt: null,
     removedBy: null,
     lastValidatedAt: null,
@@ -1728,16 +2123,6 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     const parentDeniedId = record.parentVerificationId?.trim() ?? '';
 
     const config = await getRuntimeConfig(context, subredditId);
-    if (!config.flairTemplateId.trim()) {
-      return {
-        flair: {
-          status: 'failed',
-          reason: 'Set a Flair template ID in Verification Settings before approving submissions.',
-        },
-        modmail: { status: 'skipped', reason: 'flair not applied' },
-        modNote: { status: 'skipped', reason: 'flair not applied' },
-      };
-    }
     const flairResult = await applyApprovalFlairWithFallbacks(context, record, config);
     const flair: FlairStepResult = flairResult.applied
       ? { status: 'success' }
@@ -1760,6 +2145,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
       claimedBy: null,
       claimedAt: null,
       parentVerificationId: null,
+      accountDetails: null,
       photoOneUrl: '',
       photoTwoUrl: '',
       photoThreeUrl: '',
@@ -1986,6 +2372,7 @@ async function denyVerification(
       denyNotes: moderatorNotes ?? null,
       claimedBy: null,
       claimedAt: null,
+      accountDetails: null,
       removedAt: null,
       removedBy: null,
       lastValidatedAt: null,
@@ -2033,7 +2420,7 @@ async function denyVerification(
 
     const denialCount = await incrementDenialCount(context, subredditId, record.username);
     let userBlocked = false;
-    if (denialCount >= MAX_DENIALS_BEFORE_BLOCK) {
+    if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
       const blockedEntry: BlockedUserEntry = {
         username: record.username,
         blockedAt: new Date().toISOString(),
@@ -2123,6 +2510,14 @@ async function reopenDeniedVerification(
     }
 
     const now = new Date();
+    const reopenedAt = now.toISOString();
+    const accountDetails = await collectPendingAccountDetailsSnapshot(
+      context,
+      subredditId,
+      subredditName,
+      deniedRecord.username,
+      reopenedAt
+    );
     const reopenedId = makeVerificationId(now);
     const reopenedRecord: VerificationRecord = {
       ...deniedRecord,
@@ -2134,8 +2529,9 @@ async function reopenDeniedVerification(
       denyNotes: null,
       claimedBy: null,
       claimedAt: null,
-      submittedAt: now.toISOString(),
+      submittedAt: reopenedAt,
       parentVerificationId: deniedRecord.id,
+      accountDetails,
       removedAt: null,
       removedBy: null,
       lastValidatedAt: null,
@@ -2698,9 +3094,14 @@ async function loadDashboardData(
   const canReviewUser = isModeratorUser && canManageUsers;
   const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
+  let flairTemplateValidation = validateFlairTemplateId(config.flairTemplateId);
   if (viewerUsername && config.flairTemplateId.trim()) {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
   }
+  if (canReviewUser && options.includeModData) {
+    flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
+  }
+  const requiresInitialSetup = !config.flairTemplateId.trim();
 
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
   if (viewerUsername && userLatest) {
@@ -2830,6 +3231,8 @@ async function loadDashboardData(
     canOpenInstallSettings,
     hasConfigAccess,
     canAccessSettingsTab,
+    flairTemplateValidation,
+    requiresInitialSetup,
     config,
     viewerSnapshot,
     viewerVerifiedByFlair: flairCheck.verified,
@@ -2965,6 +3368,44 @@ async function fetchConfiguredFlairTemplateTextFromSelector(
   } catch (error) {
     console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
     return null;
+  }
+}
+
+async function validateFlairTemplateIdForSubreddit(
+  context: Devvit.Context,
+  subredditName: string,
+  flairTemplateId: string | null | undefined
+): Promise<FlairTemplateValidationState> {
+  const formatValidation = validateFlairTemplateId(flairTemplateId);
+  if (!formatValidation.isValid) {
+    return formatValidation;
+  }
+
+  const normalizedSubredditName = sanitizeSubredditName(subredditName);
+  const normalizedTemplateId = normalizeTemplateId(String(flairTemplateId ?? ''));
+  try {
+    const subreddit = await context.reddit.getSubredditByName(normalizedSubredditName);
+    const flairTemplates = await subreddit.getUserFlairTemplates();
+    const exists = flairTemplates.some((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
+    if (!exists) {
+      return {
+        isValid: false,
+        code: 'not_found',
+        message: `Flair template ID was not found in r/${normalizedSubredditName}.`,
+      };
+    }
+    return {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    };
+  } catch (error) {
+    console.log(`Flair template validation lookup failed for r/${normalizedSubredditName}: ${errorText(error)}`);
+    return {
+      isValid: false,
+      code: 'lookup_failed',
+      message: `Unable to verify the flair template ID in r/${normalizedSubredditName}.`,
+    };
   }
 }
 
@@ -3629,11 +4070,12 @@ async function searchAuditEntries(
 
 async function listBlockedUsers(context: Devvit.Context, subredditId: string): Promise<BlockedUserEntry[]> {
   const blockedMap = await context.redis.hGetAll(blockedUsersKey(subredditId));
+  const config = await getRuntimeConfig(context, subredditId);
   const blockedUsers: BlockedUserEntry[] = [];
   const staleUsers: string[] = [];
 
   for (const [normalizedUsername, payload] of Object.entries(blockedMap)) {
-    const parsed = parseBlockedUserEntry(normalizedUsername, payload);
+    const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
     if (!parsed) {
       staleUsers.push(normalizedUsername);
       continue;
@@ -3659,6 +4101,7 @@ async function getBlockedUser(
   subredditId: string,
   username: string
 ): Promise<BlockedUserEntry | null> {
+  const config = await getRuntimeConfig(context, subredditId);
   const normalizedUsername = normalizeUsername(username);
   const key = blockedUsersKey(subredditId);
   const legacyUsername = `u/${normalizedUsername}`;
@@ -3666,7 +4109,7 @@ async function getBlockedUser(
   if (!payload) {
     return null;
   }
-  const parsed = parseBlockedUserEntry(normalizedUsername, payload);
+  const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
   if (!parsed) {
     await context.redis.hDel(key, [normalizedUsername, legacyUsername]);
     return null;
@@ -3683,9 +4126,7 @@ async function isUserBlocked(context: Devvit.Context, subredditId: string, usern
 async function incrementDenialCount(context: Devvit.Context, subredditId: string, username: string): Promise<number> {
   const key = denialCountKey(subredditId);
   const normalizedUsername = normalizeUsername(username);
-  const currentRaw = await context.redis.hGet(key, normalizedUsername);
-  const current = Number.parseInt(currentRaw ?? '0', 10);
-  const next = Number.isFinite(current) && current > 0 ? current + 1 : 1;
+  const next = (await getStoredDenialCount(context, subredditId, normalizedUsername)) + 1;
   await context.redis.hSet(key, { [normalizedUsername]: `${next}` });
   return next;
 }
@@ -3758,9 +4199,7 @@ async function blockUserForModerator(
     return { alreadyBlocked: true, entry: existing };
   }
 
-  const currentCountRaw = await context.redis.hGet(denialCountKey(subredditId), normalizedUsername);
-  const currentCount = Number.parseInt(currentCountRaw ?? '0', 10);
-  const deniedCount = Number.isFinite(currentCount) && currentCount > 0 ? currentCount : 0;
+  const deniedCount = await getStoredDenialCount(context, subredditId, normalizedUsername);
 
   const entry: BlockedUserEntry = {
     username: normalizedUsername,
@@ -4480,11 +4919,9 @@ async function onSaveFlairTemplateValues(
       ? existingConfig.requiredPhotoCount
       : parseRequiredPhotoCount(values.requiredPhotoCount, existingConfig.requiredPhotoCount);
   const flairTemplateId = values.flairTemplateId?.trim() ?? '';
-  if (!flairTemplateId) {
-    throw new Error('Flair template ID is required to save verification settings.');
-  }
-  if (!isLikelyFlairTemplateId(flairTemplateId)) {
-    throw new Error('Flair template ID must include letters/numbers, at least one digit, and a hyphen.');
+  const flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, flairTemplateId);
+  if (!flairTemplateValidation.isValid) {
+    throw new Error(flairTemplateValidation.message);
   }
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
 
@@ -4609,6 +5046,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawMaxDenialsBeforeBlock = await context.settings.get<number | string>(INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK);
   const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
     INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
   );
@@ -4621,6 +5059,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const maxDenialsBeforeBlock = normalizeMaxDenialsBeforeBlockSetting(rawMaxDenialsBeforeBlock);
   const showPhotoInstructionsBeforeSubmit =
     typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
       ? rawShowPhotoInstructionsBeforeSubmit
@@ -4644,6 +5083,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
     autoFlairReconcileEnabled,
+    maxDenialsBeforeBlock,
     requiredPhotoCount,
     photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
     showPhotoInstructionsBeforeSubmit,
@@ -4718,6 +5158,35 @@ function parsePositiveInt(value: string | undefined, fallback: number): number |
     return null;
   }
   return parsed;
+}
+
+function normalizeMaxDenialsBeforeBlockSetting(value: number | string | undefined | null): number {
+  const parsed =
+    typeof value === 'number'
+      ? Number.isFinite(value) && Number.isInteger(value)
+        ? value
+        : null
+      : typeof value === 'string'
+        ? parseNonNegativeInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
+        : null;
+  return parsed === 0 || (parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK)
+    ? parsed
+    : DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+}
+
+function validateMaxDenialsBeforeBlockSetting(value: unknown): string | undefined {
+  if (value === undefined) {
+    return;
+  }
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value === 1
+  ) {
+    return `Enter 0 to disable auto-block, or a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
+  }
 }
 
 function parseNonNegativeInt(value: string | undefined | null, fallback: number | null): number | null {
@@ -4853,6 +5322,7 @@ function parseRecord(payload: string): VerificationRecord | null {
       claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
       parentVerificationId: typeof parsed.parentVerificationId === 'string' ? parsed.parentVerificationId : null,
       isResubmission: parsed.isResubmission === true,
+      accountDetails: parsePendingAccountDetailsSnapshot(parsed.accountDetails),
       removedAt: typeof parsed.removedAt === 'string' ? parsed.removedAt : null,
       removedBy: typeof parsed.removedBy === 'string' ? parsed.removedBy : null,
       lastValidatedAt: typeof parsed.lastValidatedAt === 'string' ? parsed.lastValidatedAt : null,
@@ -4885,7 +5355,11 @@ function parseRecord(payload: string): VerificationRecord | null {
   }
 }
 
-function parseBlockedUserEntry(normalizedUsername: string, payload: string): BlockedUserEntry | null {
+function parseBlockedUserEntry(
+  normalizedUsername: string,
+  payload: string,
+  fallbackDeniedCount: number
+): BlockedUserEntry | null {
   try {
     const parsed = JSON.parse(payload) as Partial<BlockedUserEntry>;
     if (!parsed || typeof parsed.blockedAt !== 'string') {
@@ -4893,7 +5367,7 @@ function parseBlockedUserEntry(normalizedUsername: string, payload: string): Blo
     }
     const deniedCountRaw = Number.parseInt(`${parsed.deniedCount ?? ''}`, 10);
     const deniedCount =
-      Number.isFinite(deniedCountRaw) && deniedCountRaw >= 0 ? deniedCountRaw : MAX_DENIALS_BEFORE_BLOCK;
+      Number.isFinite(deniedCountRaw) && deniedCountRaw >= 0 ? deniedCountRaw : fallbackDeniedCount;
     const username = normalizeUsername(parsed.username ?? normalizedUsername).replace(/^u\//i, '');
     if (!username) {
       return null;
@@ -5092,6 +5566,13 @@ function moderatorRoleCacheKey(subredditId: string, username: string): string {
 
 function moderatorLookupLogCooldownKey(subredditId: string, scope: string, username: string): string {
   return `${subredditScopePrefix(subredditId)}:moderator:lookup-log:${scope}:${normalizeUsername(username) || 'unknown'}`;
+}
+
+function updateNoticeDismissalKey(subredditId: string, moderator: string, targetVersion: string): string {
+  const normalizedVersion = parseVersion(targetVersion)?.normalized ?? targetVersion.trim().toLowerCase();
+  return `${subredditScopePrefix(subredditId)}:moderator:update-dismissed:${normalizeUsername(
+    moderator
+  )}:${normalizedVersion}`;
 }
 
 function sanitizeSubredditId(input: string): string {
@@ -5720,15 +6201,31 @@ function asAuditAction(value: string | undefined): AuditAction | null {
     : null;
 }
 
-function isLikelyFlairTemplateId(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
+function validateFlairTemplateId(value: string | null | undefined): FlairTemplateValidationState {
+  const normalized = normalizeTemplateId(String(value ?? ''));
   if (!normalized) {
-    return false;
+    return {
+      isValid: false,
+      code: 'missing',
+      message: 'Flair template ID is required.',
+    };
   }
-  if (!/^[a-z0-9-]+$/.test(normalized)) {
-    return false;
+  if (!/^[a-z0-9-]+$/.test(normalized) || !/\d/.test(normalized) || !normalized.includes('-')) {
+    return {
+      isValid: false,
+      code: 'invalid_format',
+      message: 'Flair template ID must include letters or numbers, at least one digit, and a hyphen.',
+    };
   }
-  return /\d/.test(normalized) && normalized.includes('-');
+  return {
+    isValid: true,
+    code: 'valid',
+    message: 'Flair template ID looks valid.',
+  };
+}
+
+function isLikelyFlairTemplateId(value: string): boolean {
+  return validateFlairTemplateId(value).isValid;
 }
 
 function buildModmailSubject(template: string, values: Record<string, string>): string {
@@ -6365,9 +6862,16 @@ export {
   sanitizeSubredditName,
   getCurrentSubredditNameCompat,
   parseDenyReason,
+  parseRecord,
   errorText,
+  validateFlairTemplateId,
+  validateFlairTemplateIdForSubreddit,
+  validateMaxDenialsBeforeBlockSetting,
   resolveThemePalette,
   clearExpiredPendingClaim,
+  collectPendingAccountDetailsSnapshot,
+  buildModeratorUpdateNotice,
+  dismissModeratorUpdateNotice,
   normalizeSubmittedPhotoUrl,
   toPublicHubConfig,
   releaseRedisLockIfOwned,
@@ -6382,8 +6886,10 @@ export type {
   DeleteDataConfirmValues,
   DeleteDataResult,
   DenyReason,
+  FlairTemplateValidationState,
   HubStatePayload,
   ModPanelStatePayload,
+  PendingAccountDetailsSnapshot,
   PublicHubConfig,
   PurgeUserDataFormValues,
   RuntimeConfig,
@@ -6391,4 +6897,5 @@ export type {
   SubmitVerificationValues,
   ThemePalette,
   ThemePresetName,
+  UpdateNoticeState,
 };

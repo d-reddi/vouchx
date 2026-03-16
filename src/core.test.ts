@@ -2,15 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildModeratorUpdateNotice,
   clearExpiredPendingClaim,
+  collectPendingAccountDetailsSnapshot,
+  dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   normalizeSubmittedPhotoUrl,
+  parseRecord,
   releaseRedisLockIfOwned,
+  toModPanelState,
   toPublicHubConfig,
+  toHubState,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
+  validateFlairTemplateId,
+  validateMaxDenialsBeforeBlockSetting,
   withRedisLock,
   type RuntimeConfig,
 } from './core.ts';
@@ -49,11 +57,23 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildPendingAccountDetailsSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    capturedAt: '2026-03-11T12:00:00.000Z',
+    accountCreatedAt: '2026-03-01T12:00:00.000Z',
+    subredditKarma: 42,
+    previousDeniedAttempts: 2,
+    banStatus: 'not_banned' as const,
+    ...overrides,
+  };
+}
+
 function buildRuntimeConfig(): RuntimeConfig {
   return {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
     autoFlairReconcileEnabled: true,
+    maxDenialsBeforeBlock: 3,
     requiredPhotoCount: 2,
     photoInstructions: 'Follow the instructions.',
     showPhotoInstructionsBeforeSubmit: true,
@@ -85,6 +105,56 @@ function buildRuntimeConfig(): RuntimeConfig {
     customPrimary: '',
     customAccent: '',
     customBackground: '',
+  };
+}
+
+function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]> = {}): Parameters<typeof toHubState>[0] {
+  return {
+    viewerUsername: 'example_user',
+    subredditName: 'example',
+    isModerator: false,
+    canReview: false,
+    canManageUsers: false,
+    canOpenInstallSettings: false,
+    hasConfigAccess: false,
+    canAccessSettingsTab: false,
+    flairTemplateValidation: {
+      isValid: true,
+      code: 'valid',
+      message: 'Flair template ID looks valid.',
+    },
+    requiresInitialSetup: false,
+    config: buildRuntimeConfig(),
+    viewerSnapshot: {
+      accountAgeDays: 365,
+      totalKarma: 1000,
+    },
+    viewerVerifiedByFlair: false,
+    viewerFlairConfiguredTemplateId: '',
+    viewerFlairDetectedTemplateId: '',
+    viewerFlairCheckSource: 'none',
+    viewerFlairCheckError: null,
+    viewerCurrentFlairText: '',
+    viewerCurrentFlairCssClass: '',
+    userLatest: null,
+    viewerBlocked: null,
+    pendingCount: 0,
+    pending: [],
+    approved: [],
+    blocked: [],
+    auditLog: [],
+    storage: {
+      estimatedBytes: 0,
+      capBytes: 0,
+      percent: 0,
+      recordCount: 0,
+      auditCount: 0,
+      blockedCount: 0,
+      deniedCountEntries: 0,
+    },
+    approvedHasMore: false,
+    auditHasMore: false,
+    ...overrides,
   };
 }
 
@@ -171,6 +241,44 @@ function createRedisLockContext(initialValue: string | null) {
     get currentLockValue() {
       return currentLockValue;
     },
+  };
+}
+
+function createUpdateNoticeContext(options?: {
+  appVersion?: string | null;
+  subredditId?: string;
+  settingsValues?: Record<string, string | boolean | undefined>;
+  initialDismissals?: Record<string, string>;
+}) {
+  const settingsValues = options?.settingsValues ?? {};
+  const redisStore = new Map<string, string>(Object.entries(options?.initialDismissals ?? {}));
+  const getCalls: string[] = [];
+  const setCalls: Array<[string, string, unknown?]> = [];
+
+  return {
+    context: {
+      appVersion: options?.appVersion ?? '0.0.2',
+      subredditId: options?.subredditId ?? 't5_example',
+      settings: {
+        async get(key: string) {
+          return settingsValues[key];
+        },
+      },
+      redis: {
+        async get(key: string) {
+          getCalls.push(key);
+          return redisStore.get(key) ?? null;
+        },
+        async set(key: string, value: string, options?: unknown) {
+          setCalls.push([key, value, options]);
+          redisStore.set(key, value);
+          return 'OK';
+        },
+      },
+    },
+    getCalls,
+    setCalls,
+    redisStore,
   };
 }
 
@@ -269,6 +377,79 @@ function createModeratorLookupContext(options?: {
   };
 }
 
+function createPendingAccountDetailsContext(options?: {
+  userResponses?: Array<{ createdAt: Date } | null | Error>;
+  karmaResponses?: Array<unknown | Error>;
+  bannedResponses?: Array<unknown[] | Error>;
+  denialCount?: string | null;
+}) {
+  const userResponses = options?.userResponses ?? [];
+  const karmaResponses = options?.karmaResponses ?? [];
+  const bannedResponses = options?.bannedResponses ?? [];
+  let userCallCount = 0;
+  let karmaCallCount = 0;
+  let bannedCallCount = 0;
+  let denialCountCallCount = 0;
+
+  return {
+    context: {
+      reddit: {
+        async getUserByUsername() {
+          const response = userResponses[Math.min(userCallCount, userResponses.length - 1)];
+          userCallCount += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+          if (!response) {
+            return null;
+          }
+          return {
+            createdAt: response.createdAt,
+            async getUserKarmaFromCurrentSubreddit() {
+              const karmaResponse = karmaResponses[Math.min(karmaCallCount, karmaResponses.length - 1)];
+              karmaCallCount += 1;
+              if (karmaResponse instanceof Error) {
+                throw karmaResponse;
+              }
+              return karmaResponse ?? null;
+            },
+          };
+        },
+        getBannedUsers() {
+          return {
+            async all() {
+              const response = bannedResponses[Math.min(bannedCallCount, bannedResponses.length - 1)];
+              bannedCallCount += 1;
+              if (response instanceof Error) {
+                throw response;
+              }
+              return Array.isArray(response) ? response : [];
+            },
+          };
+        },
+      },
+      redis: {
+        async hGet() {
+          denialCountCallCount += 1;
+          return options?.denialCount ?? null;
+        },
+      },
+    },
+    get userCallCount() {
+      return userCallCount;
+    },
+    get karmaCallCount() {
+      return karmaCallCount;
+    },
+    get bannedCallCount() {
+      return bannedCallCount;
+    },
+    get denialCountCallCount() {
+      return denialCountCallCount;
+    },
+  };
+}
+
 test('normalizeSubmittedPhotoUrl accepts Reddit-hosted upload URLs', () => {
   assert.equal(
     normalizeSubmittedPhotoUrl('https://i.redd.it/example-photo.png'),
@@ -284,6 +465,39 @@ test('normalizeSubmittedPhotoUrl rejects non-Reddit or non-https URLs', () => {
   assert.equal(normalizeSubmittedPhotoUrl('https://example.com/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('http://i.redd.it/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('javascript:alert(1)'), null);
+});
+
+test('validateFlairTemplateId rejects missing template IDs', () => {
+  const validation = validateFlairTemplateId('');
+  assert.equal(validation.isValid, false);
+  assert.equal(validation.code, 'missing');
+});
+
+test('validateFlairTemplateId rejects malformed template IDs', () => {
+  const validation = validateFlairTemplateId('abc123');
+  assert.equal(validation.isValid, false);
+  assert.equal(validation.code, 'invalid_format');
+});
+
+test('validateFlairTemplateId accepts template IDs with a digit and hyphen', () => {
+  const validation = validateFlairTemplateId('ABC-123');
+  assert.equal(validation.isValid, true);
+  assert.equal(validation.code, 'valid');
+});
+
+test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting(0), undefined);
+});
+
+test('validateMaxDenialsBeforeBlockSetting rejects 1', () => {
+  assert.equal(
+    validateMaxDenialsBeforeBlockSetting(1),
+    'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
+  );
+});
+
+test('validateMaxDenialsBeforeBlockSetting allows 2', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting(2), undefined);
 });
 
 test('getCurrentModeratorPermissionList reuses cached permissions after a transient lookup failure', async () => {
@@ -348,6 +562,243 @@ test('clearExpiredPendingClaim keeps active claims', () => {
   assert.equal(result.claimedAt, '2026-03-11T11:55:00.000Z');
 });
 
+test('parseRecord preserves valid pending account details snapshots', () => {
+  const parsed = parseRecord(
+    JSON.stringify(
+      buildRecord({
+        accountDetails: buildPendingAccountDetailsSnapshot(),
+      })
+    )
+  );
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.accountDetails, buildPendingAccountDetailsSnapshot());
+});
+
+test('parseRecord collapses malformed pending account details snapshots to null', () => {
+  const parsed = parseRecord(
+    JSON.stringify(
+      buildRecord({
+        accountDetails: {
+          capturedAt: 123,
+          previousDeniedAttempts: 'bad-data',
+        },
+      })
+    )
+  );
+
+  assert.ok(parsed);
+  assert.equal(parsed.accountDetails, null);
+});
+
+test('toModPanelState includes account details on pending items', () => {
+  const accountDetails = buildPendingAccountDetailsSnapshot();
+  const modState = toModPanelState(
+    buildDashboardData({
+      pendingCount: 1,
+      pending: [buildRecord({ accountDetails }) as never],
+    })
+  );
+
+  assert.equal(modState.pending.length, 1);
+  assert.deepEqual(modState.pending[0].accountDetails, accountDetails);
+});
+
+test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [new Error('temporary user lookup failure'), { createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    karmaResponses: [{ fromComments: 4, fromPosts: 5 }],
+    bannedResponses: [new Error('temporary ban lookup failure'), []],
+    denialCount: '2',
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const snapshot = await collectPendingAccountDetailsSnapshot(
+      snapshotContext.context as never,
+      't5_example',
+      'example',
+      'example_user',
+      '2026-03-11T12:00:00.000Z'
+    );
+
+    assert.equal(snapshot.capturedAt, '2026-03-11T12:00:00.000Z');
+    assert.equal(snapshot.accountCreatedAt, '2026-03-01T12:00:00.000Z');
+    assert.equal(snapshot.subredditKarma, 9);
+    assert.equal(snapshot.previousDeniedAttempts, 2);
+    assert.equal(snapshot.banStatus, 'not_banned');
+    assert.equal(snapshotContext.userCallCount, 2);
+    assert.equal(snapshotContext.karmaCallCount, 1);
+    assert.equal(snapshotContext.bannedCallCount, 2);
+    assert.equal(snapshotContext.denialCountCallCount, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('collectPendingAccountDetailsSnapshot falls back to partial values after retry exhaustion', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [new Error('lookup failure'), new Error('lookup failure')],
+    bannedResponses: [new Error('ban failure'), new Error('ban failure')],
+    denialCount: '3',
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const snapshot = await collectPendingAccountDetailsSnapshot(
+      snapshotContext.context as never,
+      't5_example',
+      'example',
+      'example_user',
+      '2026-03-11T12:00:00.000Z'
+    );
+
+    assert.equal(snapshot.accountCreatedAt, null);
+    assert.equal(snapshot.subredditKarma, null);
+    assert.equal(snapshot.banStatus, 'unknown');
+    assert.equal(snapshot.previousDeniedAttempts, 3);
+    assert.equal(snapshotContext.userCallCount, 2);
+    assert.equal(snapshotContext.bannedCallCount, 2);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('buildModeratorUpdateNotice returns null when latest release metadata is missing or invalid', async () => {
+  const missingVersionContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_title: 'Release ready',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(missingVersionContext.context as never, 'mod_one'), null);
+
+  const invalidVersionContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: 'soon',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(invalidVersionContext.context as never, 'mod_one'), null);
+});
+
+test('buildModeratorUpdateNotice returns a dismissible notice when a newer release exists', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_title: 'VouchX 0.0.3 is available',
+      latest_release_notes: 'Improves moderator tooling.',
+      latest_release_link: 'https://example.com/changelog/0.0.3',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: false,
+    title: 'VouchX 0.0.3 is available',
+    notes: 'Improves moderator tooling.',
+    linkUrl: 'https://example.com/changelog/0.0.3',
+  });
+  assert.equal(updateContext.getCalls.length, 1);
+});
+
+test('buildModeratorUpdateNotice supports Devvit playtest versions when a newer release exists', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2.1',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_title: 'VouchX 0.0.3 is available',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: false,
+    title: 'VouchX 0.0.3 is available',
+    notes: null,
+    linkUrl: null,
+  });
+});
+
+test('buildModeratorUpdateNotice does not show an update when the installed Devvit playtest build is already ahead of the latest release', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2.1',
+    settingsValues: {
+      latest_release_version: '0.0.2',
+      latest_release_title: 'VouchX 0.0.2 is available',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One'), null);
+});
+
+test('buildModeratorUpdateNotice ignores Redis dismissals for critical releases', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_severity: 'critical',
+      latest_release_title: 'Critical stability update',
+    },
+    initialDismissals: {
+      'subreddit:t5_example:moderator:update-dismissed:mod_one:0.0.3': '2026-03-15T00:00:00.000Z',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: true,
+    title: 'Critical stability update',
+    notes: null,
+    linkUrl: null,
+  });
+});
+
+test('buildModeratorUpdateNotice treats latest_release_severity normal as non-critical and respects dismissals', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_severity: 'normal',
+      latest_release_title: 'Standard update',
+    },
+    initialDismissals: {
+      'subreddit:t5_example:moderator:update-dismissed:mod_one:0.0.3': '2026-03-15T00:00:00.000Z',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One'), null);
+});
+
+test('dismissModeratorUpdateNotice stores a per-moderator per-version dismissal that suppresses the notice', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+    },
+  });
+
+  await dismissModeratorUpdateNotice(updateContext.context as never, 'Mod_One', 'v0.0.3');
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+  const expirationOptions = updateContext.setCalls[0][2] as { expiration?: Date } | undefined;
+
+  assert.equal(notice, null);
+  assert.equal(updateContext.setCalls.length, 1);
+  assert.match(updateContext.setCalls[0][0], /subreddit:t5_example:moderator:update-dismissed:mod_one:0\.0\.3$/);
+  assert.ok(expirationOptions?.expiration instanceof Date);
+});
+
 test('toPublicHubConfig omits moderator-only template content', () => {
   const publicConfig = toPublicHubConfig(buildRuntimeConfig());
 
@@ -366,6 +817,35 @@ test('toPublicHubConfig omits moderator-only template content', () => {
     ],
   });
   assert.equal('template' in publicConfig.denyReasons[0], false);
+});
+
+test('toHubState marks initial setup required when flair template ID is blank', () => {
+  const hubState = toHubState(
+    buildDashboardData({
+      requiresInitialSetup: true,
+      config: {
+        ...buildRuntimeConfig(),
+        flairTemplateId: '',
+      },
+    })
+  );
+
+  assert.equal(hubState.requiresInitialSetup, true);
+  assert.equal('flairTemplateId' in hubState.config, false);
+});
+
+test('toHubState does not mark initial setup required when flair template ID is non-empty', () => {
+  const hubState = toHubState(
+    buildDashboardData({
+      requiresInitialSetup: false,
+      config: {
+        ...buildRuntimeConfig(),
+        flairTemplateId: 'template-id-present',
+      },
+    })
+  );
+
+  assert.equal(hubState.requiresInitialSetup, false);
 });
 
 test('releaseRedisLockIfOwned deletes the cleanup lock when the token matches', async () => {

@@ -37,6 +37,20 @@
         </div>
       </header>
 
+      <div id="update-notice" class="content-card panel-warning panel-warning-info hidden" role="status">
+        <div class="panel-warning-body">
+          <p id="update-notice-kicker" class="update-notice-kicker">VouchX update available</p>
+          <p id="update-notice-title" class="panel-warning-title">Update available</p>
+          <p id="update-notice-copy" class="panel-warning-copy"></p>
+          <p id="update-notice-notes" class="update-notice-notes muted small hidden"></p>
+        </div>
+        <div class="row panel-warning-actions">
+          <button id="update-notice-open-app-btn" class="btn btn-primary" type="button">Update Now</button>
+          <button id="update-notice-release-link-btn" class="btn btn-secondary hidden" type="button">Release Notes</button>
+          <button id="update-notice-dismiss-btn" class="btn btn-secondary" type="button">Later</button>
+        </div>
+      </div>
+
       <nav class="tabs primary-tabs" aria-label="Moderator navigation">
         <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>
@@ -50,6 +64,15 @@
             <div>
               <h2>Queue</h2>
               <p class="section-copy muted">Review pending verification requests.</p>
+            </div>
+          </div>
+          <div id="pending-flair-warning" class="content-card panel-warning panel-warning-error hidden" role="alert">
+            <div class="panel-warning-body">
+              <p class="panel-warning-title">Approvals are disabled</p>
+              <p id="pending-flair-warning-text" class="panel-warning-copy"></p>
+            </div>
+            <div class="row panel-warning-actions">
+              <button id="pending-flair-warning-settings-btn" class="btn btn-secondary hidden" type="button">Open Settings</button>
             </div>
           </div>
           <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
@@ -257,6 +280,7 @@
                   <div class="field-stack">
                     <label class="field-label" for="flair-template-id">Flair template ID</label>
                     <input id="flair-template-id" class="field-input" type="text" />
+                    <p id="flair-template-validation-feedback" class="field-feedback small hidden" aria-live="polite"></p>
                   </div>
                   <div class="field-stack">
                     <label class="field-label" for="flair-css-class">Flair CSS substring to match (optional)</label>
@@ -527,7 +551,7 @@
             href="#"
             target="_blank"
             rel="noopener noreferrer"
-          >Report a Bug</a>
+          >Report a Bug / Request a Feature</a>
         </div>
       </footer>
     </div>
@@ -537,6 +561,34 @@
     <div id="image-modal" class="image-modal hidden">
       <button id="image-close" class="image-close">Close</button>
       <img id="image-preview" src="" alt="Verification preview" />
+    </div>
+
+    <div id="stats-modal" class="dialog-modal hidden">
+      <div class="dialog-card stats-dialog-card">
+        <div class="stats-dialog-head">
+          <div>
+            <h3 id="stats-username">Account details</h3>
+            <p id="stats-captured-at" class="muted small">Snapshot unavailable for this pending record.</p>
+          </div>
+          <button id="stats-close-btn" class="btn btn-secondary" type="button">Close</button>
+        </div>
+        <div class="stats-section">
+          <div class="stats-primary-row">
+            <span class="stats-label">Subreddit Karma</span>
+            <span id="stats-subreddit-karma" class="stats-primary-value">Unknown</span>
+          </div>
+          <div class="stats-list">
+            <div class="stats-row">
+              <span class="stats-label">Previous denied attempts</span>
+              <span id="stats-previous-denials" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Ban status</span>
+              <span id="stats-ban-status" class="stats-value">Unknown</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="block-modal" class="dialog-modal hidden">

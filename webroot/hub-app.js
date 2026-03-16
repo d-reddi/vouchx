@@ -1,11 +1,24 @@
 import { connectRealtime, disconnectRealtime } from '@devvit/realtime/client';
-import { navigateTo, requestExpandedMode, showForm, showToast as devvitShowToast } from '@devvit/web/client';
+import {
+  exitExpandedMode,
+  navigateTo,
+  requestExpandedMode,
+  showForm,
+  showToast as devvitShowToast,
+} from '@devvit/web/client';
+import { EffectType } from '@devvit/protos/json/devvit/ui/effects/v1alpha/effect.js';
+import { WebViewImmersiveMode } from '@devvit/protos/json/devvit/ui/effects/web_view/v1alpha/immersive_mode.js';
+import { emitEffect } from '@devvit/shared-types/client/emit-effect.js';
 import brandLogoUrl from './logo.png';
 import { HOW_TO_USE_APP_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
 const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx/wiki/privacy-policy/';
+const PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY = 'vouchx-photo-instructions-launch-v1';
+const PHOTO_INSTRUCTIONS_LAUNCH_STATE_TTL_MS = 5 * 60 * 1000;
+const PHOTO_INSTRUCTIONS_READ_STATE_PREFIX = 'vouchx-photo-instructions-read-v1:';
+const PHOTO_INSTRUCTIONS_READ_TTL_MS = 15 * 60 * 1000;
 const SUBMIT_ACKNOWLEDGEMENTS = [
   {
     key: 'is18Confirmed',
@@ -94,11 +107,14 @@ function createShell(root, inline) {
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card">
-          <h2>Photo Instructions</h2>
+          <h2>Photo Requirements</h2>
           <p class="meta">
-            Review these instructions before opening the upload form.
+            Review these instructions carefully before submitting your photos.
           </p>
-          <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+          <div data-el="photo-instructions-scroll-shell" class="hub-scroll-shell" data-scroll-overflow="false" data-scroll-bottom="true">
+            <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
+            <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Scroll Down ↓</div>
+          </div>
           <div class="row">
             <button data-el="photo-instructions-continue" class="btn-primary hidden" type="button">Continue to Submission</button>
             <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
@@ -127,7 +143,9 @@ function createShell(root, inline) {
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsScrollShell: root.querySelector('[data-el="photo-instructions-scroll-shell"]'),
     photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
+    photoInstructionsScrollHint: root.querySelector('[data-el="photo-instructions-scroll-hint"]'),
     photoInstructionsContinue: root.querySelector('[data-el="photo-instructions-continue"]'),
     photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
   };
@@ -384,8 +402,89 @@ function renderInstructionTemplate(value, state) {
   });
 }
 
+function isAndroidWebViewClient() {
+  const userAgent = String(navigator.userAgent || '');
+  return /android/i.test(userAgent) && (/;\s*wv\)/i.test(userAgent) || /version\/4\.0/i.test(userAgent));
+}
+
+function forceExitExpandedView(event) {
+  if (!(event instanceof MouseEvent) || !event.isTrusted || event.type !== 'click') {
+    throw new Error('Back to Hub requires a trusted click event.');
+  }
+  emitEffect({
+    type: EffectType.EFFECT_WEB_VIEW,
+    immersiveMode: {
+      immersiveMode: WebViewImmersiveMode.INLINE_MODE,
+    },
+  });
+}
+
+function buildInternalNavigationUrl(targetPath) {
+  const currentUrl = new URL(window.location.href);
+  const targetUrl = new URL(String(targetPath || './hub.html'), currentUrl);
+  const mergedParams = new URLSearchParams(currentUrl.search);
+  for (const [key, value] of new URLSearchParams(targetUrl.search)) {
+    mergedParams.set(key, value);
+  }
+  targetUrl.search = mergedParams.toString();
+  return targetUrl.toString();
+}
+
+function normalizeStorageKeyPart(value, fallback) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || fallback;
+}
+
+function persistPhotoInstructionsLaunchMode(mode) {
+  try {
+    window.localStorage.setItem(
+      PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY,
+      JSON.stringify({
+        mode: mode === 'submit' ? 'submit' : 'view',
+        recordedAt: Date.now(),
+      })
+    );
+  } catch (_error) {
+    // Best effort only. If storage is unavailable, the dedicated entry defaults to view mode.
+  }
+}
+
+export function consumePhotoInstructionsLaunchMode() {
+  let parsed = null;
+  try {
+    const raw = window.localStorage.getItem(PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY);
+    if (!raw) {
+      return 'view';
+    }
+    window.localStorage.removeItem(PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY);
+    parsed = JSON.parse(raw);
+  } catch (_error) {
+    try {
+      window.localStorage.removeItem(PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY);
+    } catch (_removeError) {
+      // Ignore cleanup failures.
+    }
+    return 'view';
+  }
+
+  const recordedAt = Number(parsed?.recordedAt || 0);
+  if (!recordedAt || Math.abs(Date.now() - recordedAt) > PHOTO_INSTRUCTIONS_LAUNCH_STATE_TTL_MS) {
+    return 'view';
+  }
+  return parsed?.mode === 'submit' ? 'submit' : 'view';
+}
+
 export function mountHub(options = {}) {
-  const { rootId = 'app-root', inline = false } = options;
+  const {
+    rootId = 'app-root',
+    inline = false,
+    photoInstructionsOnly = false,
+    photoInstructionsLaunchMode = 'view',
+  } = options;
   const root = document.getElementById(rootId);
   if (!root) {
     return;
@@ -402,12 +501,14 @@ export function mountHub(options = {}) {
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let photoInstructionsOnlyHandled = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const legalLinks = [
     { label: 'Terms and Conditions', url: normalizeExternalUrl(TERMS_AND_CONDITIONS_URL) },
     { label: 'Privacy Policy', url: normalizeExternalUrl(PRIVACY_POLICY_URL) },
     ...(howToUseUrl ? [{ label: 'How to use this app', url: howToUseUrl }] : []),
   ];
+  const submitWarningLinks = legalLinks.filter((item) => item.label !== 'How to use this app');
 
   if (refs.brandLogo) {
     refs.brandLogo.src = brandLogoUrl;
@@ -443,7 +544,7 @@ export function mountHub(options = {}) {
 
   if (refs.submitWarningLinks) {
     refs.submitWarningLinks.classList.remove('hidden');
-    for (const item of legalLinks) {
+    for (const item of submitWarningLinks) {
       refs.submitWarningLinks.appendChild(createExternalLink(item));
     }
   }
@@ -465,6 +566,116 @@ export function mountHub(options = {}) {
       navigateTo(url);
     });
   }
+
+  function buildPhotoInstructionsReadStateKey() {
+    return `${PHOTO_INSTRUCTIONS_READ_STATE_PREFIX}${normalizeStorageKeyPart(
+      hubState?.subredditName,
+      'unknown-subreddit'
+    )}:${normalizeStorageKeyPart(hubState?.viewerUsername, 'unknown-user')}`;
+  }
+
+  function hasRecentPhotoInstructionsRead() {
+    if (!hubState?.viewerUsername || !hubState?.subredditName) {
+      return false;
+    }
+    const storageKey = buildPhotoInstructionsReadStateKey();
+    let parsed = null;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        return false;
+      }
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch (_removeError) {
+        // Ignore cleanup failures.
+      }
+      return false;
+    }
+
+    const acknowledgedAt = Number(parsed?.acknowledgedAt || 0);
+    if (!acknowledgedAt || Date.now() - acknowledgedAt > PHOTO_INSTRUCTIONS_READ_TTL_MS) {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch (_removeError) {
+        // Ignore cleanup failures.
+      }
+      return false;
+    }
+    return true;
+  }
+
+  function markPhotoInstructionsRead() {
+    if (!hubState?.viewerUsername || !hubState?.subredditName) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        buildPhotoInstructionsReadStateKey(),
+        JSON.stringify({
+          acknowledgedAt: Date.now(),
+        })
+      );
+    } catch (_error) {
+      // Best effort only.
+    }
+  }
+
+  function shouldUseAndroidPhotoInstructionsStep() {
+    return photoInstructionsOnly || isAndroidWebViewClient();
+  }
+
+  function setPhotoInstructionsPresentation(isOpen) {
+    const useAndroidPhotoInstructionsStep = shouldUseAndroidPhotoInstructionsStep();
+    if (refs.photoInstructionsModal) {
+      refs.photoInstructionsModal.classList.toggle('hub-photo-instructions-step', useAndroidPhotoInstructionsStep);
+    }
+    document.body.classList.toggle(
+      'hub-photo-instructions-step-open',
+      useAndroidPhotoInstructionsStep && isOpen
+    );
+  }
+
+  function updatePhotoInstructionsScrollAffordance() {
+    if (!refs.photoInstructionsBody || !refs.photoInstructionsScrollShell) {
+      return;
+    }
+    if (shouldUseAndroidPhotoInstructionsStep()) {
+      refs.photoInstructionsScrollShell.dataset.scrollOverflow = 'false';
+      refs.photoInstructionsScrollShell.dataset.scrollBottom = 'true';
+      if (refs.photoInstructionsScrollHint) {
+        refs.photoInstructionsScrollHint.classList.add('hidden');
+      }
+      return;
+    }
+    const overflow = refs.photoInstructionsBody.scrollHeight - refs.photoInstructionsBody.clientHeight > 8;
+    const atBottom =
+      refs.photoInstructionsBody.scrollTop + refs.photoInstructionsBody.clientHeight >=
+      refs.photoInstructionsBody.scrollHeight - 6;
+    const nearTop = refs.photoInstructionsBody.scrollTop <= 10;
+    refs.photoInstructionsScrollShell.dataset.scrollOverflow = overflow ? 'true' : 'false';
+    refs.photoInstructionsScrollShell.dataset.scrollBottom = atBottom ? 'true' : 'false';
+    if (refs.photoInstructionsScrollHint) {
+      refs.photoInstructionsScrollHint.classList.toggle(
+        'hidden',
+        !overflow || !nearTop
+      );
+    }
+  }
+
+  if (refs.photoInstructionsBody) {
+    refs.photoInstructionsBody.addEventListener('scroll', () => {
+      updatePhotoInstructionsScrollAffordance();
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    if (refs.photoInstructionsModal && !refs.photoInstructionsModal.classList.contains('hidden')) {
+      updatePhotoInstructionsScrollAffordance();
+    }
+  });
 
   function setBusy(next) {
     isBusy = Boolean(next);
@@ -598,7 +809,7 @@ export function mountHub(options = {}) {
     }
   }
 
-  async function openSubmitForm() {
+  async function openSubmitForm(triggerEvent = null) {
     if (!hubForms?.submit) {
       return;
     }
@@ -606,9 +817,26 @@ export function mountHub(options = {}) {
       hubState?.config?.showPhotoInstructionsBeforeSubmit && String(hubState?.config?.photoInstructions || '').trim()
     );
     if (shouldShowPhotoInstructionsFirst) {
-      const continueToSubmission = await requestPhotoInstructionsReview({ requireContinue: true });
-      if (!continueToSubmission) {
-        return;
+      if (shouldUseAndroidPhotoInstructionsStep() && !photoInstructionsOnly) {
+        if (!hasRecentPhotoInstructionsRead()) {
+          markPhotoInstructionsRead();
+          persistPhotoInstructionsLaunchMode('submit');
+          if (inline && triggerEvent instanceof MouseEvent) {
+            try {
+              requestExpandedMode(triggerEvent, 'photoInstructions');
+              return;
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : String(error), 'error');
+            }
+          }
+          window.location.replace(buildInternalNavigationUrl('./photo-instructions.html'));
+          return;
+        }
+      } else {
+        const continueToSubmission = await requestPhotoInstructionsReview({ requireContinue: true });
+        if (!continueToSubmission) {
+          return;
+        }
       }
     }
     const acknowledgements = await requestSubmitAcknowledgements();
@@ -691,7 +919,7 @@ export function mountHub(options = {}) {
   }
 
   function requestPhotoInstructionsReview(options = {}) {
-    const { requireContinue = false } = options;
+    const { requireContinue = false, dedicatedView = false } = options;
     return new Promise((resolve) => {
       if (
         !refs.photoInstructionsModal ||
@@ -706,26 +934,60 @@ export function mountHub(options = {}) {
       refs.photoInstructionsBody.innerHTML = renderMarkdown(
         renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
       );
+      refs.photoInstructionsBody.scrollTop = 0;
+      refs.photoInstructionsModal.scrollTop = 0;
+      const hideCloseButton = dedicatedView && requireContinue;
       refs.photoInstructionsContinue.classList.toggle('hidden', !requireContinue);
+      refs.photoInstructionsClose.classList.toggle('hidden', hideCloseButton);
+      refs.photoInstructionsClose.textContent = dedicatedView ? 'Back to Hub' : 'Close';
+      setPhotoInstructionsPresentation(true);
 
-      const close = (result) => {
+      const close = (result, event = null) => {
+        if (dedicatedView && event instanceof MouseEvent) {
+          try {
+            exitExpandedMode(event);
+            resolve(result);
+            return;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.toLowerCase().includes('already inlined')) {
+              showToast(message, 'error');
+            }
+            try {
+              forceExitExpandedView(event);
+              resolve(result);
+              return;
+            } catch (fallbackError) {
+              showToast(fallbackError instanceof Error ? fallbackError.message : String(fallbackError), 'error');
+            }
+          }
+        }
         refs.photoInstructionsModal.classList.add('hidden');
+        setPhotoInstructionsPresentation(false);
         refs.photoInstructionsClose.removeEventListener('click', onClose);
         refs.photoInstructionsContinue.removeEventListener('click', onContinue);
         refs.photoInstructionsModal.removeEventListener('click', onBackdrop);
         refs.photoInstructionsContinue.classList.add('hidden');
+        refs.photoInstructionsClose.classList.remove('hidden');
+        refs.photoInstructionsClose.textContent = 'Close';
+        if (dedicatedView) {
+          window.location.replace(buildInternalNavigationUrl('./hub.html'));
+        }
         resolve(result);
       };
 
-      const onClose = () => {
-        close(requireContinue ? false : true);
+      const onClose = (event) => {
+        close(requireContinue ? false : true, event);
       };
 
-      const onContinue = () => {
-        close(true);
+      const onContinue = (event) => {
+        close(true, event);
       };
 
       const onBackdrop = (event) => {
+        if (shouldUseAndroidPhotoInstructionsStep()) {
+          return;
+        }
         if (event.target === refs.photoInstructionsModal) {
           close(requireContinue ? false : true);
         }
@@ -735,10 +997,29 @@ export function mountHub(options = {}) {
       refs.photoInstructionsContinue.addEventListener('click', onContinue);
       refs.photoInstructionsModal.addEventListener('click', onBackdrop);
       refs.photoInstructionsModal.classList.remove('hidden');
+      // Wait until the modal is visible so overflow measurements reflect the final layout.
+      window.requestAnimationFrame(() => {
+        updatePhotoInstructionsScrollAffordance();
+      });
     });
   }
 
-  function openPhotoInstructionsModal() {
+  function openPhotoInstructionsModal(event) {
+    if (shouldUseAndroidPhotoInstructionsStep() && !photoInstructionsOnly) {
+      persistPhotoInstructionsLaunchMode('view');
+      if (inline) {
+        try {
+          if (event instanceof MouseEvent) {
+            requestExpandedMode(event, 'photoInstructions');
+            return;
+          }
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+        }
+      }
+      window.location.replace(buildInternalNavigationUrl('./photo-instructions.html'));
+      return;
+    }
     void requestPhotoInstructionsReview();
   }
 
@@ -769,7 +1050,7 @@ export function mountHub(options = {}) {
       statusText = 'Pending Review';
       statusClass = 'status-warning';
     } else if (state.userLatest?.status === 'denied') {
-      statusText = 'Denied - Resubmit';
+      statusText = 'Denied';
       statusClass = 'status-danger';
     } else if (state.userLatest?.status === 'removed') {
       statusText = 'Verification Removed';
@@ -815,6 +1096,11 @@ export function mountHub(options = {}) {
       if (state.userLatest.removedAt) {
         infoText = `Removed ${formatTimestamp(state.userLatest.removedAt)}.`;
       }
+    } else if (state.requiresInitialSetup) {
+      commandTitle = 'Setup required';
+      infoText = state.canReview
+        ? 'Setup is required. Open the Mod Panel > Settings and set a flair template ID to get started. If you do not see the Settings tab in the mod panel, ask a moderator with \"config\" permissions to complete setup.'
+        : 'Verification setup is still in progress. Please check back later.';
     }
 
     refs.commandTitle.textContent = commandTitle;
@@ -830,17 +1116,18 @@ export function mountHub(options = {}) {
     if (
       !state.viewerVerifiedByFlair &&
       !isRestricted &&
+      !state.requiresInitialSetup &&
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
       refs.actionRow.appendChild(
-        makeButton('Photo Instructions', 'btn-secondary', () => {
-          openPhotoInstructionsModal();
+        makeButton('Photo Requirements', 'btn-secondary', (event) => {
+          openPhotoInstructionsModal(event);
         })
       );
       refs.actionRow.appendChild(
-        makeButton(submitLabel, 'btn-primary', () => {
-          void openSubmitForm();
+        makeButton(submitLabel, 'btn-primary', (event) => {
+          void openSubmitForm(event);
         })
       );
     }
@@ -881,8 +1168,17 @@ export function mountHub(options = {}) {
     modPanelPath = typeof payload.modPanelPath === 'string' && payload.modPanelPath ? payload.modPanelPath : modPanelPath;
     if (hubState) {
       refs.loadingScreen.classList.add('hidden');
-      refs.mainContent.classList.remove('hidden');
+      if (!photoInstructionsOnly) {
+        refs.mainContent.classList.remove('hidden');
+      }
       renderState(hubState);
+      if (photoInstructionsOnly && !photoInstructionsOnlyHandled) {
+        photoInstructionsOnlyHandled = true;
+        void requestPhotoInstructionsReview({
+          dedicatedView: true,
+          requireContinue: photoInstructionsLaunchMode === 'submit',
+        });
+      }
     }
   }
 
@@ -945,7 +1241,7 @@ export function mountHub(options = {}) {
         showToast(error instanceof Error ? error.message : String(error), 'error');
       }
     }
-    window.location.assign(modPanelPath || './mod-panel.html');
+    window.location.replace(buildInternalNavigationUrl(modPanelPath || './mod-panel.html'));
   });
 
   scheduleAutoRefresh();
