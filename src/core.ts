@@ -425,6 +425,15 @@ type ModPanelStatePayload = {
   config: RuntimeConfig;
   resolvedTheme: ThemePalette;
   themePresets: Record<ThemePresetName, ThemePalette>;
+  updateNotice?: UpdateNoticeState | null;
+};
+
+type UpdateNoticeState = {
+  targetVersion: string;
+  critical: boolean;
+  title: string | null;
+  notes: string | null;
+  linkUrl: string | null;
 };
 
 type PublicHubConfig = {
@@ -452,6 +461,14 @@ type HubStatePayload = {
   themePresets: Record<ThemePresetName, ThemePalette>;
 };
 
+type ReleaseMetadata = {
+  version: string;
+  critical: boolean;
+  title: string | null;
+  notes: string | null;
+  linkUrl: string | null;
+};
+
 type SubmitVerificationResult = {
   pendingModmail: ModmailStepResult;
 };
@@ -469,6 +486,7 @@ const VALIDATION_BATCH_SIZE = 50;
 const NON_APPROVED_VALIDATION_BATCH_SIZE = 25;
 const NON_APPROVED_VALIDATION_SCAN_MULTIPLIER = 4;
 const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
+const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
 const APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER = 4;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const HISTORY_RETENTION_DAYS = 45;
@@ -484,6 +502,11 @@ const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabl
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
+const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
+const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
+const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
+const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
+const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -980,6 +1003,160 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     isResubmission: Boolean(normalizedRecord.isResubmission),
     accountDetails: normalizedRecord.accountDetails ?? null,
   };
+}
+
+function normalizeUpdateNoticeText(value: unknown): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized ? normalized : null;
+}
+
+function normalizeUpdateNoticeUrl(value: unknown): string | null {
+  const normalized = normalizeUpdateNoticeText(value);
+  if (!normalized) {
+    return null;
+  }
+  try {
+    const parsed = new URL(normalized);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeReleaseSeverity(value: unknown): 'critical' | 'normal' | null {
+  const normalized = normalizeUpdateNoticeText(value)?.toLowerCase() ?? null;
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'critical') {
+    return 'critical';
+  }
+  if (normalized === 'normal') {
+    return 'normal';
+  }
+  return null;
+}
+
+type ParsedVersion = {
+  major: number;
+  minor: number;
+  patch: number;
+  playtestRevision: number;
+  normalized: string;
+};
+
+function parseVersion(value: unknown): ParsedVersion | null {
+  const normalized = typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
+  if (!normalized) {
+    return null;
+  }
+  const parts = normalized.split('.');
+  if (parts.length !== 3 && parts.length !== 4) {
+    return null;
+  }
+  if (!parts.every((part) => /^\d+$/.test(part))) {
+    return null;
+  }
+  const [major, minor, patch, playtestRevision = 0] = parts.map((part) => Number(part));
+  if (![major, minor, patch, playtestRevision].every((part) => Number.isSafeInteger(part) && part >= 0)) {
+    return null;
+  }
+  return {
+    major,
+    minor,
+    patch,
+    playtestRevision,
+    normalized: parts.length === 4 ? `${major}.${minor}.${patch}.${playtestRevision}` : `${major}.${minor}.${patch}`,
+  };
+}
+
+function compareVersions(left: ParsedVersion, right: ParsedVersion): number {
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+  if (left.patch !== right.patch) {
+    return left.patch - right.patch;
+  }
+  return left.playtestRevision - right.playtestRevision;
+}
+
+async function readLatestReleaseMetadata(context: Pick<Devvit.Context, 'settings'>): Promise<ReleaseMetadata | null> {
+  const [rawVersion, rawSeverity, rawTitle, rawNotes, rawLink] = await Promise.all([
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_VERSION),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_SEVERITY),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_TITLE),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_NOTES),
+    context.settings.get<string>(GLOBAL_SETTING_LATEST_RELEASE_LINK),
+  ]);
+  const parsedVersion = parseVersion(rawVersion);
+  if (!parsedVersion) {
+    return null;
+  }
+  const normalizedSeverity = normalizeReleaseSeverity(rawSeverity);
+  return {
+    version: parsedVersion.normalized,
+    critical: normalizedSeverity === 'critical',
+    title: normalizeUpdateNoticeText(rawTitle),
+    notes: normalizeUpdateNoticeText(rawNotes),
+    linkUrl: normalizeUpdateNoticeUrl(rawLink),
+  };
+}
+
+async function buildModeratorUpdateNotice(
+  context: Pick<Devvit.Context, 'settings' | 'redis'> & { subredditId?: string | null; appVersion?: string | null },
+  moderator: string
+): Promise<UpdateNoticeState | null> {
+  try {
+    const installedVersion = parseVersion(context.appVersion);
+    const latestRelease = await readLatestReleaseMetadata(context);
+    const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+    if (!installedVersion || !latestRelease || !subredditId) {
+      return null;
+    }
+    const latestVersion = parseVersion(latestRelease.version);
+    if (!latestVersion || compareVersions(latestVersion, installedVersion) <= 0) {
+      return null;
+    }
+    const dismissalKey = updateNoticeDismissalKey(subredditId, moderator, latestRelease.version);
+    const dismissedAt = (await context.redis.get(dismissalKey)) ?? null;
+    if (!latestRelease.critical) {
+      if (dismissedAt) {
+        return null;
+      }
+    }
+    return {
+      targetVersion: latestRelease.version,
+      critical: latestRelease.critical,
+      title: latestRelease.title,
+      notes: latestRelease.notes,
+      linkUrl: latestRelease.linkUrl,
+    };
+  } catch (error) {
+    console.log(`Update notice lookup failed: ${errorText(error)}`);
+    return null;
+  }
+}
+
+async function dismissModeratorUpdateNotice(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  moderator: string,
+  targetVersion: string
+): Promise<void> {
+  const parsedVersion = parseVersion(targetVersion);
+  const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+  if (!parsedVersion || !subredditId) {
+    throw new Error('Missing update notice version.');
+  }
+  await context.redis.set(
+    updateNoticeDismissalKey(subredditId, moderator, parsedVersion.normalized),
+    new Date().toISOString(),
+    {
+      expiration: new Date(Date.now() + UPDATE_NOTICE_DISMISS_TTL_DAYS * MILLIS_PER_DAY),
+    }
+  );
 }
 
 function normalizeOptionalIsoTimestamp(value: unknown): string | null {
@@ -5391,6 +5568,13 @@ function moderatorLookupLogCooldownKey(subredditId: string, scope: string, usern
   return `${subredditScopePrefix(subredditId)}:moderator:lookup-log:${scope}:${normalizeUsername(username) || 'unknown'}`;
 }
 
+function updateNoticeDismissalKey(subredditId: string, moderator: string, targetVersion: string): string {
+  const normalizedVersion = parseVersion(targetVersion)?.normalized ?? targetVersion.trim().toLowerCase();
+  return `${subredditScopePrefix(subredditId)}:moderator:update-dismissed:${normalizeUsername(
+    moderator
+  )}:${normalizedVersion}`;
+}
+
 function sanitizeSubredditId(input: string): string {
   return input.trim().toLowerCase();
 }
@@ -6686,6 +6870,8 @@ export {
   resolveThemePalette,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  buildModeratorUpdateNotice,
+  dismissModeratorUpdateNotice,
   normalizeSubmittedPhotoUrl,
   toPublicHubConfig,
   releaseRedisLockIfOwned,
@@ -6711,4 +6897,5 @@ export type {
   SubmitVerificationValues,
   ThemePalette,
   ThemePresetName,
+  UpdateNoticeState,
 };

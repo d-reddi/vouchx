@@ -1,5 +1,5 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
-import { exitExpandedMode, getWebViewMode, navigateTo, showToast as devvitShowToast } from '@devvit/web/client';
+import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL } from './app-config.js';
 
 (function () {
@@ -24,6 +24,14 @@ import { BUG_REPORT_URL } from './app-config.js';
   const heroSubreddit = document.getElementById('hero-subreddit');
   const heroQueueStatus = document.getElementById('hero-queue-status');
   const heroUpdated = document.getElementById('hero-updated');
+  const updateNotice = document.getElementById('update-notice');
+  const updateNoticeKicker = document.getElementById('update-notice-kicker');
+  const updateNoticeTitle = document.getElementById('update-notice-title');
+  const updateNoticeCopy = document.getElementById('update-notice-copy');
+  const updateNoticeNotes = document.getElementById('update-notice-notes');
+  const updateNoticeOpenAppBtn = document.getElementById('update-notice-open-app-btn');
+  const updateNoticeReleaseLinkBtn = document.getElementById('update-notice-release-link-btn');
+  const updateNoticeDismissBtn = document.getElementById('update-notice-dismiss-btn');
   const pendingFlairWarning = document.getElementById('pending-flair-warning');
   const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
   const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
@@ -183,6 +191,7 @@ import { BUG_REPORT_URL } from './app-config.js';
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
   let flairTemplateValidationOverride = null;
+  const hiddenCriticalUpdateNoticeKeys = new Set();
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
@@ -411,6 +420,60 @@ import { BUG_REPORT_URL } from './app-config.js';
     return `https://developers.reddit.com/r/${encodeURIComponent(subredditName)}/apps/vouchx`;
   }
 
+  function getUpdateNoticeState() {
+    if (!state || !state.updateNotice || typeof state.updateNotice !== 'object') {
+      return null;
+    }
+    const targetVersion = String(state.updateNotice.targetVersion || '').trim();
+    if (!targetVersion) {
+      return null;
+    }
+    return {
+      targetVersion,
+      critical: state.updateNotice.critical === true,
+      title: String(state.updateNotice.title || '').trim(),
+      notes: decodeUpdateNoticeNotes(state.updateNotice.notes || ''),
+      linkUrl: normalizeExternalUrl(state.updateNotice.linkUrl || ''),
+    };
+  }
+
+  function decodeUpdateNoticeNotes(value) {
+    return String(value || '')
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\n')
+      .trim();
+  }
+
+  function updateNoticeDismissKey(notice) {
+    if (!notice || !notice.targetVersion) {
+      return '';
+    }
+    const subreddit = normalizeSubredditName(state && state.subredditName ? state.subredditName : themeSubredditScope)
+      .trim()
+      .toLowerCase() || 'unknown';
+    const viewer = String(state && state.viewerUsername ? state.viewerUsername : 'unknown')
+      .trim()
+      .toLowerCase() || 'unknown';
+    return `${subreddit}:${viewer}:${notice.targetVersion}`;
+  }
+
+  function isCriticalUpdateNoticeDismissedForSession(notice) {
+    if (!notice || !notice.critical) {
+      return false;
+    }
+    const key = updateNoticeDismissKey(notice);
+    return key ? hiddenCriticalUpdateNoticeKeys.has(key) : false;
+  }
+
+  function dismissCriticalUpdateNoticeForSession(notice) {
+    const key = updateNoticeDismissKey(notice);
+    if (!key) {
+      return;
+    }
+    hiddenCriticalUpdateNoticeKeys.add(key);
+  }
+
   function getConfiguredDenyReasons() {
     if (!state || !state.config || !Array.isArray(state.config.denyReasons)) {
       return [];
@@ -481,6 +544,56 @@ import { BUG_REPORT_URL } from './app-config.js';
     pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
     if (pendingFlairWarningSettingsBtn) {
       pendingFlairWarningSettingsBtn.classList.toggle('hidden', !shouldShow || !canAccessSettingsTab());
+    }
+  }
+
+  function renderUpdateNotice() {
+    if (!updateNotice || !updateNoticeTitle || !updateNoticeCopy) {
+      return;
+    }
+    const notice = getUpdateNoticeState();
+    const appPageUrl = buildInstallSettingsUrl();
+    const canUpdateNow = Boolean(state && state.canOpenInstallSettings === true && appPageUrl);
+    const sessionDismissed = Boolean(notice && isCriticalUpdateNoticeDismissedForSession(notice));
+    const isVisible = Boolean(notice && !sessionDismissed);
+    const isCriticalCopy = Boolean(notice && notice.critical && canUpdateNow);
+    const title = notice && notice.title ? notice.title : '';
+    const copy = notice
+      ? canUpdateNow
+        ? notice.critical
+          ? 'This is a critical fix update. This notification will continue to appear until upgraded.'
+          : 'Update to access new features and improvements.'
+        : 'Ask a moderator with all permissions to update VouchX.'
+      : '';
+
+    updateNotice.classList.toggle('hidden', !isVisible);
+    document.body.classList.toggle('update-notice-visible', isVisible);
+    if (updateNoticeKicker) {
+      updateNoticeKicker.textContent = notice
+        ? `VouchX update available (${notice.targetVersion})`
+        : 'VouchX update available';
+    }
+    updateNoticeTitle.textContent = title;
+    updateNoticeTitle.classList.toggle('hidden', !(notice && title));
+    updateNoticeCopy.textContent = copy;
+    updateNoticeCopy.classList.toggle('update-notice-copy-critical', isCriticalCopy);
+
+    if (updateNoticeNotes) {
+      updateNoticeNotes.textContent = notice && notice.notes ? `Release notes:\n${notice.notes}` : '';
+      updateNoticeNotes.classList.toggle('hidden', !(notice && notice.notes));
+    }
+
+    if (updateNoticeOpenAppBtn) {
+      updateNoticeOpenAppBtn.classList.toggle('hidden', !(notice && canUpdateNow));
+    }
+
+    if (updateNoticeReleaseLinkBtn) {
+      updateNoticeReleaseLinkBtn.classList.toggle('hidden', !(notice && notice.linkUrl));
+    }
+
+    if (updateNoticeDismissBtn) {
+      updateNoticeDismissBtn.classList.toggle('hidden', !notice || sessionDismissed);
+      updateNoticeDismissBtn.disabled = isBusy;
     }
   }
 
@@ -882,6 +995,14 @@ import { BUG_REPORT_URL } from './app-config.js';
         return;
       }
 
+      if (message.type === 'dismissUpdateNotice') {
+        const payload = await requestJson('/api/mod/update-notice/dismiss', {
+          targetVersion: message.targetVersion,
+        });
+        applyApiState(payload);
+        return;
+      }
+
       if (message.type === 'approve') {
         applyApiState(await requestJson('/api/mod/approve', { verificationId: message.verificationId }));
         return;
@@ -1027,10 +1148,6 @@ import { BUG_REPORT_URL } from './app-config.js';
   }
 
   function showToast(text, tone) {
-    devvitShowToast({
-      text,
-      appearance: tone === 'error' ? 'neutral' : tone === 'success' ? 'success' : 'neutral',
-    });
     toastEl.textContent = text;
     toastEl.classList.remove('hidden', 'toast-success', 'toast-error');
     if (tone === 'success') {
@@ -2392,6 +2509,7 @@ import { BUG_REPORT_URL } from './app-config.js';
     }
     renderPrimaryTabs();
     updateHeroMeta();
+    renderUpdateNotice();
     renderPendingFlairWarning();
     renderPending();
     renderBlocked();
@@ -2865,6 +2983,60 @@ import { BUG_REPORT_URL } from './app-config.js';
         return;
       }
       post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (updateNoticeOpenAppBtn) {
+    updateNoticeOpenAppBtn.addEventListener('click', () => {
+      if (!(state && state.canOpenInstallSettings === true)) {
+        showToast('Ask a moderator with all permissions to update VouchX.', 'info');
+        return;
+      }
+      const url = buildInstallSettingsUrl();
+      if (!url) {
+        showToast('Unable to resolve the app page URL.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url });
+    });
+  }
+
+  if (updateNoticeReleaseLinkBtn) {
+    updateNoticeReleaseLinkBtn.addEventListener('click', () => {
+      const notice = getUpdateNoticeState();
+      if (!notice || !notice.linkUrl) {
+        showToast('Release notes are not configured for this update.', 'error');
+        return;
+      }
+      post({ type: 'openExternalUrl', url: notice.linkUrl });
+    });
+  }
+
+  if (updateNoticeDismissBtn) {
+    updateNoticeDismissBtn.addEventListener('click', () => {
+      const notice = getUpdateNoticeState();
+      if (!notice) {
+        return;
+      }
+      if (notice.critical) {
+        setBusy(true);
+        void requestJson('/api/mod/update-notice/dismiss', {
+          targetVersion: notice.targetVersion,
+        })
+          .then(() => {
+            dismissCriticalUpdateNoticeForSession(notice);
+            renderUpdateNotice();
+            showToast("This is a critical update. We'll notify you again when the panel reloads.", 'info');
+          })
+          .catch((error) => {
+            showToast(error instanceof Error ? error.message : String(error), 'error');
+          })
+          .finally(() => {
+            setBusy(false);
+          });
+        return;
+      }
+      postWithBusy({ type: 'dismissUpdateNotice', targetVersion: notice.targetVersion });
     });
   }
 

@@ -43,6 +43,38 @@
     "media": true
   },
   "settings": {
+    "global": {
+      "latest_release_version": {
+        "type": "string",
+        "label": "Latest release version",
+        "helpText": "Set this after publishing a new VouchX release so older installations can show an in-app update notice to moderators.",
+        "defaultValue": ""
+      },
+      "latest_release_title": {
+        "type": "string",
+        "label": "Latest release title",
+        "helpText": "Optional short heading shown in the moderator panel update notice.",
+        "defaultValue": ""
+      },
+      "latest_release_notes": {
+        "type": "string",
+        "label": "Latest release notes",
+        "helpText": "Optional short summary shown to moderators when an update is available.",
+        "defaultValue": ""
+      },
+      "latest_release_link": {
+        "type": "string",
+        "label": "Latest release link",
+        "helpText": "Optional changelog or help URL shown in the moderator panel update notice.",
+        "defaultValue": ""
+      },
+      "latest_release_severity": {
+        "type": "string",
+        "label": "Latest release severity",
+        "helpText": "Set to \"critical\" to force repeated reminders, or \"normal\" for the standard 7-day dismissal behavior. Leave blank for the standard behavior.",
+        "defaultValue": ""
+      }
+    },
     "subreddit": {
       "verifications_disabled_message": {
         "type": "string",

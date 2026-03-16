@@ -37,6 +37,20 @@
         </div>
       </header>
 
+      <div id="update-notice" class="content-card panel-warning panel-warning-info hidden" role="status">
+        <div class="panel-warning-body">
+          <p id="update-notice-kicker" class="update-notice-kicker">VouchX update available</p>
+          <p id="update-notice-title" class="panel-warning-title">Update available</p>
+          <p id="update-notice-copy" class="panel-warning-copy"></p>
+          <p id="update-notice-notes" class="update-notice-notes muted small hidden"></p>
+        </div>
+        <div class="row panel-warning-actions">
+          <button id="update-notice-open-app-btn" class="btn btn-primary" type="button">Update Now</button>
+          <button id="update-notice-release-link-btn" class="btn btn-secondary hidden" type="button">Release Notes</button>
+          <button id="update-notice-dismiss-btn" class="btn btn-secondary" type="button">Later</button>
+        </div>
+      </div>
+
       <nav class="tabs primary-tabs" aria-label="Moderator navigation">
         <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>

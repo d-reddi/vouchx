@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildModeratorUpdateNotice,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
@@ -239,6 +241,44 @@ function createRedisLockContext(initialValue: string | null) {
     get currentLockValue() {
       return currentLockValue;
     },
+  };
+}
+
+function createUpdateNoticeContext(options?: {
+  appVersion?: string | null;
+  subredditId?: string;
+  settingsValues?: Record<string, string | boolean | undefined>;
+  initialDismissals?: Record<string, string>;
+}) {
+  const settingsValues = options?.settingsValues ?? {};
+  const redisStore = new Map<string, string>(Object.entries(options?.initialDismissals ?? {}));
+  const getCalls: string[] = [];
+  const setCalls: Array<[string, string, unknown?]> = [];
+
+  return {
+    context: {
+      appVersion: options?.appVersion ?? '0.0.2',
+      subredditId: options?.subredditId ?? 't5_example',
+      settings: {
+        async get(key: string) {
+          return settingsValues[key];
+        },
+      },
+      redis: {
+        async get(key: string) {
+          getCalls.push(key);
+          return redisStore.get(key) ?? null;
+        },
+        async set(key: string, value: string, options?: unknown) {
+          setCalls.push([key, value, options]);
+          redisStore.set(key, value);
+          return 'OK';
+        },
+      },
+    },
+    getCalls,
+    setCalls,
+    redisStore,
   };
 }
 
@@ -624,6 +664,139 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('buildModeratorUpdateNotice returns null when latest release metadata is missing or invalid', async () => {
+  const missingVersionContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_title: 'Release ready',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(missingVersionContext.context as never, 'mod_one'), null);
+
+  const invalidVersionContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: 'soon',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(invalidVersionContext.context as never, 'mod_one'), null);
+});
+
+test('buildModeratorUpdateNotice returns a dismissible notice when a newer release exists', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_title: 'VouchX 0.0.3 is available',
+      latest_release_notes: 'Improves moderator tooling.',
+      latest_release_link: 'https://example.com/changelog/0.0.3',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: false,
+    title: 'VouchX 0.0.3 is available',
+    notes: 'Improves moderator tooling.',
+    linkUrl: 'https://example.com/changelog/0.0.3',
+  });
+  assert.equal(updateContext.getCalls.length, 1);
+});
+
+test('buildModeratorUpdateNotice supports Devvit playtest versions when a newer release exists', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2.1',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_title: 'VouchX 0.0.3 is available',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: false,
+    title: 'VouchX 0.0.3 is available',
+    notes: null,
+    linkUrl: null,
+  });
+});
+
+test('buildModeratorUpdateNotice does not show an update when the installed Devvit playtest build is already ahead of the latest release', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2.1',
+    settingsValues: {
+      latest_release_version: '0.0.2',
+      latest_release_title: 'VouchX 0.0.2 is available',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One'), null);
+});
+
+test('buildModeratorUpdateNotice ignores Redis dismissals for critical releases', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_severity: 'critical',
+      latest_release_title: 'Critical stability update',
+    },
+    initialDismissals: {
+      'subreddit:t5_example:moderator:update-dismissed:mod_one:0.0.3': '2026-03-15T00:00:00.000Z',
+    },
+  });
+
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+
+  assert.deepEqual(notice, {
+    targetVersion: '0.0.3',
+    critical: true,
+    title: 'Critical stability update',
+    notes: null,
+    linkUrl: null,
+  });
+});
+
+test('buildModeratorUpdateNotice treats latest_release_severity normal as non-critical and respects dismissals', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+      latest_release_severity: 'normal',
+      latest_release_title: 'Standard update',
+    },
+    initialDismissals: {
+      'subreddit:t5_example:moderator:update-dismissed:mod_one:0.0.3': '2026-03-15T00:00:00.000Z',
+    },
+  });
+
+  assert.equal(await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One'), null);
+});
+
+test('dismissModeratorUpdateNotice stores a per-moderator per-version dismissal that suppresses the notice', async () => {
+  const updateContext = createUpdateNoticeContext({
+    appVersion: '0.0.2',
+    settingsValues: {
+      latest_release_version: '0.0.3',
+    },
+  });
+
+  await dismissModeratorUpdateNotice(updateContext.context as never, 'Mod_One', 'v0.0.3');
+  const notice = await buildModeratorUpdateNotice(updateContext.context as never, 'Mod_One');
+  const expirationOptions = updateContext.setCalls[0][2] as { expiration?: Date } | undefined;
+
+  assert.equal(notice, null);
+  assert.equal(updateContext.setCalls.length, 1);
+  assert.match(updateContext.setCalls[0][0], /subreddit:t5_example:moderator:update-dismissed:mod_one:0\.0\.3$/);
+  assert.ok(expirationOptions?.expiration instanceof Date);
 });
 
 test('toPublicHubConfig omits moderator-only template content', () => {
