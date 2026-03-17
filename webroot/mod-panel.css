@@ -941,7 +941,7 @@ textarea {
 }
 
 .pending-account-age-chip-warn {
-  color: #735400;
+  color: var(--text);
   background: rgba(249, 219, 110, 0.28);
   border-color: rgba(217, 174, 29, 0.38);
 }
