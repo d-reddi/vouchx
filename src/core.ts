@@ -502,11 +502,11 @@ const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabl
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
-const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
-const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
-const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
-const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
-const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
+const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'play_latest_release_version';
+const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'play_latest_release_title';
+const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'play_latest_release_notes';
+const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'play_latest_release_link';
+const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'play_latest_release_severity';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -1249,9 +1249,26 @@ function normalizeSubredditKarmaValue(value: unknown): number | null {
 }
 
 async function getStoredDenialCount(context: RedisContext, subredditId: string, username: string): Promise<number> {
-  const currentRaw = await context.redis.hGet(denialCountKey(subredditId), normalizeUsername(username));
-  const current = Number.parseInt(currentRaw ?? '0', 10);
-  return Number.isFinite(current) && current > 0 ? current : 0;
+  const lookupFields = usernameLookupFields(username);
+  if (lookupFields.length === 0) {
+    return 0;
+  }
+
+  const key = denialCountKey(subredditId);
+  const primaryField = primaryUsernameLookupField(username);
+  for (const field of lookupFields) {
+    const currentRaw = await context.redis.hGet(key, field);
+    const current = Number.parseInt(currentRaw ?? '0', 10);
+    if (!Number.isFinite(current) || current <= 0) {
+      continue;
+    }
+    if (primaryField && field !== primaryField) {
+      await context.redis.hSet(key, { [primaryField]: `${current}` });
+    }
+    return current;
+  }
+
+  return 0;
 }
 
 async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Promise<T>): Promise<T> {
@@ -1276,13 +1293,16 @@ async function collectPendingAccountDetailsSnapshot(
   username: string,
   capturedAt: string
 ): Promise<PendingAccountDetailsSnapshot> {
-  const normalizedUsername = normalizeUsername(username);
+  const normalizedUsername = normalizeUsernameStrict(username);
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
 
   const userSnapshotTask = withSingleRetry(
     `Pending account details user snapshot lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
     { accountCreatedAt: null, subredditKarma: null },
     async () => {
+      if (!normalizedUsername) {
+        return { accountCreatedAt: null, subredditKarma: null };
+      }
       const user = await context.reddit.getUserByUsername(normalizedUsername);
       if (!user) {
         return { accountCreatedAt: null, subredditKarma: null };
@@ -1314,6 +1334,9 @@ async function collectPendingAccountDetailsSnapshot(
         }) => { all: () => Promise<unknown[]> };
       };
       if (typeof redditClient.getBannedUsers !== 'function') {
+        return 'unknown';
+      }
+      if (!normalizedUsername) {
         return 'unknown';
       }
       const bannedUsers = await redditClient
@@ -1487,36 +1510,42 @@ async function onModeratorPurgeUserData(
   event: FormOnSubmitEvent<PurgeUserDataFormValues>,
   context: Devvit.Context
 ): Promise<void> {
-  const moderator = await context.reddit.getCurrentUsername();
-  if (!moderator) {
-    throw new Error('You must be logged in as a moderator.');
+  try {
+    const moderator = await context.reddit.getCurrentUsername();
+    if (!moderator) {
+      throw new Error('You must be logged in as a moderator.');
+    }
+
+    const subredditName = await getCurrentSubredditNameCompat(context);
+    const subredditId = sanitizeSubredditId(context.subredditId);
+    await assertCanReview(context, subredditName, moderator);
+
+    const confirmationText = event.values.confirmationText?.trim().toLowerCase();
+    if (confirmationText !== 'confirm') {
+      context.ui.showToast('You must type "confirm" to complete purge.');
+      return;
+    }
+
+    const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context);
+    const deletedAuditCount = await purgeAuditLogOlderThanDays(context, subredditId, purgeMinAgeDays);
+
+    const ageFilterDescription =
+      purgeMinAgeDays <= 0
+        ? 'all audit log entries'
+        : `audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} older than ${purgeMinAgeDays} days`;
+    const emptyStateDescription =
+      purgeMinAgeDays <= 0 ? 'No audit log entries found' : `No audit log entries older than ${purgeMinAgeDays} days found`;
+
+    context.ui.showToast({
+      text:
+        deletedAuditCount > 0
+          ? `Purged ${deletedAuditCount} ${ageFilterDescription} for r/${subredditName}.`
+          : `${emptyStateDescription} for r/${subredditName}.`,
+      appearance: 'success',
+    });
+  } catch (error) {
+    context.ui.showToast(`Failed to purge audit log: ${errorText(error)}`);
   }
-
-  const subredditName = await getCurrentSubredditNameCompat(context);
-  const subredditId = sanitizeSubredditId(context.subredditId);
-  await assertCanReview(context, subredditName, moderator);
-
-  const confirmationText = event.values.confirmationText?.trim().toLowerCase();
-  if (confirmationText !== 'confirm') {
-    context.ui.showToast('You must type "confirm" to complete purge.');
-    return;
-  }
-
-  const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context);
-  const deletedAuditCount = await purgeAuditLogOlderThanDays(context, subredditId, purgeMinAgeDays);
-
-  const ageFilterDescription =
-    purgeMinAgeDays <= 0 ? 'all audit log entries' : `audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} older than ${purgeMinAgeDays} days`;
-  const emptyStateDescription =
-    purgeMinAgeDays <= 0 ? 'No audit log entries found' : `No audit log entries older than ${purgeMinAgeDays} days found`;
-
-  context.ui.showToast({
-    text:
-      deletedAuditCount > 0
-        ? `Purged ${deletedAuditCount} ${ageFilterDescription} for r/${subredditName}.`
-        : `${emptyStateDescription} for r/${subredditName}.`,
-    appearance: 'success',
-  });
 }
 
 async function withdrawCurrentUserPendingVerification(context: Devvit.Context): Promise<void> {
@@ -1533,7 +1562,7 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
   }
 
   const record = await getRecord(context, subredditId, pendingId);
-  if (!record || normalizeUsername(record.username) !== normalizedUsername || record.status !== 'pending') {
+  if (!record || !usernamesEqual(record.username, normalizedUsername) || record.status !== 'pending') {
     await context.redis.del(userPendingKey(subredditId, normalizedUsername));
     throw new Error('No pending verification request found.');
   }
@@ -1834,11 +1863,20 @@ async function removeUserFlairWithFallbacks(
   const rawUsername = username.trim();
   const rawUsernameNoPrefix = rawUsername.replace(/^u\//i, '');
   const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  const strictUsername = normalizeUsernameStrict(username);
   const usernameAttempts = Array.from(
-    new Set([rawUsernameNoPrefix, rawUsername, normalizedUsername, `u/${rawUsernameNoPrefix}`, `u/${normalizedUsername}`])
+    new Set([
+      rawUsernameNoPrefix,
+      rawUsername,
+      normalizedUsername,
+      strictUsername,
+      `u/${rawUsernameNoPrefix}`,
+      normalizedUsername ? `u/${normalizedUsername}` : '',
+      strictUsername ? `u/${strictUsername}` : '',
+    ])
   ).filter((value) => value.trim());
   const errors: string[] = [];
-  const verificationUsername = normalizedUsername || rawUsernameNoPrefix;
+  const verificationUsername = strictUsername || normalizedUsername || rawUsernameNoPrefix;
 
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
@@ -1885,7 +1923,7 @@ async function isUserFlairCleared(
   username: string
 ): Promise<boolean> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  const normalizedUsername = normalizeUsernameStrict(username);
   if (!sanitizedSubreddit || !normalizedUsername) {
     return false;
   }
@@ -1923,11 +1961,11 @@ async function isUserFlairCleared(
 
 function assertClaimAllowsAction(record: VerificationRecord, moderator: string): void {
   const normalizedRecord = clearExpiredPendingClaim(record);
-  const claimedBy = normalizeUsername(normalizedRecord.claimedBy ?? '');
+  const claimedBy = normalizeUsernameForLookup(normalizedRecord.claimedBy ?? '');
   if (!claimedBy) {
     return;
   }
-  if (claimedBy !== normalizeUsername(moderator)) {
+  if (!usernamesEqual(claimedBy, moderator)) {
     throw new Error(`This request is currently claimed by u/${normalizedRecord.claimedBy}.`);
   }
 }
@@ -1941,7 +1979,7 @@ function parseTimestampMs(value: string | null | undefined): number {
 }
 
 function clearExpiredPendingClaim(record: VerificationRecord, nowMs = Date.now()): VerificationRecord {
-  const claimedBy = normalizeUsername(record.claimedBy ?? '');
+  const claimedBy = normalizeUsernameForLookup(record.claimedBy ?? '');
   const claimedAtMs = parseTimestampMs(record.claimedAt);
   const claimActive =
     Boolean(claimedBy) &&
@@ -2059,8 +2097,8 @@ async function setPendingClaimState(
     throw new Error('Verification is no longer pending.');
   }
 
-  const claimedByNormalized = normalizeUsername(record.claimedBy ?? '');
-  const moderatorNormalized = normalizeUsername(moderator);
+  const claimedByNormalized = normalizeUsernameForLookup(record.claimedBy ?? '');
+  const moderatorNormalized = normalizeUsernameForLookup(moderator);
   let updatedRecord = record;
   let changed = false;
 
@@ -2283,8 +2321,17 @@ async function applyApprovalFlairWithFallbacks(
   const rawUsername = record.username.trim();
   const rawUsernameNoPrefix = rawUsername.replace(/^u\//i, '');
   const normalizedUsername = normalizeUsername(record.username).replace(/^u\//i, '');
+  const strictUsername = normalizeUsernameStrict(record.username);
   const usernameAttempts = Array.from(
-    new Set([rawUsernameNoPrefix, rawUsername, normalizedUsername, `u/${rawUsernameNoPrefix}`, `u/${normalizedUsername}`])
+    new Set([
+      rawUsernameNoPrefix,
+      rawUsername,
+      normalizedUsername,
+      strictUsername,
+      `u/${rawUsernameNoPrefix}`,
+      normalizedUsername ? `u/${normalizedUsername}` : '',
+      strictUsername ? `u/${strictUsername}` : '',
+    ])
   ).filter((value) => value.trim());
   const configuredTemplateId = config.flairTemplateId.trim() || undefined;
   if (!configuredTemplateId) {
@@ -2952,11 +2999,19 @@ async function sendUserModmailWithFallback(
   const subject = input.subject;
   const body = input.body;
   const username = input.username;
-  const normalizedUser = normalizeUsername(username).replace(/^u\//i, '');
+  const normalizedUser = normalizeUsernameStrict(username);
+  if (!normalizedUser) {
+    return {
+      status: 'failed',
+      reason: 'Invalid modmail recipient username.',
+    };
+  }
   const eventId = input.eventId?.trim() ?? '';
   const lockKey = eventId ? modmailLockKey(subredditId, eventId) : null;
   const dedupeKey = eventId ? modmailDedupeKey(subredditId, eventId) : null;
-  const userThreadKey = modmailThreadByUserEntryKey(subredditId, normalizedUser);
+  const userThreadKeys = Array.from(
+    new Set(usernameLookupFields(username).map((field) => modmailThreadByUserEntryKey(subredditId, field)))
+  );
   const recipients = Array.from(new Set([normalizedUser, `u/${normalizedUser}`]));
   let lockAcquired = false;
 
@@ -2979,18 +3034,37 @@ async function sendUserModmailWithFallback(
 
   try {
     if (dedupeKey) {
-        const dedupeSeen = await context.redis.get(dedupeKey);
-        if (dedupeSeen) {
-        const existingConversationId = await context.redis.get(userThreadKey);
+      const dedupeSeenRaw = await context.redis.get(dedupeKey);
+      const dedupeConversationId = normalizeModmailConversationId(dedupeSeenRaw);
+      if (dedupeConversationId) {
         return {
           status: 'skipped',
           reason: 'already processed',
-          conversationId: existingConversationId ?? undefined,
+          conversationId: dedupeConversationId,
         };
+      }
+      if (dedupeSeenRaw) {
+        await context.redis.del(dedupeKey);
       }
     }
 
-    const existingConversationId = await context.redis.get(userThreadKey);
+    let existingConversationId = '';
+    const invalidThreadKeys: string[] = [];
+    for (const userThreadKey of userThreadKeys) {
+      const existingConversationIdRaw = await context.redis.get(userThreadKey);
+      const normalizedConversationId = normalizeModmailConversationId(existingConversationIdRaw);
+      if (existingConversationIdRaw && !normalizedConversationId) {
+        invalidThreadKeys.push(userThreadKey);
+        continue;
+      }
+      if (normalizedConversationId) {
+        existingConversationId = normalizedConversationId;
+        break;
+      }
+    }
+    if (invalidThreadKeys.length > 0) {
+      await context.redis.del(...invalidThreadKeys);
+    }
     if (existingConversationId) {
       try {
         try {
@@ -3014,7 +3088,9 @@ async function sendUserModmailWithFallback(
         console.log(
           `Modmail reply failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${existingConversationId}: ${errorText(error)}`
         );
-        await context.redis.del(userThreadKey);
+        if (userThreadKeys.length > 0) {
+          await context.redis.del(...userThreadKeys);
+        }
       }
     }
 
@@ -3028,11 +3104,11 @@ async function sendUserModmailWithFallback(
           to,
           isAuthorHidden: true,
         });
-        const conversationId = response.conversation.id?.trim();
+        const conversationId = normalizeModmailConversationId(response.conversation.id);
         if (!conversationId) {
           throw new Error('Modmail conversation created but no conversation ID was returned.');
         }
-        await context.redis.set(userThreadKey, conversationId);
+        await Promise.all(userThreadKeys.map((userThreadKey) => context.redis.set(userThreadKey, conversationId)));
         if (dedupeKey) {
           await context.redis.set(dedupeKey, conversationId, {
             expiration: new Date(Date.now() + MODMAIL_DEDUPE_TTL_SECONDS * 1000),
@@ -3693,7 +3769,7 @@ async function searchHistoryRecords(
 ): Promise<HistorySearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
-  const usernameFilter = query.username ? normalizeUsername(query.username) : '';
+  const usernameFilter = query.username ? normalizeUsernameForLookup(query.username) : '';
   if (usernameFilter.length > 0 && usernameFilter.length < 3) {
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
@@ -3739,7 +3815,7 @@ async function searchHistoryRecords(
       staleIds.push(recordId);
       continue;
     }
-    if (usernameFilter && !normalizeUsername(parsed.username).startsWith(usernameFilter)) {
+    if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
       continue;
     }
     items.push({
@@ -3989,8 +4065,8 @@ async function searchAuditEntries(
 ): Promise<AuditSearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
-  const usernameFilter = query.username ? normalizeUsername(query.username) : '';
-  const actorFilter = query.actor ? normalizeUsername(query.actor) : '';
+  const usernameFilter = query.username ? normalizeUsernameForLookup(query.username) : '';
+  const actorFilter = query.actor ? normalizeUsernameForLookup(query.actor) : '';
   const actionFilter = asAuditAction(query.action);
   if ((usernameFilter.length > 0 && usernameFilter.length < 3) || (actorFilter.length > 0 && actorFilter.length < 3)) {
     return { items: [], offset, hasMore: false, requestId: 0 };
@@ -4034,10 +4110,10 @@ async function searchAuditEntries(
       staleIds.push(auditId);
       continue;
     }
-    if (usernameFilter && !normalizeUsername(parsed.username).startsWith(usernameFilter)) {
+    if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
       continue;
     }
-    if (actorFilter && !normalizeUsername(parsed.actor).startsWith(actorFilter)) {
+    if (actorFilter && !normalizeUsernameForLookup(parsed.actor).startsWith(actorFilter)) {
       continue;
     }
     if (actionFilter && parsed.action !== actionFilter) {
@@ -4104,18 +4180,34 @@ async function getBlockedUser(
   const config = await getRuntimeConfig(context, subredditId);
   const normalizedUsername = normalizeUsername(username);
   const key = blockedUsersKey(subredditId);
-  const legacyUsername = `u/${normalizedUsername}`;
-  const payload = (await context.redis.hGet(key, normalizedUsername)) ?? (await context.redis.hGet(key, legacyUsername));
+  const lookupFields = usernameLookupFields(username);
+  const primaryField = primaryUsernameLookupField(username);
+  let matchedField = '';
+  let payload: string | null = null;
+  for (const field of lookupFields) {
+    payload = await context.redis.hGet(key, field);
+    if (payload) {
+      matchedField = field;
+      break;
+    }
+  }
   if (!payload) {
     return null;
   }
-  const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
+  const parsed = parseBlockedUserEntry(matchedField || normalizedUsername, payload, config.maxDenialsBeforeBlock);
   if (!parsed) {
-    await context.redis.hDel(key, [normalizedUsername, legacyUsername]);
+    if (lookupFields.length > 0) {
+      await context.redis.hDel(key, lookupFields);
+    }
     return null;
   }
-  await context.redis.hSet(key, { [normalizedUsername]: JSON.stringify(parsed) });
-  await context.redis.hDel(key, [legacyUsername]);
+  if (primaryField) {
+    await context.redis.hSet(key, { [primaryField]: JSON.stringify(parsed) });
+  }
+  const staleFields = lookupFields.filter((field) => field !== primaryField);
+  if (staleFields.length > 0) {
+    await context.redis.hDel(key, staleFields);
+  }
   return parsed;
 }
 
@@ -4144,14 +4236,20 @@ async function unblockUserForModerator(
   username: string,
   moderator: string
 ): Promise<boolean> {
-  const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  const normalizedUsername = normalizeUsernameStrict(username);
+  if (!normalizedUsername) {
+    return false;
+  }
   const blocked = await getBlockedUser(context, subredditId, normalizedUsername);
   if (!blocked) {
     return false;
   }
 
-  await context.redis.hDel(blockedUsersKey(subredditId), [normalizedUsername, `u/${normalizedUsername}`]);
-  await context.redis.hDel(denialCountKey(subredditId), [normalizedUsername, `u/${normalizedUsername}`]);
+  const lookupFields = usernameLookupFields(username);
+  if (lookupFields.length > 0) {
+    await context.redis.hDel(blockedUsersKey(subredditId), lookupFields);
+    await context.redis.hDel(denialCountKey(subredditId), lookupFields);
+  }
 
   try {
     await appendAuditLog(context, {
@@ -4176,7 +4274,7 @@ async function blockUserForModerator(
   username: string,
   moderator: string
 ): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
-  const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     throw new Error('A valid username is required.');
   }
@@ -4732,12 +4830,11 @@ async function getModeratorAccessSnapshot(
     };
   }
 
-  const normalizedUsername = normalizeUsername(username);
   const errors: string[] = [];
 
   try {
     const mods = await context.reddit.getModerators({ subredditName: sanitizedSubreddit, limit: 100 }).all();
-    if (mods.some((modUser) => normalizeUsername(modUser.username) === normalizedUsername)) {
+    if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
       await cacheModeratorRole(context, username);
       return {
         isModerator: true,
@@ -4752,7 +4849,7 @@ async function getModeratorAccessSnapshot(
     const mods = await context.reddit
       .getModerators({ subredditName: sanitizedSubreddit, username, limit: 1 })
       .all();
-    if (mods.some((modUser) => normalizeUsername(modUser.username) === normalizedUsername)) {
+    if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
       await cacheModeratorRole(context, username);
       return {
         isModerator: true,
@@ -4809,9 +4906,8 @@ async function getCurrentModeratorPermissionList(
   username: string
 ): Promise<string[]> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsername(username);
   const currentUsername = await context.reddit.getCurrentUsername();
-  if (!currentUsername || normalizeUsername(currentUsername) !== normalizedUsername) {
+  if (!currentUsername || !usernamesEqual(currentUsername, username)) {
     return [];
   }
 
@@ -5368,7 +5464,7 @@ function parseBlockedUserEntry(
     const deniedCountRaw = Number.parseInt(`${parsed.deniedCount ?? ''}`, 10);
     const deniedCount =
       Number.isFinite(deniedCountRaw) && deniedCountRaw >= 0 ? deniedCountRaw : fallbackDeniedCount;
-    const username = normalizeUsername(parsed.username ?? normalizedUsername).replace(/^u\//i, '');
+    const username = normalizeUsernameForLookup(parsed.username ?? normalizedUsername);
     if (!username) {
       return null;
     }
@@ -5611,6 +5707,76 @@ function normalizeUsername(input: string): string {
   return input.trim().replace(/^u\//i, '').toLowerCase();
 }
 
+function normalizeUsernameStrict(input: string): string {
+  let normalized = input.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  if (/^(?:https?:\/\/)?(?:www\.)?reddit\.com\//i.test(normalized)) {
+    normalized = normalized.replace(/^(?:https?:\/\/)?(?:www\.)?reddit\.com\//i, '/');
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) {
+    try {
+      const parsed = new URL(normalized);
+      const hostname = parsed.hostname.trim().toLowerCase();
+      if (hostname !== 'reddit.com' && hostname !== 'www.reddit.com') {
+        return '';
+      }
+      normalized = parsed.pathname;
+    } catch {
+      return '';
+    }
+  }
+
+  normalized = normalized.split(/[?#]/, 1)[0]?.trim() ?? '';
+  normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (normalized.includes('/')) {
+    if (!/^(?:u|user)\//i.test(normalized)) {
+      return '';
+    }
+    normalized = normalized.replace(/^(?:u|user)\//i, '');
+  }
+
+  const username = normalized.split('/').find((segment) => segment.trim())?.trim() ?? '';
+  return /^[A-Za-z0-9_-]+$/.test(username) ? username.toLowerCase() : '';
+}
+
+function normalizeUsernameForLookup(input: string): string {
+  return normalizeUsernameStrict(input) || normalizeUsername(input);
+}
+
+function primaryUsernameLookupField(input: string): string {
+  return normalizeUsernameStrict(input) || normalizeUsername(input);
+}
+
+function usernameLookupFields(input: string): string[] {
+  const compatibility = normalizeUsername(input);
+  const strict = normalizeUsernameStrict(input);
+  return Array.from(
+    new Set(
+      [
+        compatibility,
+        strict,
+        strict ? `u/${strict}` : '',
+        strict ? `/u/${strict}` : '',
+        strict ? `/user/${strict}` : '',
+        strict ? `/user/${strict}/` : '',
+        strict ? `https://www.reddit.com/user/${strict}` : '',
+        strict ? `https://www.reddit.com/user/${strict}/` : '',
+        strict ? `https://www.reddit.com/user/${strict}/about/` : '',
+      ].filter((value) => typeof value === 'string' && value.trim())
+    )
+  );
+}
+
+function normalizeModmailConversationId(value: string | null | undefined): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const normalized = value.trim();
+  return normalized;
+}
+
 function normalizeModeratorPermissions(permissions: string[]): string[] {
   return dedupeNonEmpty(permissions.map((permission) => String(permission ?? '').trim()));
 }
@@ -5811,7 +5977,7 @@ async function removeApprovedPrefixIndexEntries(
 }
 
 function maskUsernameForLog(input: string | null | undefined): string {
-  const normalized = normalizeUsername(input ?? '');
+  const normalized = normalizeUsernameForLookup(input ?? '');
   if (!normalized) {
     return '<redacted-user>';
   }
@@ -5829,7 +5995,7 @@ function normalizeUsernameKey(input: string): string {
 }
 
 function usernamesEqual(left: string, right: string): boolean {
-  return normalizeUsername(left) === normalizeUsername(right);
+  return normalizeUsernameForLookup(left) === normalizeUsernameForLookup(right);
 }
 
 function isApprovedRetentionBumpDue(record: VerificationRecord, nowMs = Date.now()): boolean {
@@ -6705,7 +6871,7 @@ async function validateVerificationUserState(
 }
 
 async function validateUsernameState(context: Pick<Devvit.Context, 'reddit'>, username: string): Promise<ValidationCheckResult> {
-  const normalizedUsername = normalizeUsername(username).replace(/^u\//i, '');
+  const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     return { outcome: 'deleted_or_suspended', reason: 'empty username' };
   }
@@ -6872,7 +7038,12 @@ export {
   collectPendingAccountDetailsSnapshot,
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
+  normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
+  normalizeUsername,
+  normalizeUsernameForLookup,
+  normalizeUsernameStrict,
+  usernameLookupFields,
   toPublicHubConfig,
   releaseRedisLockIfOwned,
   withRedisLock,
