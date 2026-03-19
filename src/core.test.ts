@@ -9,7 +9,11 @@ import {
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
+  normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
+  normalizeUsername,
+  normalizeUsernameForLookup,
+  normalizeUsernameStrict,
   parseRecord,
   releaseRedisLockIfOwned,
   toModPanelState,
@@ -20,6 +24,7 @@ import {
   validateFlairTemplateId,
   validateMaxDenialsBeforeBlockSetting,
   withRedisLock,
+  usernameLookupFields,
   type RuntimeConfig,
 } from './core.ts';
 
@@ -465,6 +470,80 @@ test('normalizeSubmittedPhotoUrl rejects non-Reddit or non-https URLs', () => {
   assert.equal(normalizeSubmittedPhotoUrl('https://example.com/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('http://i.redd.it/photo.png'), null);
   assert.equal(normalizeSubmittedPhotoUrl('javascript:alert(1)'), null);
+});
+
+test('normalizeUsername preserves legacy key-compatible normalization', () => {
+  assert.equal(normalizeUsername('Example_User'), 'example_user');
+  assert.equal(normalizeUsername('u/Example_User'), 'example_user');
+  assert.equal(normalizeUsername('/u/Example_User'), '/u/example_user');
+  assert.equal(normalizeUsername('/user/Example_User/'), '/user/example_user/');
+  assert.equal(
+    normalizeUsername('https://www.reddit.com/user/Example_User/about/'),
+    'https://www.reddit.com/user/example_user/about/'
+  );
+});
+
+test('normalizeUsername keeps malformed legacy values stable for lookup keys', () => {
+  assert.equal(normalizeUsername(''), '');
+  assert.equal(normalizeUsername('   '), '');
+  assert.equal(normalizeUsername('r/example'), 'r/example');
+  assert.equal(normalizeUsername('https://www.reddit.com/message/compose'), 'https://www.reddit.com/message/compose');
+});
+
+test('normalizeUsernameStrict canonicalizes supported user identifiers', () => {
+  assert.equal(normalizeUsernameStrict('Example_User'), 'example_user');
+  assert.equal(normalizeUsernameStrict('u/Example_User'), 'example_user');
+  assert.equal(normalizeUsernameStrict('/u/Example_User'), 'example_user');
+  assert.equal(normalizeUsernameStrict('/user/Example_User/'), 'example_user');
+  assert.equal(normalizeUsernameStrict('https://www.reddit.com/user/Example_User/about/'), 'example_user');
+});
+
+test('normalizeUsernameStrict rejects malformed non-user inputs', () => {
+  assert.equal(normalizeUsernameStrict(''), '');
+  assert.equal(normalizeUsernameStrict('   '), '');
+  assert.equal(normalizeUsernameStrict('https://www.reddit.com/message/compose'), '');
+  assert.equal(normalizeUsernameStrict('https://example.com/not-a-user'), '');
+});
+
+test('normalizeUsernameForLookup canonicalizes known user formats while preserving legacy malformed values', () => {
+  assert.equal(normalizeUsernameForLookup('Example_User'), 'example_user');
+  assert.equal(normalizeUsernameForLookup('u/Example_User'), 'example_user');
+  assert.equal(normalizeUsernameForLookup('/u/Example_User'), 'example_user');
+  assert.equal(normalizeUsernameForLookup('/user/Example_User/'), 'example_user');
+  assert.equal(normalizeUsernameForLookup('https://www.reddit.com/user/Example_User/about/'), 'example_user');
+  assert.equal(normalizeUsernameForLookup('https://www.reddit.com/message/compose'), 'https://www.reddit.com/message/compose');
+});
+
+test('legacy stored usernames remain findable through lookup normalization', () => {
+  const legacyStoredProfileUrl = 'https://www.reddit.com/user/Example_User/about/';
+  assert.equal(normalizeUsername(legacyStoredProfileUrl), 'https://www.reddit.com/user/example_user/about/');
+  assert.equal(normalizeUsernameForLookup(legacyStoredProfileUrl), 'example_user');
+  assert.equal(normalizeUsernameForLookup('Example_User'), 'example_user');
+});
+
+test('usernameLookupFields includes canonical and common legacy aliases', () => {
+  assert.deepEqual(usernameLookupFields('Example_User'), [
+    'example_user',
+    'u/example_user',
+    '/u/example_user',
+    '/user/example_user',
+    '/user/example_user/',
+    'https://www.reddit.com/user/example_user',
+    'https://www.reddit.com/user/example_user/',
+    'https://www.reddit.com/user/example_user/about/',
+  ]);
+});
+
+test('normalizeModmailConversationId preserves non-numeric Devvit conversation IDs', () => {
+  assert.equal(normalizeModmailConversationId('39to20'), '39to20');
+  assert.equal(normalizeModmailConversationId('39t18m'), '39t18m');
+  assert.equal(normalizeModmailConversationId('abcdef'), 'abcdef');
+});
+
+test('normalizeModmailConversationId rejects blank and whitespace values', () => {
+  assert.equal(normalizeModmailConversationId(''), '');
+  assert.equal(normalizeModmailConversationId('   '), '');
+  assert.equal(normalizeModmailConversationId('\n\t  '), '');
 });
 
 test('validateFlairTemplateId rejects missing template IDs', () => {
