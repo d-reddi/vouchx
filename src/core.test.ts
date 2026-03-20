@@ -9,6 +9,8 @@ import {
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
+  getViewerFlairSnapshot,
+  sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
   normalizeUsername,
@@ -266,7 +268,7 @@ function createUpdateNoticeContext(options?: {
       subredditId: options?.subredditId ?? 't5_example',
       settings: {
         async get(key: string) {
-          return settingsValues[key];
+          return settingsValues[key] ?? settingsValues[key.replace(/^play_/, '')];
         },
       },
       redis: {
@@ -453,6 +455,218 @@ function createPendingAccountDetailsContext(options?: {
       return denialCountCallCount;
     },
   };
+}
+
+function createViewerFlairSnapshotContext(options?: {
+  currentUserResponses?: Array<
+    | {
+        username?: string;
+        id?: string;
+        flair?:
+          | {
+              flairText?: string;
+              flairCssClass?: string;
+              flairTemplateId?: string;
+            }
+          | null
+          | Error;
+      }
+    | null
+    | Error
+  >;
+  usernameUserResponses?: Array<
+    | {
+        username?: string;
+        id?: string;
+        flair?:
+          | {
+              flairText?: string;
+              flairCssClass?: string;
+              flairTemplateId?: string;
+            }
+          | null
+          | Error;
+      }
+    | null
+    | Error
+  >;
+}) {
+  const currentUserResponses = options?.currentUserResponses ?? [];
+  const usernameUserResponses = options?.usernameUserResponses ?? [];
+  let currentUserCallCount = 0;
+  let usernameLookupCallCount = 0;
+  let flairLookupCallCount = 0;
+
+  const toMockUser = (
+    response:
+      | {
+          username?: string;
+          id?: string;
+          flair?:
+            | {
+                flairText?: string;
+                flairCssClass?: string;
+                flairTemplateId?: string;
+              }
+            | null
+            | Error;
+        }
+      | null
+      | Error,
+    onLookup: () => void
+  ) => {
+    if (response instanceof Error) {
+      throw response;
+    }
+    if (!response) {
+      return null;
+    }
+    return {
+      username: response.username ?? '',
+      id: response.id ?? '',
+      async getUserFlairBySubreddit() {
+        onLookup();
+        if (response.flair instanceof Error) {
+          throw response.flair;
+        }
+        if (!response.flair) {
+          return undefined;
+        }
+        return {
+          flairText: response.flair.flairText ?? '',
+          flairCssClass: response.flair.flairCssClass ?? '',
+          flairTemplateId: response.flair.flairTemplateId ?? '',
+        };
+      },
+    };
+  };
+
+  return {
+    context: {
+      reddit: {
+        async getCurrentUser() {
+          const response = currentUserResponses[Math.min(currentUserCallCount, currentUserResponses.length - 1)];
+          currentUserCallCount += 1;
+          return toMockUser(response, () => {
+            flairLookupCallCount += 1;
+          });
+        },
+        async getUserByUsername() {
+          const response = usernameUserResponses[Math.min(usernameLookupCallCount, usernameUserResponses.length - 1)];
+          usernameLookupCallCount += 1;
+          return toMockUser(response, () => {
+            flairLookupCallCount += 1;
+          });
+        },
+      },
+    },
+    get currentUserCallCount() {
+      return currentUserCallCount;
+    },
+    get usernameLookupCallCount() {
+      return usernameLookupCallCount;
+    },
+    get flairLookupCallCount() {
+      return flairLookupCallCount;
+    },
+  };
+}
+
+function createModmailContext(options?: {
+  initialRedis?: Record<string, string>;
+  replyError?: Error | null;
+  createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
+  unarchiveError?: Error | null;
+  archiveError?: Error | null;
+}) {
+  const redisStore = new Map<string, string>(Object.entries(options?.initialRedis ?? {}));
+  const getCalls: string[] = [];
+  const setCalls: Array<[string, string, unknown?]> = [];
+  const delCalls: string[][] = [];
+  const replyCalls: Array<{ conversationId: string; body: string; isAuthorHidden: boolean }> = [];
+  const createConversationCalls: Array<{
+    subredditName: string;
+    subject: string;
+    body: string;
+    to: string | null;
+    isAuthorHidden: boolean;
+  }> = [];
+  const unarchiveCalls: string[] = [];
+  const archiveCalls: string[] = [];
+  const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
+  let createConversationCallCount = 0;
+
+  return {
+    context: {
+      reddit: {
+        modMail: {
+          async unarchiveConversation(conversationId: string) {
+            unarchiveCalls.push(conversationId);
+            if (options?.unarchiveError) {
+              throw options.unarchiveError;
+            }
+          },
+          async reply(args: { conversationId: string; body: string; isAuthorHidden: boolean }) {
+            replyCalls.push(args);
+            if (options?.replyError) {
+              throw options.replyError;
+            }
+          },
+          async createConversation(args: {
+            subredditName: string;
+            subject: string;
+            body: string;
+            to: string | null;
+            isAuthorHidden: boolean;
+          }) {
+            createConversationCalls.push(args);
+            const response =
+              createConversationResponses[Math.min(createConversationCallCount, createConversationResponses.length - 1)];
+            createConversationCallCount += 1;
+            if (response instanceof Error) {
+              throw response;
+            }
+            return response;
+          },
+          async archiveConversation(conversationId: string) {
+            archiveCalls.push(conversationId);
+            if (options?.archiveError) {
+              throw options.archiveError;
+            }
+          },
+        },
+      },
+      redis: {
+        async get(key: string) {
+          getCalls.push(key);
+          return redisStore.get(key) ?? null;
+        },
+        async set(key: string, value: string, setOptions?: unknown) {
+          setCalls.push([key, value, setOptions]);
+          redisStore.set(key, value);
+          return 'OK';
+        },
+        async del(...keys: string[]) {
+          delCalls.push(keys);
+          for (const key of keys) {
+            redisStore.delete(key);
+          }
+        },
+      },
+    },
+    redisStore,
+    getCalls,
+    setCalls,
+    delCalls,
+    replyCalls,
+    createConversationCalls,
+    unarchiveCalls,
+    archiveCalls,
+  };
+}
+
+function modmailThreadKey(subredditId: string, usernameField: string): string {
+  return `subreddit:${subredditId.toLowerCase()}:modmail:thread-by-user:${normalizeUsername(usernameField)}`;
 }
 
 test('normalizeSubmittedPhotoUrl accepts Reddit-hosted upload URLs', () => {
@@ -740,6 +954,227 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
     assert.equal(snapshot.previousDeniedAttempts, 3);
     assert.equal(snapshotContext.userCallCount, 2);
     assert.equal(snapshotContext.bannedCallCount, 2);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('getViewerFlairSnapshot prefers the current viewer over a username lookup', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Verified',
+          flairCssClass: 'verified',
+          flairTemplateId: 'abc123',
+        },
+      },
+    ],
+  });
+
+  const snapshot = await getViewerFlairSnapshot(
+    snapshotContext.context as never,
+    'Bulges',
+    'Ornery_Locksmith_176'
+  );
+
+  assert.deepEqual(snapshot, {
+    flairText: 'Verified',
+    flairCssClass: 'verified',
+    flairTemplateId: 'abc123',
+    userId: 't2_viewer',
+  });
+  assert.equal(snapshotContext.currentUserCallCount, 1);
+  assert.equal(snapshotContext.usernameLookupCallCount, 0);
+  assert.equal(snapshotContext.flairLookupCallCount, 1);
+});
+
+test('getViewerFlairSnapshot retries transient transport errors without logging them', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF'),
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Verified',
+          flairCssClass: 'verified',
+          flairTemplateId: 'abc123',
+        },
+      },
+    ],
+  });
+  const originalConsoleLog = console.log;
+  let consoleLogCallCount = 0;
+  console.log = () => {
+    consoleLogCallCount += 1;
+  };
+
+  try {
+    const snapshot = await getViewerFlairSnapshot(
+      snapshotContext.context as never,
+      'Bulges',
+      'Ornery_Locksmith_176'
+    );
+
+    assert.deepEqual(snapshot, {
+      flairText: 'Verified',
+      flairCssClass: 'verified',
+      flairTemplateId: 'abc123',
+      userId: 't2_viewer',
+    });
+    assert.equal(snapshotContext.currentUserCallCount, 2);
+    assert.equal(snapshotContext.usernameLookupCallCount, 0);
+    assert.equal(consoleLogCallCount, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('sendUserModmailWithFallback rejects invalid recipients before calling modmail APIs', async () => {
+  const modmailContext = createModmailContext();
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'https://www.reddit.com/message/compose',
+  });
+
+  assert.deepEqual(result, {
+    status: 'failed',
+    reason: 'Invalid modmail recipient username.',
+  });
+  assert.equal(modmailContext.replyCalls.length, 0);
+  assert.equal(modmailContext.createConversationCalls.length, 0);
+  assert.equal(modmailContext.archiveCalls.length, 0);
+});
+
+test('sendUserModmailWithFallback replies using a legacy cached thread alias', async () => {
+  const legacyAliasKey = modmailThreadKey('t5_example', 'https://www.reddit.com/user/example_user/about/');
+  const modmailContext = createModmailContext({
+    initialRedis: {
+      [legacyAliasKey]: '39to20',
+    },
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'Example_User',
+  });
+
+  assert.deepEqual(result, {
+    status: 'replied',
+    conversationId: '39to20',
+  });
+  assert.deepEqual(modmailContext.unarchiveCalls, ['39to20']);
+  assert.deepEqual(modmailContext.replyCalls, [
+    {
+      conversationId: '39to20',
+      body: 'Body',
+      isAuthorHidden: true,
+    },
+  ]);
+  assert.equal(modmailContext.createConversationCalls.length, 0);
+  assert.deepEqual(modmailContext.archiveCalls, ['39to20']);
+});
+
+test('sendUserModmailWithFallback clears stale thread keys and falls back to create when reply fails', async () => {
+  const threadKeys = Array.from(
+    new Set(usernameLookupFields('Example_User').map((field) => modmailThreadKey('t5_example', field)))
+  );
+  const modmailContext = createModmailContext({
+    initialRedis: {
+      [threadKeys[0]!]: '39to20',
+    },
+    replyError: new Error('proto: invalid value for int64 field value: ""'),
+    createConversationResponses: [{ conversation: { id: '39t18m' } }],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+      subredditId: 't5_example',
+      subredditName: 'ExampleSub',
+      subject: 'Approved',
+      body: 'Body',
+      username: 'Example_User',
+    });
+
+    assert.deepEqual(result, {
+      status: 'created',
+      conversationId: '39t18m',
+    });
+    assert.equal(modmailContext.replyCalls.length, 1);
+    assert.equal(modmailContext.createConversationCalls.length, 1);
+    assert.deepEqual(modmailContext.delCalls[0], threadKeys);
+    for (const key of threadKeys) {
+      assert.equal(modmailContext.redisStore.get(key), '39t18m');
+    }
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('sendUserModmailWithFallback purges invalid cached conversation ids before creating a new thread', async () => {
+  const invalidThreadKey = modmailThreadKey('t5_example', '/user/example_user/');
+  const modmailContext = createModmailContext({
+    initialRedis: {
+      [invalidThreadKey]: '   ',
+    },
+    createConversationResponses: [{ conversation: { id: 'abcdef' } }],
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'Example_User',
+  });
+
+  assert.deepEqual(result, {
+    status: 'created',
+    conversationId: 'abcdef',
+  });
+  assert.deepEqual(modmailContext.delCalls[0], [invalidThreadKey]);
+  assert.equal(modmailContext.createConversationCalls.length, 1);
+});
+
+test('sendUserModmailWithFallback retries createConversation with u-prefixed recipient', async () => {
+  const modmailContext = createModmailContext({
+    createConversationResponses: [
+      new Error("HTTP 400 Bad Request ... fields: ['to'] ... reason: 'USER_DOESNT_EXIST'"),
+      { conversation: { id: '39to20' } },
+    ],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+      subredditId: 't5_example',
+      subredditName: 'ExampleSub',
+      subject: 'Approved',
+      body: 'Body',
+      username: 'Example_User',
+    });
+
+    assert.deepEqual(result, {
+      status: 'created',
+      conversationId: '39to20',
+    });
+    assert.deepEqual(
+      modmailContext.createConversationCalls.map((call) => call.to),
+      ['example_user', 'u/example_user']
+    );
   } finally {
     console.log = originalConsoleLog;
   }
