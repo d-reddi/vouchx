@@ -3344,20 +3344,32 @@ async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
 }
 
 async function getViewerSnapshot(context: Devvit.Context): Promise<UserSnapshot> {
-  try {
-    const user = await context.reddit.getCurrentUser();
-    if (!user) {
-      return { accountAgeDays: null, totalKarma: null };
+  const emptySnapshot = { accountAgeDays: null, totalKarma: null };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const user = await context.reddit.getCurrentUser();
+      if (!user) {
+        return emptySnapshot;
+      }
+      const createdAt = user.createdAt;
+      const ageMs = Date.now() - createdAt.getTime();
+      const accountAgeDays = Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
+      const totalKarma = (user.commentKarma ?? 0) + (user.linkKarma ?? 0);
+      return { accountAgeDays, totalKarma };
+    } catch (error) {
+      const message = errorText(error);
+      if (attempt < 1 && looksLikeTransientRedditTransportError(message)) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      if (!looksLikeTransientRedditTransportError(message)) {
+        console.log(`Viewer snapshot lookup failed: ${message}`);
+      }
+      return emptySnapshot;
     }
-    const createdAt = user.createdAt;
-    const ageMs = Date.now() - createdAt.getTime();
-    const accountAgeDays = Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
-    const totalKarma = (user.commentKarma ?? 0) + (user.linkKarma ?? 0);
-    return { accountAgeDays, totalKarma };
-  } catch (error) {
-    console.log(`Viewer snapshot lookup failed: ${errorText(error)}`);
-    return { accountAgeDays: null, totalKarma: null };
   }
+
+  return emptySnapshot;
 }
 
 async function getViewerFlairSnapshot(
@@ -3365,28 +3377,45 @@ async function getViewerFlairSnapshot(
   subredditName: string,
   username: string
 ): Promise<ViewerFlairSnapshot> {
-  try {
-    const user = await context.reddit.getUserByUsername(username);
-    if (!user) {
-      return { flairText: '', flairCssClass: '', flairTemplateId: '', userId: '' };
+  const emptySnapshot = { flairText: '', flairCssClass: '', flairTemplateId: '', userId: '' };
+  const sanitizedSubreddit = sanitizeSubredditName(subredditName);
+  const normalizedUsername = normalizeUsernameStrict(username);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      let user = await context.reddit.getCurrentUser();
+      const currentUsername = typeof user?.username === 'string' ? user.username : '';
+      if (!user || (normalizedUsername && currentUsername && !usernamesEqual(currentUsername, normalizedUsername))) {
+        user = normalizedUsername ? await context.reddit.getUserByUsername(normalizedUsername) : undefined;
+      }
+      if (!user) {
+        return emptySnapshot;
+      }
+      const flair = await user.getUserFlairBySubreddit(sanitizedSubreddit);
+      if (!flair) {
+        return { ...emptySnapshot, userId: user.id ?? '' };
+      }
+      const flairTemplateId = normalizeTemplateId(extractTemplateId(flair));
+      return {
+        flairText: (flair.flairText ?? '').trim(),
+        flairCssClass: (flair.flairCssClass ?? '').trim(),
+        flairTemplateId,
+        userId: user.id ?? '',
+      };
+    } catch (error) {
+      const message = errorText(error);
+      if (attempt < 1 && looksLikeTransientRedditTransportError(message)) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      if (!looksLikeTransientRedditTransportError(message)) {
+        console.log(`Viewer flair snapshot lookup failed for r/${subredditName} u/${maskUsernameForLog(username)}: ${message}`);
+      }
+      return emptySnapshot;
     }
-    const flair = await user.getUserFlairBySubreddit(sanitizeSubredditName(subredditName));
-    if (!flair) {
-      return { flairText: '', flairCssClass: '', flairTemplateId: '', userId: user.id ?? '' };
-    }
-    const flairTemplateId = normalizeTemplateId(extractTemplateId(flair));
-    return {
-      flairText: (flair.flairText ?? '').trim(),
-      flairCssClass: (flair.flairCssClass ?? '').trim(),
-      flairTemplateId,
-      userId: user.id ?? '',
-    };
-  } catch (error) {
-    console.log(
-      `Viewer flair snapshot lookup failed for r/${subredditName} u/${maskUsernameForLog(username)}: ${errorText(error)}`
-    );
-    return { flairText: '', flairCssClass: '', flairTemplateId: '', userId: '' };
   }
+
+  return emptySnapshot;
 }
 
 function extractFieldString(value: unknown, keys: string[]): string {
@@ -4185,7 +4214,7 @@ async function getBlockedUser(
   let matchedField = '';
   let payload: string | null = null;
   for (const field of lookupFields) {
-    payload = await context.redis.hGet(key, field);
+    payload = (await context.redis.hGet(key, field)) ?? null;
     if (payload) {
       matchedField = field;
       break;
@@ -5879,6 +5908,9 @@ async function logModeratorLookupFailureWithCooldown(
   username: string,
   message: string
 ): Promise<void> {
+  if (looksLikeTransientRedditTransportError(message)) {
+    return;
+  }
   const subredditId = getModeratorCacheSubredditId(context);
   const normalizedUsername = normalizeUsername(username);
   if (!subredditId || !normalizedUsername) {
@@ -6918,6 +6950,22 @@ function looksLikeDeletedOrSuspendedError(message: string): boolean {
   return false;
 }
 
+function looksLikeTransientRedditTransportError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('unexpected eof') ||
+    normalized.includes('upstream request missing or timed out') ||
+    normalized.includes('timed out') ||
+    normalized.includes('timeout') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('connection reset')
+  );
+}
+
 async function purgeAuditLogOlderThanDays(
   context: RedisContext,
   subredditId: string,
@@ -7038,6 +7086,8 @@ export {
   collectPendingAccountDetailsSnapshot,
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
+  getViewerFlairSnapshot,
+  sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
   normalizeUsername,
