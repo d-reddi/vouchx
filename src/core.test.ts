@@ -926,6 +926,8 @@ function createReviewActionContext(options?: {
   setUserFlairResponses?: Array<true | Error>;
   addModNoteResponses?: Array<true | Error>;
   createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
+  archiveConversationResponses?: Array<true | Error>;
+  maxDenialsBeforeBlock?: number | string;
   initialRedis?: Record<string, string>;
   initialHashes?: Record<string, Record<string, string>>;
 }) {
@@ -954,12 +956,14 @@ function createReviewActionContext(options?: {
   const setUserFlairResponses = options?.setUserFlairResponses ?? [true];
   const addModNoteResponses = options?.addModNoteResponses ?? [true];
   const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
+  const archiveConversationResponses = options?.archiveConversationResponses ?? [true];
   let validationResponseIndex = 0;
   let bannedResponseIndex = 0;
   let unbanResponseIndex = 0;
   let setUserFlairResponseIndex = 0;
   let addModNoteResponseIndex = 0;
   let createConversationResponseIndex = 0;
+  let archiveConversationResponseIndex = 0;
 
   const ensureHash = (key: string) => {
     let hash = hashStore.get(key);
@@ -1102,11 +1106,19 @@ function createReviewActionContext(options?: {
           },
           async archiveConversation(conversationId: string) {
             archiveCalls.push(conversationId);
+            const response = pickResponse(archiveConversationResponses, archiveConversationResponseIndex);
+            archiveConversationResponseIndex += 1;
+            if (response instanceof Error) {
+              throw response;
+            }
           },
         },
       },
       settings: {
-        async get() {
+        async get(key: string) {
+          if (key === 'max_denials_before_block') {
+            return options?.maxDenialsBeforeBlock;
+          }
           return undefined;
         },
       },
@@ -2069,6 +2081,61 @@ test('denyVerification keeps valid denials working and exposes the denied userna
   assert.equal(reviewContext.addModNoteCalls.length, 1);
   assert.equal(reviewContext.createConversationCalls.length, 1);
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
+});
+
+test('denyVerification auto-blocks once the configured denial threshold is reached', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '1',
+      },
+    },
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+  const blockedEntryRaw = reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.get('example_user');
+  const blockedEntry = blockedEntryRaw ? JSON.parse(blockedEntryRaw) : null;
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(result.denialCount, 2);
+  assert.equal(result.userBlocked, true);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '2');
+  assert.equal(blockedEntry?.username, reviewContext.record.username);
+  assert.equal(blockedEntry?.deniedCount, 2);
+  assert.equal(blockedEntry?.reason, 'Reached 2 denials');
+});
+
+test('denyVerification still auto-blocks when denial modmail archive is skipped', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '1',
+      },
+    },
+    archiveConversationResponses: [
+      new Error(
+        'http status 400 Bad Request: {"explanation":"Cannot archive/unarchive internal conversations.","message":"Bad Request","reason":"UNKNOWN_ERROR"}'
+      ),
+    ],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.applied, true);
+    assert.equal(result.denialCount, 2);
+    assert.equal(result.userBlocked, true);
+    assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '2');
+    assert.ok(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.has('example_user'));
+  } finally {
+    console.log = originalConsoleLog;
+  }
 });
 
 test('approveVerification leaves the record pending when user validation has a transient failure', async () => {
