@@ -156,6 +156,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
   const blockConfirmBtn = document.getElementById('block-confirm-btn');
+  const approveBannedModal = document.getElementById('approve-banned-modal');
+  const approveBannedCancelBtn = document.getElementById('approve-banned-cancel-btn');
+  const approveBannedConfirmBtn = document.getElementById('approve-banned-confirm-btn');
   const bugReportLink = document.getElementById('bug-report-link');
 
   let state = null;
@@ -188,6 +191,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let selectedAuditActionFilter = 'all';
   let realtimeChannel = '';
   let realtimeConnectedChannel = '';
+  let pendingApproveBannedConfirmation = null;
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
@@ -1009,7 +1013,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
 
       if (message.type === 'approve') {
-        applyApiState(await requestJson('/api/mod/approve', { verificationId: message.verificationId }));
+        const payload = await requestJson('/api/mod/approve', {
+          verificationId: message.verificationId,
+          confirmBannedApproval: Boolean(message.confirmBannedApproval),
+        });
+        applyApiState(payload);
+        if (payload && payload.approvalConfirm && payload.approvalConfirm.kind === 'banned-unban') {
+          openApproveBannedModal(payload.approvalConfirm);
+        }
         return;
       }
 
@@ -1514,6 +1525,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return badge;
   }
 
+  function createPendingBannedBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge pending-age-banned';
+    badge.textContent = 'Banned';
+    badge.title = 'This user is currently banned from the subreddit.';
+    return badge;
+  }
+
   function createPendingAccountAgeMeta(item) {
     const meta = document.createElement('p');
     meta.className = 'item-meta pending-account-meta';
@@ -1551,9 +1570,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     titleRow.appendChild(createPendingTitlePrimary(item));
     const badgeRow = document.createElement('div');
     badgeRow.className = 'pending-badge-row';
+    const accountDetails = normalizePendingAccountDetails(item);
     const ageBadge = createPendingAgeBadge(item.submittedAt);
     if (ageBadge) {
       badgeRow.appendChild(ageBadge);
+    }
+    if (accountDetails && accountDetails.banStatus === 'banned') {
+      badgeRow.appendChild(createPendingBannedBadge());
     }
     if (isResubmission) {
       badgeRow.appendChild(createPendingResubmitBadge());
@@ -1700,7 +1723,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           showToast('You selected a denial reason. Clear the denial reason before approving.', 'error');
           return;
         }
-        postWithBusy({ type: 'approve', verificationId: item.id });
+        postWithBusy({ type: 'approve', verificationId: item.id, confirmBannedApproval: false });
       });
       row.appendChild(approveBtn);
 
@@ -2672,6 +2695,36 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     blockUsernameInput.value = '';
   }
 
+  function openApproveBannedModal(payload) {
+    if (!approveBannedModal) {
+      return;
+    }
+    pendingApproveBannedConfirmation = payload && typeof payload === 'object' ? payload : null;
+    setTab('pending');
+    approveBannedModal.classList.remove('hidden');
+    if (approveBannedConfirmBtn) {
+      window.setTimeout(() => approveBannedConfirmBtn.focus(), 0);
+    }
+  }
+
+  function closeApproveBannedModal() {
+    if (!approveBannedModal) {
+      return;
+    }
+    approveBannedModal.classList.add('hidden');
+    pendingApproveBannedConfirmation = null;
+    setTab('pending');
+  }
+
+  function submitApproveBannedConfirmation() {
+    const verificationId = String(pendingApproveBannedConfirmation && pendingApproveBannedConfirmation.verificationId || '').trim();
+    closeApproveBannedModal();
+    if (!verificationId) {
+      return;
+    }
+    postWithBusy({ type: 'approve', verificationId, confirmBannedApproval: true });
+  }
+
   function submitManualBlock() {
     if (!blockUsernameInput) {
       return;
@@ -3495,6 +3548,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     blockModal.addEventListener('click', (event) => {
       if (event.target === blockModal) {
         closeBlockModal();
+      }
+    });
+  }
+  if (approveBannedCancelBtn) {
+    approveBannedCancelBtn.addEventListener('click', closeApproveBannedModal);
+  }
+  if (approveBannedConfirmBtn) {
+    approveBannedConfirmBtn.addEventListener('click', submitApproveBannedConfirmation);
+  }
+  if (approveBannedModal) {
+    approveBannedModal.addEventListener('click', (event) => {
+      if (event.target === approveBannedModal) {
+        closeApproveBannedModal();
       }
     });
   }

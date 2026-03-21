@@ -247,7 +247,7 @@ type RedisContext = Pick<Devvit.Context, 'redis'>;
 type RedditRedisContext = Pick<Devvit.Context, 'redis' | 'reddit'>;
 type SchedulerContext = Pick<Devvit.Context, 'redis' | 'scheduler'>;
 type ReviewActionKind = 'approval' | 'denial';
-type ActionOutcome = 'completed' | 'invalid_account_removed' | 'validation_retry';
+type ActionOutcome = 'completed' | 'invalid_account_removed' | 'validation_retry' | 'banned_confirmation_required';
 
 type FlairStepResult = {
   status: 'success' | 'failed' | 'skipped';
@@ -1292,6 +1292,34 @@ async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Pro
   }
 }
 
+async function lookupCurrentSubredditBanStatus(
+  context: Pick<Devvit.Context, 'reddit'>,
+  subredditName: string,
+  username: string
+): Promise<PendingAccountDetailsSnapshot['banStatus']> {
+  const redditClient = context.reddit as Devvit.Context['reddit'] & {
+    getBannedUsers?: (options: {
+      subredditName?: string;
+      username?: string;
+      limit?: number;
+      pageSize?: number;
+    }) => { all: () => Promise<unknown[]> };
+  };
+  const normalizedUsername = normalizeUsernameStrict(username);
+  if (typeof redditClient.getBannedUsers !== 'function' || !normalizedUsername) {
+    return 'unknown';
+  }
+  const bannedUsers = await redditClient
+    .getBannedUsers({
+      subredditName: sanitizeSubredditName(subredditName),
+      username: normalizedUsername,
+      limit: 1,
+      pageSize: 1,
+    })
+    .all();
+  return bannedUsers.length > 0 ? 'banned' : 'not_banned';
+}
+
 async function collectPendingAccountDetailsSnapshot(
   context: Devvit.Context,
   subredditId: string,
@@ -1330,31 +1358,7 @@ async function collectPendingAccountDetailsSnapshot(
   const banStatusTask = withSingleRetry(
     `Pending account details ban lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
     'unknown' as const,
-    async () => {
-      const redditClient = context.reddit as Devvit.Context['reddit'] & {
-        getBannedUsers?: (options: {
-          subredditName?: string;
-          username?: string;
-          limit?: number;
-          pageSize?: number;
-        }) => { all: () => Promise<unknown[]> };
-      };
-      if (typeof redditClient.getBannedUsers !== 'function') {
-        return 'unknown';
-      }
-      if (!normalizedUsername) {
-        return 'unknown';
-      }
-      const bannedUsers = await redditClient
-        .getBannedUsers({
-          subredditName: sanitizedSubreddit,
-          username: normalizedUsername,
-          limit: 1,
-          pageSize: 1,
-        })
-        .all();
-      return bannedUsers.length > 0 ? 'banned' : 'not_banned';
-    }
+    async () => await lookupCurrentSubredditBanStatus(context, sanitizedSubreddit, username)
   );
 
   const [userSnapshot, banStatus, previousDeniedAttempts] = await Promise.all([
@@ -2155,6 +2159,17 @@ function buildValidationRetryActionResult(reason: string): ActionResult {
   };
 }
 
+function buildBannedApprovalConfirmationActionResult(username: string): ActionResult {
+  return {
+    outcome: 'banned_confirmation_required',
+    applied: false,
+    username,
+    flair: { status: 'skipped', reason: 'Approval confirmation required before unbanning.' },
+    modmail: { status: 'skipped', reason: 'Approval confirmation required before unbanning.' },
+    modNote: { status: 'skipped', reason: 'Approval confirmation required before unbanning.' },
+  };
+}
+
 async function removeReviewTargetForInvalidAccount(
   context: Devvit.Context,
   subredditId: string,
@@ -2247,7 +2262,11 @@ async function removeReviewTargetForInvalidAccount(
   };
 }
 
-async function approveVerification(context: Devvit.Context, verificationId: string): Promise<ActionResult> {
+async function approveVerification(
+  context: Devvit.Context,
+  verificationId: string,
+  confirmBannedApproval = false
+): Promise<ActionResult> {
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
     throw new Error('You must be logged in as a moderator.');
@@ -2291,6 +2310,33 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     }
     if (validation.outcome === 'retry') {
       return buildValidationRetryActionResult(validation.reason);
+    }
+
+    let banStatus: PendingAccountDetailsSnapshot['banStatus'];
+    try {
+      banStatus = await lookupCurrentSubredditBanStatus(context, subredditName, record.username);
+    } catch (error) {
+      return buildValidationRetryActionResult(`User ban status could not be confirmed. ${errorText(error)}`);
+    }
+    if (banStatus === 'unknown') {
+      return buildValidationRetryActionResult('User ban status could not be confirmed.');
+    }
+    if (banStatus === 'banned') {
+      if (!confirmBannedApproval) {
+        return buildBannedApprovalConfirmationActionResult(record.username);
+      }
+      const normalizedUsername = normalizeUsernameStrict(record.username);
+      const redditClient = context.reddit as Devvit.Context['reddit'] & {
+        unbanUser?: (username: string, subredditName: string) => Promise<void>;
+      };
+      if (!normalizedUsername || typeof redditClient.unbanUser !== 'function') {
+        throw new Error('Unable to unban the user before approval.');
+      }
+      try {
+        await redditClient.unbanUser(normalizedUsername, sanitizeSubredditName(record.subredditName));
+      } catch (error) {
+        throw new Error(`Unable to unban u/${normalizedUsername}. ${errorText(error)}`);
+      }
     }
 
     const config = await getRuntimeConfig(context, subredditId);

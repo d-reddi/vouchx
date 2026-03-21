@@ -751,6 +751,8 @@ function createReviewActionContext(options?: {
   recordOverrides?: Record<string, unknown>;
   moderatorName?: string;
   validationResponses?: Array<{ username?: string; id?: string; isSuspended?: boolean } | Error | null>;
+  bannedResponses?: Array<unknown[] | Error>;
+  unbanResponses?: Array<true | Error>;
   setUserFlairResponses?: Array<true | Error>;
   addModNoteResponses?: Array<true | Error>;
   createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
@@ -775,11 +777,16 @@ function createReviewActionContext(options?: {
   const createConversationCalls: Array<Record<string, unknown>> = [];
   const archiveCalls: string[] = [];
   const replyCalls: Array<Record<string, unknown>> = [];
+  const unbanUserCalls: Array<{ username: string; subredditName: string }> = [];
   const validationResponses = options?.validationResponses ?? [{ username: normalizedUsername, id: 't2_target' }];
+  const bannedResponses = options?.bannedResponses ?? [[]];
+  const unbanResponses = options?.unbanResponses ?? [true];
   const setUserFlairResponses = options?.setUserFlairResponses ?? [true];
   const addModNoteResponses = options?.addModNoteResponses ?? [true];
   const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
   let validationResponseIndex = 0;
+  let bannedResponseIndex = 0;
+  let unbanResponseIndex = 0;
   let setUserFlairResponseIndex = 0;
   let addModNoteResponseIndex = 0;
   let createConversationResponseIndex = 0;
@@ -856,6 +863,26 @@ function createReviewActionContext(options?: {
         },
         async getCurrentSubreddit() {
           return { name: subredditName };
+        },
+        getBannedUsers() {
+          return {
+            async all() {
+              const response = pickResponse(bannedResponses, bannedResponseIndex);
+              bannedResponseIndex += 1;
+              if (response instanceof Error) {
+                throw response;
+              }
+              return Array.isArray(response) ? response : [];
+            },
+          };
+        },
+        async unbanUser(username: string, targetSubredditName: string) {
+          unbanUserCalls.push({ username, subredditName: targetSubredditName });
+          const response = pickResponse(unbanResponses, unbanResponseIndex);
+          unbanResponseIndex += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
         },
         async getUserByUsername(username: string) {
           getUserByUsernameCalls.push(username);
@@ -1009,6 +1036,7 @@ function createReviewActionContext(options?: {
     createConversationCalls,
     archiveCalls,
     replyCalls,
+    unbanUserCalls,
     redisStore,
     hashStore,
     zsetStore,
@@ -1278,6 +1306,29 @@ test('collectPendingAccountDetailsSnapshot retries transient lookup failures and
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('collectPendingAccountDetailsSnapshot stores banned status when the user is currently banned', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [{ createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    karmaResponses: [{ fromComments: 1, fromPosts: 2 }],
+    bannedResponses: [[{ username: 'example_user' }]],
+    denialCount: '1',
+  });
+
+  const snapshot = await collectPendingAccountDetailsSnapshot(
+    snapshotContext.context as never,
+    't5_example',
+    'example',
+    'example_user',
+    '2026-03-11T12:00:00.000Z'
+  );
+
+  assert.equal(snapshot.accountCreatedAt, '2026-03-01T12:00:00.000Z');
+  assert.equal(snapshot.subredditKarma, 3);
+  assert.equal(snapshot.previousDeniedAttempts, 1);
+  assert.equal(snapshot.banStatus, 'banned');
+  assert.equal(snapshotContext.bannedCallCount, 1);
 });
 
 test('collectPendingAccountDetailsSnapshot falls back to partial values after retry exhaustion', async () => {
@@ -1562,6 +1613,56 @@ test('approveVerification keeps valid approvals working', async () => {
   );
 });
 
+test('approveVerification requires confirmation before approving a currently banned user', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [[{ username: 'example_user' }]],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+  assert.equal(result.outcome, 'banned_confirmation_required');
+  assert.equal(result.applied, false);
+  assert.equal(result.username, reviewContext.record.username);
+  assert.equal(reviewContext.getParsedRecord()?.status, 'pending');
+  assert.equal(reviewContext.unbanUserCalls.length, 0);
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+});
+
+test('approveVerification unbans a banned user after confirmation and then approves normally', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [[{ username: 'example_user' }]],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id, true);
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.deepEqual(reviewContext.unbanUserCalls, [
+    { username: 'example_user', subredditName: 'examplesub' },
+  ]);
+  assert.equal(reviewContext.getParsedRecord()?.status, 'approved');
+  assert.equal(reviewContext.setUserFlairCalls.length, 1);
+  assert.equal(reviewContext.createConversationCalls.length, 1);
+  assert.equal(reviewContext.addModNoteCalls.length, 1);
+});
+
+test('approveVerification proceeds without unbanning when the user is no longer banned at confirmation time', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [[{ username: 'example_user' }], []],
+  });
+
+  const firstResult = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+  const secondResult = await approveVerification(reviewContext.context as never, reviewContext.record.id, true);
+
+  assert.equal(firstResult.outcome, 'banned_confirmation_required');
+  assert.equal(secondResult.outcome, 'completed');
+  assert.equal(secondResult.applied, true);
+  assert.equal(reviewContext.unbanUserCalls.length, 0);
+  assert.equal(reviewContext.getParsedRecord()?.status, 'approved');
+});
+
 test('approveVerification removes pending records immediately when the account is deleted or suspended', async () => {
   const reviewContext = createReviewActionContext({
     validationResponses: [new Error('that user does not exist')],
@@ -1629,6 +1730,22 @@ test('approveVerification leaves the record pending when user validation has a t
   assert.equal(result.outcome, 'validation_retry');
   assert.equal(result.applied, false);
   assert.equal(storedRecord?.status, 'pending');
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+});
+
+test('approveVerification leaves the record pending when live ban lookup has a transient failure', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF')],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+  assert.equal(result.outcome, 'validation_retry');
+  assert.equal(result.applied, false);
+  assert.equal(reviewContext.getParsedRecord()?.status, 'pending');
+  assert.equal(reviewContext.unbanUserCalls.length, 0);
   assert.equal(reviewContext.setUserFlairCalls.length, 0);
   assert.equal(reviewContext.createConversationCalls.length, 0);
   assert.equal(reviewContext.addModNoteCalls.length, 0);
@@ -1717,6 +1834,49 @@ test('approveVerification keeps the approval when modmail fails after a valid pr
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('approveVerification keeps the approval outcome behavior after unbanning when modmail fails', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [[{ username: 'example_user' }]],
+    createConversationResponses: [new Error("that user doesn't exist")],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await approveVerification(reviewContext.context as never, reviewContext.record.id, true);
+
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.applied, true);
+    assert.equal(result.modmail.status, 'failed');
+    assert.deepEqual(reviewContext.unbanUserCalls, [
+      { username: 'example_user', subredditName: 'examplesub' },
+    ]);
+    assert.equal(reviewContext.getParsedRecord()?.status, 'approved');
+    assert.equal(reviewContext.addModNoteCalls.length, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('approveVerification aborts when unban fails after confirmation', async () => {
+  const reviewContext = createReviewActionContext({
+    bannedResponses: [[{ username: 'example_user' }]],
+    unbanResponses: [new Error('permission denied')],
+  });
+
+  await assert.rejects(
+    approveVerification(reviewContext.context as never, reviewContext.record.id, true),
+    /Unable to unban u\/example_user\./
+  );
+  assert.equal(reviewContext.getParsedRecord()?.status, 'pending');
+  assert.deepEqual(reviewContext.unbanUserCalls, [
+    { username: 'example_user', subredditName: 'examplesub' },
+  ]);
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
 });
 
 test('denyVerification keeps the denial when modmail fails after a valid preflight', async () => {
