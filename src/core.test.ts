@@ -17,12 +17,14 @@ import {
   onSaveFlairTemplateValues,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
+  normalizeMaxDenialsBeforeBlockSetting,
   normalizeSubmittedPhotoUrl,
   normalizeUsername,
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
   parseRecord,
   releaseRedisLockIfOwned,
+  repairMissingAutoBlockForUser,
   toModPanelState,
   toPublicHubConfig,
   toHubState,
@@ -1492,9 +1494,31 @@ test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () =
   assert.equal(validateMaxDenialsBeforeBlockSetting(0), undefined);
 });
 
+test('normalizeMaxDenialsBeforeBlockSetting preserves 0 and 2+ while rejecting 1', () => {
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(-1), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('-1'), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(0), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('0'), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(1), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('1'), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(2), 2);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('2'), 2);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(3), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('3'), 3);
+});
+
 test('validateMaxDenialsBeforeBlockSetting rejects 1', () => {
   assert.equal(
     validateMaxDenialsBeforeBlockSetting(1),
+    'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
+  );
+});
+
+test('validateMaxDenialsBeforeBlockSetting accepts numeric strings for install-setting validation', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting('0'), undefined);
+  assert.equal(validateMaxDenialsBeforeBlockSetting('3'), undefined);
+  assert.equal(
+    validateMaxDenialsBeforeBlockSetting('1'),
     'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
   );
 });
@@ -2136,6 +2160,32 @@ test('denyVerification still auto-blocks when denial modmail archive is skipped'
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('repairMissingAutoBlockForUser recreates a missing block from the stored denial count', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '5',
+      },
+    },
+  });
+
+  const repaired = await repairMissingAutoBlockForUser(
+    reviewContext.context as never,
+    reviewContext.subredditId,
+    reviewContext.record.username,
+    {
+      ...buildRuntimeConfig(),
+      maxDenialsBeforeBlock: 2,
+    }
+  );
+
+  assert.equal(repaired?.username, 'example_user');
+  assert.equal(repaired?.deniedCount, 5);
+  assert.equal(repaired?.reason, 'Reached 5 denials');
+  assert.ok(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.has('example_user'));
 });
 
 test('approveVerification leaves the record pending when user validation has a transient failure', async () => {
