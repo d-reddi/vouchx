@@ -31,6 +31,7 @@ type BlockedUserEntry = {
 type PendingAccountDetailsSnapshot = {
   capturedAt: string;
   accountCreatedAt: string | null;
+  totalKarma: number | null;
   subredditKarma: number | null;
   previousDeniedAttempts: number;
   banStatus: 'banned' | 'not_banned' | 'unknown';
@@ -1202,6 +1203,7 @@ function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetai
   const parsed = value as {
     capturedAt?: unknown;
     accountCreatedAt?: unknown;
+    totalKarma?: unknown;
     subredditKarma?: unknown;
     previousDeniedAttempts?: unknown;
     banStatus?: unknown;
@@ -1215,6 +1217,7 @@ function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetai
   return {
     capturedAt,
     accountCreatedAt: normalizeOptionalIsoTimestamp(parsed.accountCreatedAt),
+    totalKarma: normalizeOptionalWholeNumber(parsed.totalKarma),
     subredditKarma: normalizeOptionalWholeNumber(parsed.subredditKarma),
     previousDeniedAttempts: normalizeNonNegativeWholeNumber(parsed.previousDeniedAttempts),
     banStatus: normalizePendingBanStatus(parsed.banStatus),
@@ -1332,14 +1335,14 @@ async function collectPendingAccountDetailsSnapshot(
 
   const userSnapshotTask = withSingleRetry(
     `Pending account details user snapshot lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
-    { accountCreatedAt: null, subredditKarma: null },
+    { accountCreatedAt: null, totalKarma: null, subredditKarma: null },
     async () => {
       if (!normalizedUsername) {
-        return { accountCreatedAt: null, subredditKarma: null };
+        return { accountCreatedAt: null, totalKarma: null, subredditKarma: null };
       }
       const user = await context.reddit.getUserByUsername(normalizedUsername);
       if (!user) {
-        return { accountCreatedAt: null, subredditKarma: null };
+        return { accountCreatedAt: null, totalKarma: null, subredditKarma: null };
       }
       const userWithKarma = user as typeof user & {
         getUserKarmaFromCurrentSubreddit?: () => Promise<unknown>;
@@ -1350,6 +1353,7 @@ async function collectPendingAccountDetailsSnapshot(
           : null;
       return {
         accountCreatedAt: normalizeOptionalIsoTimestamp(user.createdAt),
+        totalKarma: normalizeSubredditKarmaValue(user),
         subredditKarma: normalizeSubredditKarmaValue(rawKarma),
       };
     }
@@ -1370,6 +1374,7 @@ async function collectPendingAccountDetailsSnapshot(
   return {
     capturedAt,
     accountCreatedAt: userSnapshot.accountCreatedAt,
+    totalKarma: userSnapshot.totalKarma,
     subredditKarma: userSnapshot.subredditKarma,
     previousDeniedAttempts,
     banStatus,
