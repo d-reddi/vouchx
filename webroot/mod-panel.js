@@ -1019,6 +1019,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
             verificationId: message.verificationId,
             reason: message.reason,
             moderatorNotes: message.moderatorNotes,
+            blockUser: Boolean(message.blockUser),
           })
         );
         return;
@@ -1612,6 +1613,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
     let denyReason = null;
     let denyNotes = null;
+    let denyBlockRow = null;
+    let denyBlockCheckbox = null;
     if (!isClaimedByOther && !isReReview) {
       const configuredReasons = getEnabledDenyReasons();
       denyReason = document.createElement('select');
@@ -1629,6 +1632,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         option.textContent = reason.label;
         denyReason.appendChild(option);
       }
+      denyReason.selectedIndex = 0;
+      denyReason.value = '';
       denyReason.disabled = configuredReasons.length === 0;
       card.appendChild(denyReason);
 
@@ -1645,6 +1650,32 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       denyNotes.placeholder =
         'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
       card.appendChild(denyNotes);
+
+      denyBlockRow = document.createElement('label');
+      denyBlockRow.className = 'toggle-row';
+      denyBlockRow.style.marginTop = '0';
+      denyBlockRow.style.display = 'none';
+      denyBlockRow.setAttribute('aria-hidden', 'true');
+      denyBlockCheckbox = document.createElement('input');
+      denyBlockCheckbox.type = 'checkbox';
+      const denyBlockText = document.createElement('span');
+      denyBlockText.textContent = 'Block user';
+      denyBlockRow.append(denyBlockCheckbox, denyBlockText);
+
+      const syncDenyBlockVisibility = () => {
+        const showBlockToggle = Boolean(denyReason && denyReason.value);
+        if (!denyBlockRow || !denyBlockCheckbox) {
+          return;
+        }
+        denyBlockRow.style.display = showBlockToggle ? 'flex' : 'none';
+        denyBlockRow.setAttribute('aria-hidden', showBlockToggle ? 'false' : 'true');
+        denyBlockCheckbox.disabled = !showBlockToggle;
+        if (!showBlockToggle) {
+          denyBlockCheckbox.checked = false;
+        }
+      };
+      denyReason.addEventListener('change', syncDenyBlockVisibility);
+      syncDenyBlockVisibility();
     }
 
     const row = document.createElement('div');
@@ -1691,6 +1722,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
             verificationId: item.id,
             reason: denyReason.value,
             moderatorNotes: denyNotes ? denyNotes.value : '',
+            blockUser: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
           });
         });
         row.appendChild(denyBtn);
@@ -1713,6 +1745,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         postWithBusy({ type: 'claimPending', verificationId: item.id });
       });
       row.appendChild(claimBtn);
+    }
+
+    if (denyBlockRow && !isClaimedByOther && !isReReview) {
+      row.appendChild(denyBlockRow);
     }
 
     if (item.parentVerificationId && !isClaimedByOther) {

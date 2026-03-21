@@ -267,7 +267,9 @@ type ModNoteStepResult = {
 
 type ActionResult = {
   outcome: ActionOutcome;
+  applied: boolean;
   outcomeReason?: string;
+  username?: string;
   flair: FlairStepResult;
   modmail: ModmailStepResult;
   modNote: ModNoteStepResult;
@@ -2145,6 +2147,7 @@ async function preflightReviewTargetAccount(
 function buildValidationRetryActionResult(reason: string): ActionResult {
   return {
     outcome: 'validation_retry',
+    applied: false,
     outcomeReason: reason,
     flair: { status: 'skipped', reason: 'User validation could not be confirmed.' },
     modmail: { status: 'skipped', reason: 'User validation could not be confirmed.' },
@@ -2236,6 +2239,7 @@ async function removeReviewTargetForInvalidAccount(
 
   return {
     outcome: 'invalid_account_removed',
+    applied: false,
     outcomeReason: validationReason,
     flair: { status: 'skipped', reason: 'User no longer exists or is suspended.' },
     modmail: { status: 'skipped', reason: 'User no longer exists or is suspended.' },
@@ -2261,6 +2265,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     if (record.status === 'approved') {
       return {
         outcome: 'completed',
+        applied: false,
         flair: { status: 'skipped', reason: 'already approved' },
         modmail: { status: 'skipped', reason: 'already approved' },
         modNote: { status: 'skipped', reason: 'already approved' },
@@ -2306,6 +2311,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
       }
       return {
         outcome: 'completed',
+        applied: false,
         flair,
         modmail: { status: 'skipped', reason: 'flair not applied' },
         modNote: { status: 'skipped', reason: 'flair not applied' },
@@ -2412,6 +2418,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
 
     return {
       outcome: 'completed',
+      applied: true,
       flair,
       modmail,
       modNote,
@@ -2544,6 +2551,7 @@ async function denyVerification(
     if (record.status === 'denied') {
       return {
         outcome: 'completed',
+        applied: false,
         flair: { status: 'skipped', reason: 'not applicable' },
         modmail: { status: 'skipped', reason: 'already denied' },
         modNote: { status: 'skipped', reason: 'already denied' },
@@ -2672,6 +2680,8 @@ async function denyVerification(
 
     return {
       outcome: 'completed',
+      applied: true,
+      username: reviewedRecord.username,
       flair: { status: 'skipped', reason: 'not applicable' },
       modmail,
       modNote,
@@ -2879,6 +2889,7 @@ async function removeApprovedVerificationByModerator(
     if (record.status === 'removed') {
       return {
         outcome: 'completed',
+        applied: false,
         flair: { status: 'skipped', reason: 'already removed' },
         modmail: { status: 'skipped', reason: 'already removed' },
         modNote: { status: 'skipped', reason: 'not applicable' },
@@ -2949,6 +2960,7 @@ async function removeApprovedVerificationByModerator(
 
     return {
       outcome: 'completed',
+      applied: true,
       flair,
       modmail,
       modNote: { status: 'skipped', reason: 'not applicable' },
