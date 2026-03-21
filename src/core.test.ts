@@ -70,6 +70,7 @@ function buildPendingAccountDetailsSnapshot(overrides: Record<string, unknown> =
   return {
     capturedAt: '2026-03-11T12:00:00.000Z',
     accountCreatedAt: '2026-03-01T12:00:00.000Z',
+    totalKarma: 420,
     subredditKarma: 42,
     previousDeniedAttempts: 2,
     banStatus: 'not_banned' as const,
@@ -387,7 +388,7 @@ function createModeratorLookupContext(options?: {
 }
 
 function createPendingAccountDetailsContext(options?: {
-  userResponses?: Array<{ createdAt: Date } | null | Error>;
+  userResponses?: Array<{ createdAt: Date; commentKarma?: number | null; linkKarma?: number | null } | null | Error>;
   karmaResponses?: Array<unknown | Error>;
   bannedResponses?: Array<unknown[] | Error>;
   denialCount?: string | null;
@@ -414,6 +415,8 @@ function createPendingAccountDetailsContext(options?: {
           }
           return {
             createdAt: response.createdAt,
+            commentKarma: response.commentKarma,
+            linkKarma: response.linkKarma,
             async getUserKarmaFromCurrentSubreddit() {
               const karmaResponse = karmaResponses[Math.min(karmaCallCount, karmaResponses.length - 1)];
               karmaCallCount += 1;
@@ -1246,6 +1249,32 @@ test('parseRecord preserves valid pending account details snapshots', () => {
   assert.deepEqual(parsed.accountDetails, buildPendingAccountDetailsSnapshot());
 });
 
+test('parseRecord preserves legacy pending account details snapshots without total karma', () => {
+  const parsed = parseRecord(
+    JSON.stringify(
+      buildRecord({
+        accountDetails: {
+          capturedAt: '2026-03-11T12:00:00.000Z',
+          accountCreatedAt: '2026-03-01T12:00:00.000Z',
+          subredditKarma: 42,
+          previousDeniedAttempts: 2,
+          banStatus: 'not_banned',
+        },
+      })
+    )
+  );
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.accountDetails, {
+    capturedAt: '2026-03-11T12:00:00.000Z',
+    accountCreatedAt: '2026-03-01T12:00:00.000Z',
+    totalKarma: null,
+    subredditKarma: 42,
+    previousDeniedAttempts: 2,
+    banStatus: 'not_banned',
+  });
+});
+
 test('parseRecord collapses malformed pending account details snapshots to null', () => {
   const parsed = parseRecord(
     JSON.stringify(
@@ -1277,7 +1306,10 @@ test('toModPanelState includes account details on pending items', () => {
 
 test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
   const snapshotContext = createPendingAccountDetailsContext({
-    userResponses: [new Error('temporary user lookup failure'), { createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    userResponses: [
+      new Error('temporary user lookup failure'),
+      { createdAt: new Date('2026-03-01T12:00:00.000Z'), commentKarma: 100, linkKarma: 50 },
+    ],
     karmaResponses: [{ fromComments: 4, fromPosts: 5 }],
     bannedResponses: [new Error('temporary ban lookup failure'), []],
     denialCount: '2',
@@ -1296,6 +1328,7 @@ test('collectPendingAccountDetailsSnapshot retries transient lookup failures and
 
     assert.equal(snapshot.capturedAt, '2026-03-11T12:00:00.000Z');
     assert.equal(snapshot.accountCreatedAt, '2026-03-01T12:00:00.000Z');
+    assert.equal(snapshot.totalKarma, 150);
     assert.equal(snapshot.subredditKarma, 9);
     assert.equal(snapshot.previousDeniedAttempts, 2);
     assert.equal(snapshot.banStatus, 'not_banned');
@@ -1310,7 +1343,7 @@ test('collectPendingAccountDetailsSnapshot retries transient lookup failures and
 
 test('collectPendingAccountDetailsSnapshot stores banned status when the user is currently banned', async () => {
   const snapshotContext = createPendingAccountDetailsContext({
-    userResponses: [{ createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    userResponses: [{ createdAt: new Date('2026-03-01T12:00:00.000Z'), commentKarma: 7, linkKarma: 8 }],
     karmaResponses: [{ fromComments: 1, fromPosts: 2 }],
     bannedResponses: [[{ username: 'example_user' }]],
     denialCount: '1',
@@ -1325,6 +1358,7 @@ test('collectPendingAccountDetailsSnapshot stores banned status when the user is
   );
 
   assert.equal(snapshot.accountCreatedAt, '2026-03-01T12:00:00.000Z');
+  assert.equal(snapshot.totalKarma, 15);
   assert.equal(snapshot.subredditKarma, 3);
   assert.equal(snapshot.previousDeniedAttempts, 1);
   assert.equal(snapshot.banStatus, 'banned');
@@ -1350,6 +1384,7 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
     );
 
     assert.equal(snapshot.accountCreatedAt, null);
+    assert.equal(snapshot.totalKarma, null);
     assert.equal(snapshot.subredditKarma, null);
     assert.equal(snapshot.banStatus, 'unknown');
     assert.equal(snapshot.previousDeniedAttempts, 3);

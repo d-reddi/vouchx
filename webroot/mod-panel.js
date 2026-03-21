@@ -150,8 +150,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const statsUsername = document.getElementById('stats-username');
   const statsCapturedAt = document.getElementById('stats-captured-at');
   const statsSubredditKarma = document.getElementById('stats-subreddit-karma');
+  const statsOverallKarma = document.getElementById('stats-overall-karma');
   const statsPreviousDenials = document.getElementById('stats-previous-denials');
-  const statsBanStatus = document.getElementById('stats-ban-status');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
@@ -2822,16 +2822,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unknown';
   }
 
-  function formatBanStatus(value) {
-    if (value === 'banned') {
-      return 'banned';
-    }
-    if (value === 'not_banned') {
-      return 'not banned';
-    }
-    return 'unknown';
-  }
-
   function openStatsModal(item) {
     if (!statsModal) {
       return;
@@ -2851,12 +2841,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (statsSubredditKarma) {
       statsSubredditKarma.textContent = accountDetails ? formatStatCount(accountDetails.subredditKarma) : 'Unknown';
     }
+    if (statsOverallKarma) {
+      statsOverallKarma.textContent = accountDetails ? formatStatCount(accountDetails.totalKarma) : 'Unknown';
+    }
     if (statsPreviousDenials) {
       statsPreviousDenials.textContent =
         accountDetails ? formatStatCount(accountDetails.previousDeniedAttempts) : 'Unknown';
-    }
-    if (statsBanStatus) {
-      statsBanStatus.textContent = accountDetails ? formatBanStatus(accountDetails.banStatus) : 'unknown';
     }
 
     statsModal.classList.remove('hidden');
