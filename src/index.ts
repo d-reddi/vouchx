@@ -97,6 +97,16 @@ function toSettingsValidationResponse(error?: string): SettingsValidationRespons
   return error ? { success: false, error } : { success: true };
 }
 
+function parseBooleanFlag(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase() === 'true';
+  }
+  return false;
+}
+
 function validateAuditPurgeDays(value: unknown): string | undefined {
   if (value === undefined) {
     return;
@@ -361,12 +371,47 @@ app.get('/api/mod/state', async (_req, res) => {
 app.post('/api/mod/approve', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
+    const confirmBannedApproval = parseBooleanFlag(req.body?.confirmBannedApproval);
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     const appContext = currentContext();
-    const result = await approveVerification(appContext, verificationId);
-    await sendRefreshSignals(appContext);
+    const result = await approveVerification(appContext, verificationId, confirmBannedApproval);
+    if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
+      await sendRefreshSignals(appContext);
+    }
+    const payload = await buildModPayload(appContext);
+    if (result.outcome === 'validation_retry') {
+      res.json({
+        ...payload,
+        toast: {
+          text: "Couldn't confirm the user account right now. Please retry.",
+          tone: 'error',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'banned_confirmation_required') {
+      res.json({
+        ...payload,
+        approvalConfirm: {
+          kind: 'banned-unban',
+          verificationId,
+          username: result.username ?? '',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'invalid_account_removed') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'User no longer exists or is suspended. Verification removed from review.',
+          tone: 'info',
+        },
+      });
+      return;
+    }
     const approvalFailed = result.flair.status === 'failed';
     const success = !approvalFailed && result.modmail.status !== 'failed' && result.modNote.status !== 'failed';
     const details = [
@@ -375,7 +420,7 @@ app.post('/api/mod/approve', async (req, res) => {
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
     res.json({
-      ...(await buildModPayload(appContext)),
+      ...payload,
       toast: {
         text: `${approvalFailed ? 'Approval failed' : success ? 'Approved' : 'Approved with issues'}: ${details.join('; ')}`,
         tone: success ? 'success' : 'error',
@@ -391,6 +436,7 @@ app.post('/api/mod/deny', async (req, res) => {
     const verificationId = String(req.body?.verificationId ?? '').trim();
     const reason = parseDenyReason(String(req.body?.reason ?? '').trim());
     const moderatorNotes = String(req.body?.moderatorNotes ?? '').trim();
+    const blockUser = parseBooleanFlag(req.body?.blockUser);
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
@@ -399,16 +445,81 @@ app.post('/api/mod/deny', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);
-    await sendRefreshSignals(appContext);
-    const blockText = result.userBlocked
-      ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.`
-      : '';
-    const success = result.modmail.status !== 'failed' && result.modNote.status !== 'failed';
+    let requestedBlockOutcome:
+      | { status: 'blocked' | 'already_blocked'; username: string }
+      | { status: 'failed'; reason: string }
+      | null = null;
+    if (blockUser && result.applied) {
+      if (!result.username) {
+        requestedBlockOutcome = { status: 'failed', reason: 'Denied user could not be resolved for blocking.' };
+      } else {
+        try {
+          const moderator = await appContext.reddit.getCurrentUsername();
+          const subredditName = await getCurrentSubredditNameCompat(appContext);
+          if (!moderator) {
+            throw new Error('You must be logged in as a moderator.');
+          }
+          const blockResult = await blockUserForModerator(
+            appContext,
+            sanitizeSubredditId(appContext.subredditId),
+            subredditName,
+            result.username,
+            moderator
+          );
+          requestedBlockOutcome = {
+            status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
+            username: blockResult.entry.username,
+          };
+        } catch (error) {
+          requestedBlockOutcome = { status: 'failed', reason: errorText(error) };
+        }
+      }
+    }
+    if (result.outcome !== 'validation_retry') {
+      await sendRefreshSignals(appContext);
+    }
+    const payload = await buildModPayload(appContext);
+    if (result.outcome === 'validation_retry') {
+      res.json({
+        ...payload,
+        toast: {
+          text: "Couldn't confirm the user account right now. Please retry.",
+          tone: 'error',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'invalid_account_removed') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'User no longer exists or is suspended. Verification removed from review.',
+          tone: 'info',
+        },
+      });
+      return;
+    }
+    let blockText = result.userBlocked ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.` : '';
+    let blockFailed = false;
+    if (requestedBlockOutcome) {
+      if (requestedBlockOutcome.status === 'failed') {
+        if (result.userBlocked) {
+          blockText = ` User reached ${result.denialCount ?? 3} denials and is now blocked.`;
+        } else {
+          blockText = ` Block failed (${requestedBlockOutcome.reason}).`;
+          blockFailed = true;
+        }
+      } else if (requestedBlockOutcome.status === 'blocked' || result.userBlocked) {
+        blockText = ` Blocked u/${requestedBlockOutcome.username} from submitting verification.`;
+      } else {
+        blockText = ` u/${requestedBlockOutcome.username} is already blocked.`;
+      }
+    }
+    const success = result.modmail.status !== 'failed' && result.modNote.status !== 'failed' && !blockFailed;
     const details = [
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
-    const payload = await buildModPayload(appContext);
     const denyReasonLabel =
       payload.state.config.denyReasons.find((item) => item.id === reason)?.label?.trim() ||
       reason.replace(/_/g, ' ');
