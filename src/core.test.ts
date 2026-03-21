@@ -1537,6 +1537,7 @@ test('approveVerification keeps valid approvals working', async () => {
   const storedRecord = reviewContext.getParsedRecord();
 
   assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
   assert.deepEqual(
     {
       flair: result.flair.status,
@@ -1570,6 +1571,7 @@ test('approveVerification removes pending records immediately when the account i
   const storedRecord = reviewContext.getParsedRecord();
 
   assert.equal(result.outcome, 'invalid_account_removed');
+  assert.equal(result.applied, false);
   assert.equal(storedRecord?.status, 'removed');
   assert.equal(storedRecord?.removedBy, 'Mod_One');
   assert.equal(storedRecord?.moderator, 'Mod_One');
@@ -1593,11 +1595,27 @@ test('denyVerification removes invalid accounts without incrementing denials or 
   const storedRecord = reviewContext.getParsedRecord();
 
   assert.equal(result.outcome, 'invalid_account_removed');
+  assert.equal(result.applied, false);
   assert.equal(storedRecord?.status, 'removed');
   assert.equal(reviewContext.createConversationCalls.length, 0);
   assert.equal(reviewContext.addModNoteCalls.length, 0);
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
   assert.equal(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+});
+
+test('denyVerification keeps valid denials working and exposes the denied username', async () => {
+  const reviewContext = createReviewActionContext();
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(result.username, reviewContext.record.username);
+  assert.equal(storedRecord?.status, 'denied');
+  assert.equal(reviewContext.addModNoteCalls.length, 1);
+  assert.equal(reviewContext.createConversationCalls.length, 1);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
 });
 
 test('approveVerification leaves the record pending when user validation has a transient failure', async () => {
@@ -1609,10 +1627,27 @@ test('approveVerification leaves the record pending when user validation has a t
   const storedRecord = reviewContext.getParsedRecord();
 
   assert.equal(result.outcome, 'validation_retry');
+  assert.equal(result.applied, false);
   assert.equal(storedRecord?.status, 'pending');
   assert.equal(reviewContext.setUserFlairCalls.length, 0);
   assert.equal(reviewContext.createConversationCalls.length, 0);
   assert.equal(reviewContext.addModNoteCalls.length, 0);
+});
+
+test('denyVerification leaves the record pending when user validation has a transient failure', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF')],
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'validation_retry');
+  assert.equal(result.applied, false);
+  assert.equal(storedRecord?.status, 'pending');
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
 });
 
 test('approveVerification clears reopened metadata when an invalid reopened review is removed', async () => {
@@ -1654,6 +1689,7 @@ test('approveVerification removes the record when flair lookup later reports the
     const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
 
     assert.equal(result.outcome, 'invalid_account_removed');
+    assert.equal(result.applied, false);
     assert.equal(reviewContext.getParsedRecord()?.status, 'removed');
     assert.ok(reviewContext.setUserFlairCalls.length >= 1);
     assert.equal(reviewContext.createConversationCalls.length, 0);
@@ -1674,6 +1710,7 @@ test('approveVerification keeps the approval when modmail fails after a valid pr
     const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
 
     assert.equal(result.outcome, 'completed');
+    assert.equal(result.applied, true);
     assert.equal(result.modmail.status, 'failed');
     assert.equal(reviewContext.getParsedRecord()?.status, 'approved');
     assert.equal(reviewContext.addModNoteCalls.length, 1);
@@ -1693,12 +1730,33 @@ test('denyVerification keeps the denial when modmail fails after a valid preflig
     const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
 
     assert.equal(result.outcome, 'completed');
+    assert.equal(result.applied, true);
     assert.equal(result.modmail.status, 'failed');
     assert.equal(reviewContext.getParsedRecord()?.status, 'denied');
     assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('denyVerification reports already denied records as a no-op', async () => {
+  const reviewContext = createReviewActionContext({
+    recordOverrides: {
+      status: 'denied',
+      moderator: 'Another_Mod',
+      reviewedAt: '2026-03-12T12:00:00.000Z',
+      denyReason: 'reason_1',
+    },
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied again');
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, false);
+  assert.equal(result.modmail.status, 'skipped');
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
 });
 
 test('buildModeratorUpdateNotice returns null when latest release metadata is missing or invalid', async () => {
