@@ -3376,8 +3376,15 @@ async function archiveModmailConversationBestEffort(
   try {
     await context.reddit.modMail.archiveConversation(conversationId);
   } catch (error) {
+    const message = errorText(error);
+    if (looksLikeInternalModmailArchiveError(message)) {
+      console.log(
+        `Modmail archive skipped for internal conversation in r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}.`
+      );
+      return;
+    }
     console.log(
-      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${errorText(error)}`
+      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${message}`
     );
   }
 }
@@ -5323,7 +5330,6 @@ async function onSaveFlairTemplateValues(
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
-  const verificationsEnabled = values.verificationsEnabled !== false;
   const existingConfig = await getRuntimeConfig(context, subredditId);
   const requiredPhotoCount =
     values.requiredPhotoCount === undefined
@@ -5337,7 +5343,9 @@ async function onSaveFlairTemplateValues(
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
 
   await context.redis.hSet(subredditConfigKey(subredditId), {
-    [CONFIG_FIELD.verificationsEnabled]: `${verificationsEnabled}`,
+    ...(values.verificationsEnabled === undefined
+      ? {}
+      : { [CONFIG_FIELD.verificationsEnabled]: `${values.verificationsEnabled !== false}` }),
     [CONFIG_FIELD.requiredPhotoCount]: `${requiredPhotoCount}`,
     [CONFIG_FIELD.photoInstructions]: values.photoInstructions?.trim() ?? '',
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
@@ -7245,6 +7253,17 @@ function looksLikeDeletedOrSuspendedError(message: string): boolean {
   return false;
 }
 
+function looksLikeInternalModmailArchiveError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('cannot archive/unarchive internal conversations') ||
+    (normalized.includes('archive') && normalized.includes('internal conversation'))
+  );
+}
+
 function looksLikeTransientRedditTransportError(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   if (!normalized) {
@@ -7383,6 +7402,7 @@ export {
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,
   loadApprovalFlairOptionsForSettings,
+  looksLikeInternalModmailArchiveError,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,

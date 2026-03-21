@@ -13,6 +13,8 @@ import {
   getModeratorAccessSnapshot,
   getViewerFlairSnapshot,
   loadApprovalFlairOptionsForSettings,
+  looksLikeInternalModmailArchiveError,
+  onSaveFlairTemplateValues,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
@@ -524,6 +526,106 @@ function createApprovalFlairOptionsContext(options?: {
     getUserFlairTemplatesCallCount() {
       return getUserFlairTemplatesCallCount;
     },
+  };
+}
+
+function createFlairSettingsSaveContext(options?: {
+  storedConfig?: Record<string, string>;
+  flairTemplates?: Array<{
+    id: string;
+    text?: string;
+    modOnly?: boolean;
+    backgroundColor?: string;
+    textColor?: string;
+  }>;
+  settingsTabRequiresConfigAccess?: boolean;
+}) {
+  const hashStore = new Map<string, Map<string, string>>();
+  const setFieldsCalls: Array<Record<string, string>> = [];
+  const configKey = 'subreddit:t5_example:config';
+  const storedConfig = options?.storedConfig ?? {};
+  hashStore.set(configKey, new Map(Object.entries(storedConfig)));
+
+  const ensureHash = (key: string) => {
+    const existing = hashStore.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = new Map<string, string>();
+    hashStore.set(key, created);
+    return created;
+  };
+
+  return {
+    context: {
+      subredditId: 't5_example',
+      settings: {
+        async get(key: string) {
+          if (key === 'settings_tab_requires_config_access') {
+            return options?.settingsTabRequiresConfigAccess ?? false;
+          }
+          if (key === 'auto_flair_reconcile_enabled') {
+            return true;
+          }
+          if (key === 'show_photo_instructions_before_submit') {
+            return true;
+          }
+          if (key === 'max_denials_before_block') {
+            return 3;
+          }
+          if (key === 'verifications_disabled_message') {
+            return 'Disabled';
+          }
+          return undefined;
+        },
+      },
+      reddit: {
+        async getCurrentUsername() {
+          return 'mod_one';
+        },
+        async getCurrentSubreddit() {
+          return { name: 'example' };
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return ['all'];
+            },
+          };
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              return options?.flairTemplates ?? [
+                {
+                  id: 'ABC-123',
+                  text: 'Verified',
+                  modOnly: true,
+                  backgroundColor: '#123456',
+                  textColor: 'light',
+                },
+              ];
+            },
+          };
+        },
+      },
+      redis: {
+        async hGetAll(key: string) {
+          return Object.fromEntries(ensureHash(key).entries());
+        },
+        async hSet(key: string, entries: Record<string, string>) {
+          setFieldsCalls.push(entries);
+          const hash = ensureHash(key);
+          for (const [field, value] of Object.entries(entries)) {
+            hash.set(field, value);
+          }
+          return Object.keys(entries).length;
+        },
+      },
+    },
+    hashStore,
+    setFieldsCalls,
+    configKey,
   };
 }
 
@@ -1314,6 +1416,64 @@ test('loadApprovalFlairOptionsForSettings surfaces flair lookup failures', async
     async () => await loadApprovalFlairOptionsForSettings(optionsContext.context as never),
     /flair lookup failed/
   );
+});
+
+test('looksLikeInternalModmailArchiveError matches internal conversation archive failures', () => {
+  assert.equal(
+    looksLikeInternalModmailArchiveError(
+      '2 UNKNOWN: HTTP request failed: {"explanation":"Cannot archive/unarchive internal conversations.","reason":"UNKNOWN_ERROR"}'
+    ),
+    true
+  );
+  assert.equal(looksLikeInternalModmailArchiveError('http status 500 Internal Server Error'), false);
+});
+
+test('onSaveFlairTemplateValues preserves verificationsEnabled when it is omitted', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      verifications_enabled: 'false',
+      required_photo_count: '2',
+      flair_template_id: 'OLD-123',
+      flair_css_class: 'verified',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: 'approved',
+      requiredPhotoCount: 2,
+      photoInstructions: 'Updated instructions',
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
+  assert.ok(saveContext.setFieldsCalls.every((entries) => !('verifications_enabled' in entries)));
+});
+
+test('onSaveFlairTemplateValues still updates verificationsEnabled when explicitly provided', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      verifications_enabled: 'true',
+      required_photo_count: '2',
+      flair_template_id: 'OLD-123',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: '',
+      verificationsEnabled: false,
+      requiredPhotoCount: 2,
+      photoInstructions: '',
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
+  assert.ok(saveContext.setFieldsCalls.some((entries) => entries.verifications_enabled === 'false'));
 });
 
 test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {
