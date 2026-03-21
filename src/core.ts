@@ -1450,7 +1450,7 @@ async function submitVerification(
     );
   }
 
-  const blocked = await getBlockedUser(context, subredditId, username);
+  const blocked = await repairMissingAutoBlockForUser(context, subredditId, username, config);
   if (blocked) {
     throw new Error(BLOCKED_SUBMISSION_MESSAGE);
   }
@@ -3424,7 +3424,7 @@ async function loadDashboardData(
   if (viewerUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
   }
-  const viewerBlocked = viewerUsername ? await getBlockedUser(context, subredditId, viewerUsername) : null;
+  const viewerBlocked = viewerUsername ? await repairMissingAutoBlockForUser(context, subredditId, viewerUsername, config) : null;
   const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
   const pendingCount = canReviewUser
     ? options.includeModData
@@ -4537,6 +4537,40 @@ async function isUserBlocked(context: Devvit.Context, subredditId: string, usern
   return (await getBlockedUser(context, subredditId, username)) !== null;
 }
 
+async function repairMissingAutoBlockForUser(
+  context: Devvit.Context,
+  subredditId: string,
+  username: string,
+  config: RuntimeConfig
+): Promise<BlockedUserEntry | null> {
+  const existingBlocked = await getBlockedUser(context, subredditId, username);
+  if (existingBlocked) {
+    return existingBlocked;
+  }
+  if (config.maxDenialsBeforeBlock <= 0) {
+    return null;
+  }
+
+  const deniedCount = await getStoredDenialCount(context, subredditId, username);
+  if (deniedCount < config.maxDenialsBeforeBlock) {
+    return null;
+  }
+
+  const normalizedUsername = normalizeUsernameForLookup(username);
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  const entry: BlockedUserEntry = {
+    username: normalizedUsername,
+    blockedAt: new Date().toISOString(),
+    deniedCount,
+    reason: `Reached ${deniedCount} denials`,
+  };
+  await setBlockedUser(context, subredditId, entry);
+  return entry;
+}
+
 async function incrementDenialCount(context: Devvit.Context, subredditId: string, username: string): Promise<number> {
   const key = denialCountKey(subredditId);
   const normalizedUsername = normalizeUsername(username);
@@ -5586,23 +5620,35 @@ function normalizeMaxDenialsBeforeBlockSetting(value: number | string | undefine
         ? value
         : null
       : typeof value === 'string'
-        ? parseNonNegativeInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
+        ? Number.parseInt(value.trim(), 10)
         : null;
-  return parsed === 0 || (parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK)
-    ? parsed
-    : DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+  if (parsed === null || !Number.isFinite(parsed)) {
+    return DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+  }
+  if (parsed < 0) {
+    return 0;
+  }
+  if (parsed === 0 || parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK) {
+    return parsed;
+  }
+  return DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
 }
 
 function validateMaxDenialsBeforeBlockSetting(value: unknown): string | undefined {
   if (value === undefined) {
     return;
   }
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
   if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    !Number.isInteger(value) ||
-    value < 0 ||
-    value === 1
+    !Number.isFinite(parsed) ||
+    !Number.isInteger(parsed) ||
+    parsed < 0 ||
+    parsed === 1
   ) {
     return `Enter 0 to disable auto-block, or a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
   }
@@ -7379,6 +7425,7 @@ export {
   getModeratorAccessSnapshot,
   unblockUserForModerator,
   blockUserForModerator,
+  repairMissingAutoBlockForUser,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
@@ -7394,6 +7441,7 @@ export {
   errorText,
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,
+  normalizeMaxDenialsBeforeBlockSetting,
   validateMaxDenialsBeforeBlockSetting,
   resolveThemePalette,
   clearExpiredPendingClaim,

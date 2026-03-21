@@ -114,10 +114,10 @@
         "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
       },
       "max_denials_before_block": {
-        "type": "number",
+        "type": "string",
         "label": "Max denials before auto-block",
         "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter 0 to disable auto-block, or a whole number of 2 or greater.",
-        "defaultValue": 3,
+        "defaultValue": "3",
         "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
       },
       "auto_flair_reconcile_enabled": {
