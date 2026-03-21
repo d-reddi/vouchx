@@ -17,6 +17,7 @@ import {
   getCurrentSubredditNameCompat,
   loadHubDashboard,
   loadModDashboard,
+  loadApprovalFlairOptionsForSettings,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
@@ -280,6 +281,17 @@ app.post('/api/mod/settings/flair/validate', async (req, res) => {
     const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
     const validation = await validateFlairTemplateIdForSubreddit(appContext, subredditName, body.value);
     res.json(toSettingsValidationResponse(validation.isValid ? undefined : validation.message));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/api/mod/settings/flair/options', async (_req, res) => {
+  try {
+    const appContext = currentContext();
+    res.json({
+      options: await loadApprovalFlairOptionsForSettings(appContext),
+    });
   } catch (error) {
     sendError(res, error);
   }

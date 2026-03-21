@@ -12,6 +12,7 @@ import {
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   getViewerFlairSnapshot,
+  loadApprovalFlairOptionsForSettings,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
@@ -458,6 +459,70 @@ function createPendingAccountDetailsContext(options?: {
     },
     get denialCountCallCount() {
       return denialCountCallCount;
+    },
+  };
+}
+
+function createApprovalFlairOptionsContext(options?: {
+  flairTemplates?: Array<{
+    id: string;
+    text?: string;
+    modOnly?: boolean;
+    backgroundColor?: string;
+    textColor?: string;
+  }> | Error;
+  permissions?: string[];
+  settingsTabRequiresConfigAccess?: boolean;
+}) {
+  const redisStore = new Map<string, string>();
+  let getUserFlairTemplatesCallCount = 0;
+
+  return {
+    context: {
+      subredditId: 't5_example',
+      settings: {
+        async get() {
+          return options?.settingsTabRequiresConfigAccess ?? false;
+        },
+      },
+      reddit: {
+        async getCurrentUsername() {
+          return 'mod_one';
+        },
+        async getCurrentSubreddit() {
+          return { name: 'example' };
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return options?.permissions ?? ['all'];
+            },
+          };
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              getUserFlairTemplatesCallCount += 1;
+              if (options?.flairTemplates instanceof Error) {
+                throw options.flairTemplates;
+              }
+              return options?.flairTemplates ?? [];
+            },
+          };
+        },
+      },
+      redis: {
+        async get(key: string) {
+          return redisStore.get(key) ?? null;
+        },
+        async set(key: string, value: string) {
+          redisStore.set(key, value);
+          return 'OK';
+        },
+      },
+    },
+    getUserFlairTemplatesCallCount() {
+      return getUserFlairTemplatesCallCount;
     },
   };
 }
@@ -1157,6 +1222,98 @@ test('validateFlairTemplateId accepts template IDs with a digit and hyphen', () 
   const validation = validateFlairTemplateId('ABC-123');
   assert.equal(validation.isValid, true);
   assert.equal(validation.code, 'valid');
+});
+
+test('loadApprovalFlairOptionsForSettings returns only mod-only user flairs in API order with stable labels', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: [
+      {
+        id: 'AAA-111',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+      {
+        id: 'BBB-222',
+        text: 'Visible to users',
+        modOnly: false,
+        backgroundColor: '#abcdef',
+        textColor: 'dark',
+      },
+      {
+        id: 'CCC-333',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: 'transparent',
+        textColor: 'dark',
+      },
+      {
+        id: 'DDD-444',
+        text: '',
+        modOnly: true,
+        backgroundColor: '#654321',
+        textColor: 'light',
+      },
+    ],
+  });
+
+  const options = await loadApprovalFlairOptionsForSettings(optionsContext.context as never);
+
+  assert.deepEqual(options, [
+    {
+      id: 'AAA-111',
+      text: 'Verified',
+      label: 'Verified — AAA-111',
+      backgroundColor: '#123456',
+      textColor: 'light',
+    },
+    {
+      id: 'CCC-333',
+      text: 'Verified',
+      label: 'Verified — CCC-333',
+      backgroundColor: 'transparent',
+      textColor: 'dark',
+    },
+    {
+      id: 'DDD-444',
+      text: '',
+      label: '(untitled flair) — DDD-444',
+      backgroundColor: '#654321',
+      textColor: 'light',
+    },
+  ]);
+  assert.equal(optionsContext.getUserFlairTemplatesCallCount(), 1);
+});
+
+test('loadApprovalFlairOptionsForSettings keeps unique flair text labels clean', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: [
+      {
+        id: 'XYZ-123',
+        text: 'Approved',
+        modOnly: true,
+        backgroundColor: '#ffffff',
+        textColor: 'dark',
+      },
+    ],
+  });
+
+  const options = await loadApprovalFlairOptionsForSettings(optionsContext.context as never);
+
+  assert.equal(options.length, 1);
+  assert.equal(options[0].label, 'Approved');
+});
+
+test('loadApprovalFlairOptionsForSettings surfaces flair lookup failures', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: new Error('flair lookup failed'),
+  });
+
+  await assert.rejects(
+    async () => await loadApprovalFlairOptionsForSettings(optionsContext.context as never),
+    /flair lookup failed/
+  );
 });
 
 test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {

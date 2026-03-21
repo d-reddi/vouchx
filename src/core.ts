@@ -332,6 +332,14 @@ type FlairTemplateValidationState = {
   message: string;
 };
 
+type ApprovalFlairOption = {
+  id: string;
+  text: string;
+  label: string;
+  backgroundColor: string;
+  textColor: string;
+};
+
 type FlairApplyResult = {
   applied: boolean;
   error?: string;
@@ -3682,6 +3690,58 @@ function extractTemplateId(value: unknown): string {
 
 function normalizeTemplateId(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function buildApprovalFlairOptionLabel(text: string, templateId: string, duplicateCount: number): string {
+  if (!text) {
+    return `(untitled flair) — ${templateId}`;
+  }
+  if (duplicateCount > 1) {
+    return `${text} — ${templateId}`;
+  }
+  return text;
+}
+
+async function loadApprovalFlairOptionsForSettings(context: Devvit.Context): Promise<ApprovalFlairOption[]> {
+  const moderator = await context.reddit.getCurrentUsername();
+  if (!moderator) {
+    throw new Error('You must be logged in as a moderator.');
+  }
+
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
+
+  const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
+  const flairTemplates = await subreddit.getUserFlairTemplates();
+  const modOnlyTemplates = flairTemplates
+    .map((template) => {
+      const templateId = String(template.id ?? '').trim();
+      return template.modOnly && templateId
+        ? {
+            id: templateId,
+            text: String(template.text ?? '').trim(),
+            backgroundColor: typeof template.backgroundColor === 'string' ? template.backgroundColor : 'transparent',
+            textColor: typeof template.textColor === 'string' ? template.textColor : 'dark',
+          }
+        : null;
+    })
+    .filter((template): template is NonNullable<typeof template> => Boolean(template));
+
+  const duplicateCounts = new Map<string, number>();
+  for (const template of modOnlyTemplates) {
+    if (!template.text) {
+      continue;
+    }
+    duplicateCounts.set(template.text, (duplicateCounts.get(template.text) ?? 0) + 1);
+  }
+
+  return modOnlyTemplates.map((template) => ({
+    id: template.id,
+    text: template.text,
+    label: buildApprovalFlairOptionLabel(template.text, template.id, duplicateCounts.get(template.text) ?? 0),
+    backgroundColor: template.backgroundColor,
+    textColor: template.textColor,
+  }));
 }
 
 async function fetchConfiguredFlairTemplateTextFromSelector(
@@ -7322,6 +7382,7 @@ export {
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,
+  loadApprovalFlairOptionsForSettings,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
@@ -7345,6 +7406,7 @@ export type {
   FlairTemplateValidationState,
   HubStatePayload,
   ModPanelStatePayload,
+  ApprovalFlairOption,
   PendingAccountDetailsSnapshot,
   PublicHubConfig,
   PurgeUserDataFormValues,

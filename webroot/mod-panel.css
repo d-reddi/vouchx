@@ -636,6 +636,14 @@ textarea {
   background: color-mix(in srgb, var(--panel-surface-soft) 94%, var(--primary-soft) 6%);
 }
 
+#flair-template-id:disabled {
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  -webkit-text-fill-color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  background: color-mix(in srgb, var(--panel-surface-soft) 94%, black 6%);
+  border-color: color-mix(in srgb, var(--panel-border) 54%, transparent);
+  cursor: not-allowed;
+}
+
 .field-input-invalid,
 .field-input-invalid:hover,
 .field-input-invalid:focus {
@@ -990,6 +998,18 @@ textarea {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
+.approval-flair-preview {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.approval-flair-preview-chip {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-surface-soft) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 76%, transparent);
 }
 
 .image-grid {

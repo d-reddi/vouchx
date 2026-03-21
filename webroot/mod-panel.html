@@ -279,7 +279,17 @@
                 <h4 class="minor-heading">Flair Setup</h4>
                 <div class="field-grid">
                   <div class="field-stack">
-                    <label class="field-label" for="flair-template-id">Verified Flair template ID</label>
+                    <label class="field-label" for="approval-flair-select">Verified flair (mod-only)</label>
+                    <select id="approval-flair-select" class="field-select" disabled>
+                      <option value="">Choose a mod-only user flair...</option>
+                    </select>
+                    <p id="approval-flair-select-help" class="field-feedback muted small hidden" aria-live="polite"></p>
+                    <div id="approval-flair-preview" class="approval-flair-preview hidden" aria-live="polite">
+                      <span id="approval-flair-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
+                    </div>
+                  </div>
+                  <div class="field-stack">
+                    <label class="field-label" for="flair-template-id">Manual flair template ID (advanced/fallback)</label>
                     <input id="flair-template-id" class="field-input" type="text" />
                     <p id="flair-template-validation-feedback" class="field-feedback small hidden" aria-live="polite"></p>
                   </div>
