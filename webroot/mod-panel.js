@@ -86,6 +86,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const saveThemeBtn = document.getElementById('save-theme-btn');
   const resetThemeBtn = document.getElementById('reset-theme-btn');
 
+  const approvalFlairSelect = document.getElementById('approval-flair-select');
+  const approvalFlairSelectHelp = document.getElementById('approval-flair-select-help');
+  const approvalFlairPreview = document.getElementById('approval-flair-preview');
+  const approvalFlairPreviewChip = document.getElementById('approval-flair-preview-chip');
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
@@ -196,7 +200,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
   let flairTemplateValidationOverride = null;
+  let approvalFlairOptions = [];
+  let approvalFlairOptionsLoaded = false;
+  let approvalFlairOptionsLoading = false;
+  let approvalFlairOptionsError = '';
+  let approvalFlairOptionsRequestId = 0;
+  let approvalFlairManualMode = false;
   const hiddenCriticalUpdateNoticeKeys = new Set();
+  const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
@@ -624,6 +635,182 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     flairTemplateInput.setAttribute('aria-invalid', shouldShow ? 'true' : 'false');
   }
 
+  function normalizeTemplateIdValue(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function resetApprovalFlairOptionsState() {
+    approvalFlairOptions = [];
+    approvalFlairOptionsLoaded = false;
+    approvalFlairOptionsLoading = false;
+    approvalFlairOptionsError = '';
+    approvalFlairOptionsRequestId += 1;
+    approvalFlairManualMode = false;
+  }
+
+  function findApprovalFlairOptionByTemplateId(templateId) {
+    const normalizedTemplateId = normalizeTemplateIdValue(templateId);
+    if (!normalizedTemplateId) {
+      return null;
+    }
+    return (
+      approvalFlairOptions.find((option) => normalizeTemplateIdValue(option && option.id) === normalizedTemplateId) || null
+    );
+  }
+
+  function setApprovalFlairHelp(text, tone) {
+    if (!approvalFlairSelectHelp) {
+      return;
+    }
+    const hasText = Boolean(text);
+    approvalFlairSelectHelp.classList.toggle('hidden', !hasText);
+    approvalFlairSelectHelp.classList.toggle('field-feedback-error', tone === 'error');
+    approvalFlairSelectHelp.textContent = hasText ? text : '';
+  }
+
+  function renderApprovalFlairPreview(option) {
+    if (!approvalFlairPreview || !approvalFlairPreviewChip) {
+      return;
+    }
+    if (!option) {
+      approvalFlairPreview.classList.add('hidden');
+      approvalFlairPreviewChip.textContent = '';
+      approvalFlairPreviewChip.style.backgroundColor = '';
+      approvalFlairPreviewChip.style.color = '';
+      approvalFlairPreviewChip.style.borderColor = '';
+      return;
+    }
+
+    const text = String(option.text || '').trim() || '(untitled flair)';
+    const backgroundColor = String(option.backgroundColor || '').trim();
+    const textColor = String(option.textColor || '').trim().toLowerCase() === 'light' ? '#ffffff' : '#1f2328';
+
+    approvalFlairPreviewChip.textContent = text;
+    approvalFlairPreviewChip.style.backgroundColor =
+      backgroundColor && backgroundColor !== 'transparent' ? backgroundColor : '';
+    approvalFlairPreviewChip.style.color = backgroundColor && backgroundColor !== 'transparent' ? textColor : '';
+    approvalFlairPreviewChip.style.borderColor =
+      backgroundColor && backgroundColor !== 'transparent' ? backgroundColor : '';
+    approvalFlairPreview.classList.remove('hidden');
+  }
+
+  function buildMissingApprovalFlairMessage(templateId) {
+    if (!state || !state.config) {
+      return 'This template ID is not in the current mod-only flair list. You can still save it manually.';
+    }
+    const normalizedCurrentId = normalizeTemplateIdValue(templateId);
+    const normalizedSavedId = normalizeTemplateIdValue(state.config.flairTemplateId || '');
+    if (normalizedCurrentId && normalizedCurrentId === normalizedSavedId) {
+      const cachedLabel = String(state.config.flairTemplateCacheText || '').trim();
+      const flairDescriptor = cachedLabel || String(templateId || '').trim();
+      return `The currently saved flair${
+        flairDescriptor ? ` (${flairDescriptor})` : ''
+      } is not in the current mod-only flair list. It will stay unchanged unless you pick a new flair or edit the template ID manually.`;
+    }
+    return 'This template ID is not in the current mod-only flair list. You can still save it manually.';
+  }
+
+  function shouldUseApprovalFlairManualMode(currentTemplateId, matchedOption) {
+    if (approvalFlairManualMode) {
+      return true;
+    }
+    if (approvalFlairOptionsError) {
+      return true;
+    }
+    if (approvalFlairOptionsLoaded && approvalFlairOptions.length === 0) {
+      return true;
+    }
+    return Boolean(currentTemplateId) && !matchedOption;
+  }
+
+  function renderApprovalFlairPicker() {
+    if (!approvalFlairSelect || !flairTemplateInput) {
+      return;
+    }
+
+    const currentTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
+    const matchedOption = findApprovalFlairOptionByTemplateId(currentTemplateId);
+    const manualMode = shouldUseApprovalFlairManualMode(currentTemplateId, matchedOption);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = approvalFlairOptionsLoading ? 'Loading mod-only user flairs...' : 'Choose a mod-only user flair...';
+    placeholder.disabled = true;
+    const manualOption = document.createElement('option');
+    manualOption.value = APPROVAL_FLAIR_MANUAL_VALUE;
+    manualOption.textContent = 'Manual input';
+
+    approvalFlairSelect.innerHTML = '';
+    approvalFlairSelect.appendChild(placeholder);
+    for (const option of approvalFlairOptions) {
+      const el = document.createElement('option');
+      el.value = String(option.id || '').trim();
+      el.textContent = String(option.label || option.text || option.id || '').trim();
+      approvalFlairSelect.appendChild(el);
+    }
+    approvalFlairSelect.appendChild(manualOption);
+
+    approvalFlairSelect.value = manualMode ? APPROVAL_FLAIR_MANUAL_VALUE : matchedOption ? matchedOption.id : '';
+    approvalFlairSelect.disabled = false;
+    flairTemplateInput.disabled = !manualMode;
+
+    if (approvalFlairOptionsLoading) {
+      setApprovalFlairHelp('Loading mod-only user flairs...', 'info');
+    } else if (approvalFlairOptionsError) {
+      setApprovalFlairHelp("Couldn't load mod-only user flairs. Enter a template ID manually below.", 'error');
+    } else if (approvalFlairOptionsLoaded && approvalFlairOptions.length === 0) {
+      setApprovalFlairHelp('No mod-only user flairs found. Enter a template ID manually below.', 'info');
+    } else if (currentTemplateId && !matchedOption) {
+      setApprovalFlairHelp(buildMissingApprovalFlairMessage(currentTemplateId), 'info');
+    } else {
+      setApprovalFlairHelp('', 'info');
+    }
+
+    renderApprovalFlairPreview(manualMode ? null : matchedOption);
+  }
+
+  async function ensureApprovalFlairOptionsLoaded() {
+    if (!state || !approvalFlairSelect || approvalFlairOptionsLoaded || approvalFlairOptionsLoading) {
+      return;
+    }
+
+    approvalFlairOptionsLoading = true;
+    approvalFlairOptionsError = '';
+    const requestId = approvalFlairOptionsRequestId + 1;
+    approvalFlairOptionsRequestId = requestId;
+    renderApprovalFlairPicker();
+
+    try {
+      const payload = await requestJson('/api/mod/settings/flair/options');
+      if (approvalFlairOptionsRequestId !== requestId) {
+        return;
+      }
+      approvalFlairOptions = Array.isArray(payload && payload.options)
+        ? payload.options
+            .map((option) => ({
+              id: String(option && option.id ? option.id : '').trim(),
+              text: String(option && option.text ? option.text : '').trim(),
+              label: String(option && option.label ? option.label : '').trim(),
+              backgroundColor: String(option && option.backgroundColor ? option.backgroundColor : 'transparent').trim(),
+              textColor: String(option && option.textColor ? option.textColor : 'dark').trim(),
+            }))
+            .filter((option) => option.id)
+        : [];
+      approvalFlairOptionsLoaded = true;
+      approvalFlairOptionsLoading = false;
+      approvalFlairOptionsError = '';
+      renderApprovalFlairPicker();
+    } catch (error) {
+      if (approvalFlairOptionsRequestId !== requestId) {
+        return;
+      }
+      approvalFlairOptions = [];
+      approvalFlairOptionsLoaded = true;
+      approvalFlairOptionsLoading = false;
+      approvalFlairOptionsError = error instanceof Error ? error.message : String(error);
+      renderApprovalFlairPicker();
+    }
+  }
+
   async function validateFlairTemplateInputValue(value) {
     const payload = await requestJson('/api/mod/settings/flair/validate', {
       value: String(value || ''),
@@ -668,15 +855,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
       setBusy(true);
       try {
+        const requestBody = {
+          type: 'saveFlair',
+          flairTemplateId,
+          flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+          requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+          photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+        };
+        const savedVerificationsEnabled = state ? state.config.verificationsEnabled !== false : true;
+        if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
+          requestBody.verificationsEnabled = Boolean(verificationsEnabledInput.checked);
+        }
         applyApiState(
-          await requestJson('/api/mod/settings/flair', {
-            type: 'saveFlair',
-            flairTemplateId,
-            flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
-            verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
-            requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
-            photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
-          })
+          await requestJson('/api/mod/settings/flair', requestBody)
         );
       } catch (error) {
         setBusy(false);
@@ -703,8 +894,18 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       return;
     }
     setSettingsTab('general');
-    if (flairTemplateInput) {
-      window.setTimeout(() => flairTemplateInput.focus(), 0);
+    if (approvalFlairSelect || flairTemplateInput) {
+      window.setTimeout(() => {
+        const target =
+          flairTemplateInput && !flairTemplateInput.disabled
+            ? flairTemplateInput
+            : approvalFlairSelect && !approvalFlairSelect.disabled
+              ? approvalFlairSelect
+              : flairTemplateInput;
+        if (target) {
+          target.focus();
+        }
+      }, 0);
     }
   }
 
@@ -732,6 +933,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       return null;
     }
     const draft = {
+      approvalFlairManualMode,
       flairTemplateId: stringInputValue(flairTemplateInput),
       flairCssClass: stringInputValue(flairCssClassInput),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
@@ -858,6 +1060,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (!draft) {
       return;
     }
+    approvalFlairManualMode = draft.approvalFlairManualMode === true;
     if (flairTemplateInput) {
       flairTemplateInput.value = draft.flairTemplateId;
     }
@@ -873,6 +1076,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (photoInstructionsInput) {
       photoInstructionsInput.value = draft.photoInstructions;
     }
+    renderApprovalFlairPicker();
   }
 
   function restoreTemplatesDraft(draft) {
@@ -1204,6 +1408,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const hadPriorState = stateInitialized;
       state = message.payload;
       flairTemplateValidationOverride = null;
+      resetApprovalFlairOptionsState();
       lastStateUpdatedAt = Date.now();
       if (hadPriorState) {
         invalidateHistoryCaches();
@@ -1345,6 +1550,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (activeSettingsTab === 'themes') {
       renderThemePreview();
+      return;
+    }
+    if (activeSettingsTab === 'general' && tabPanels.settings && !tabPanels.settings.classList.contains('hidden')) {
+      void ensureApprovalFlairOptionsLoaded();
     }
   }
 
@@ -2099,6 +2308,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (photoInstructionsInput) {
       photoInstructionsInput.value = state.config.photoInstructions || '';
     }
+    renderApprovalFlairPicker();
     renderFlairTemplateValidationFeedback();
   }
 
@@ -3145,6 +3355,36 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       if (flairTemplateValidationOverride) {
         clearFlairTemplateValidationOverride();
       }
+      renderApprovalFlairPicker();
+    });
+  }
+
+  if (approvalFlairSelect && flairTemplateInput) {
+    approvalFlairSelect.addEventListener('change', () => {
+      if (approvalFlairSelect.value === APPROVAL_FLAIR_MANUAL_VALUE) {
+        approvalFlairManualMode = true;
+        renderApprovalFlairPicker();
+        window.setTimeout(() => {
+          if (!flairTemplateInput.disabled) {
+            flairTemplateInput.focus();
+          }
+        }, 0);
+        return;
+      }
+
+      const selectedOption = findApprovalFlairOptionByTemplateId(approvalFlairSelect.value);
+      if (!selectedOption) {
+        renderApprovalFlairPicker();
+        return;
+      }
+      approvalFlairManualMode = false;
+      flairTemplateInput.value = selectedOption.id;
+      setFlairTemplateValidationOverride({
+        isValid: true,
+        code: 'valid',
+        message: 'Flair template ID looks valid.',
+      });
+      renderApprovalFlairPicker();
     });
   }
 

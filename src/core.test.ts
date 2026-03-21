@@ -12,14 +12,19 @@ import {
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   getViewerFlairSnapshot,
+  loadApprovalFlairOptionsForSettings,
+  looksLikeInternalModmailArchiveError,
+  onSaveFlairTemplateValues,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
+  normalizeMaxDenialsBeforeBlockSetting,
   normalizeSubmittedPhotoUrl,
   normalizeUsername,
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
   parseRecord,
   releaseRedisLockIfOwned,
+  repairMissingAutoBlockForUser,
   toModPanelState,
   toPublicHubConfig,
   toHubState,
@@ -462,6 +467,170 @@ function createPendingAccountDetailsContext(options?: {
   };
 }
 
+function createApprovalFlairOptionsContext(options?: {
+  flairTemplates?: Array<{
+    id: string;
+    text?: string;
+    modOnly?: boolean;
+    backgroundColor?: string;
+    textColor?: string;
+  }> | Error;
+  permissions?: string[];
+  settingsTabRequiresConfigAccess?: boolean;
+}) {
+  const redisStore = new Map<string, string>();
+  let getUserFlairTemplatesCallCount = 0;
+
+  return {
+    context: {
+      subredditId: 't5_example',
+      settings: {
+        async get() {
+          return options?.settingsTabRequiresConfigAccess ?? false;
+        },
+      },
+      reddit: {
+        async getCurrentUsername() {
+          return 'mod_one';
+        },
+        async getCurrentSubreddit() {
+          return { name: 'example' };
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return options?.permissions ?? ['all'];
+            },
+          };
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              getUserFlairTemplatesCallCount += 1;
+              if (options?.flairTemplates instanceof Error) {
+                throw options.flairTemplates;
+              }
+              return options?.flairTemplates ?? [];
+            },
+          };
+        },
+      },
+      redis: {
+        async get(key: string) {
+          return redisStore.get(key) ?? null;
+        },
+        async set(key: string, value: string) {
+          redisStore.set(key, value);
+          return 'OK';
+        },
+      },
+    },
+    getUserFlairTemplatesCallCount() {
+      return getUserFlairTemplatesCallCount;
+    },
+  };
+}
+
+function createFlairSettingsSaveContext(options?: {
+  storedConfig?: Record<string, string>;
+  flairTemplates?: Array<{
+    id: string;
+    text?: string;
+    modOnly?: boolean;
+    backgroundColor?: string;
+    textColor?: string;
+  }>;
+  settingsTabRequiresConfigAccess?: boolean;
+}) {
+  const hashStore = new Map<string, Map<string, string>>();
+  const setFieldsCalls: Array<Record<string, string>> = [];
+  const configKey = 'subreddit:t5_example:config';
+  const storedConfig = options?.storedConfig ?? {};
+  hashStore.set(configKey, new Map(Object.entries(storedConfig)));
+
+  const ensureHash = (key: string) => {
+    const existing = hashStore.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created = new Map<string, string>();
+    hashStore.set(key, created);
+    return created;
+  };
+
+  return {
+    context: {
+      subredditId: 't5_example',
+      settings: {
+        async get(key: string) {
+          if (key === 'settings_tab_requires_config_access') {
+            return options?.settingsTabRequiresConfigAccess ?? false;
+          }
+          if (key === 'auto_flair_reconcile_enabled') {
+            return true;
+          }
+          if (key === 'show_photo_instructions_before_submit') {
+            return true;
+          }
+          if (key === 'max_denials_before_block') {
+            return 3;
+          }
+          if (key === 'verifications_disabled_message') {
+            return 'Disabled';
+          }
+          return undefined;
+        },
+      },
+      reddit: {
+        async getCurrentUsername() {
+          return 'mod_one';
+        },
+        async getCurrentSubreddit() {
+          return { name: 'example' };
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return ['all'];
+            },
+          };
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              return options?.flairTemplates ?? [
+                {
+                  id: 'ABC-123',
+                  text: 'Verified',
+                  modOnly: true,
+                  backgroundColor: '#123456',
+                  textColor: 'light',
+                },
+              ];
+            },
+          };
+        },
+      },
+      redis: {
+        async hGetAll(key: string) {
+          return Object.fromEntries(ensureHash(key).entries());
+        },
+        async hSet(key: string, entries: Record<string, string>) {
+          setFieldsCalls.push(entries);
+          const hash = ensureHash(key);
+          for (const [field, value] of Object.entries(entries)) {
+            hash.set(field, value);
+          }
+          return Object.keys(entries).length;
+        },
+      },
+    },
+    hashStore,
+    setFieldsCalls,
+    configKey,
+  };
+}
+
 function createViewerFlairSnapshotContext(options?: {
   currentUserResponses?: Array<
     | {
@@ -759,6 +928,8 @@ function createReviewActionContext(options?: {
   setUserFlairResponses?: Array<true | Error>;
   addModNoteResponses?: Array<true | Error>;
   createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
+  archiveConversationResponses?: Array<true | Error>;
+  maxDenialsBeforeBlock?: number | string;
   initialRedis?: Record<string, string>;
   initialHashes?: Record<string, Record<string, string>>;
 }) {
@@ -787,12 +958,14 @@ function createReviewActionContext(options?: {
   const setUserFlairResponses = options?.setUserFlairResponses ?? [true];
   const addModNoteResponses = options?.addModNoteResponses ?? [true];
   const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
+  const archiveConversationResponses = options?.archiveConversationResponses ?? [true];
   let validationResponseIndex = 0;
   let bannedResponseIndex = 0;
   let unbanResponseIndex = 0;
   let setUserFlairResponseIndex = 0;
   let addModNoteResponseIndex = 0;
   let createConversationResponseIndex = 0;
+  let archiveConversationResponseIndex = 0;
 
   const ensureHash = (key: string) => {
     let hash = hashStore.get(key);
@@ -935,11 +1108,19 @@ function createReviewActionContext(options?: {
           },
           async archiveConversation(conversationId: string) {
             archiveCalls.push(conversationId);
+            const response = pickResponse(archiveConversationResponses, archiveConversationResponseIndex);
+            archiveConversationResponseIndex += 1;
+            if (response instanceof Error) {
+              throw response;
+            }
           },
         },
       },
       settings: {
-        async get() {
+        async get(key: string) {
+          if (key === 'max_denials_before_block') {
+            return options?.maxDenialsBeforeBlock;
+          }
           return undefined;
         },
       },
@@ -1159,13 +1340,185 @@ test('validateFlairTemplateId accepts template IDs with a digit and hyphen', () 
   assert.equal(validation.code, 'valid');
 });
 
+test('loadApprovalFlairOptionsForSettings returns only mod-only user flairs in API order with stable labels', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: [
+      {
+        id: 'AAA-111',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+      {
+        id: 'BBB-222',
+        text: 'Visible to users',
+        modOnly: false,
+        backgroundColor: '#abcdef',
+        textColor: 'dark',
+      },
+      {
+        id: 'CCC-333',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: 'transparent',
+        textColor: 'dark',
+      },
+      {
+        id: 'DDD-444',
+        text: '',
+        modOnly: true,
+        backgroundColor: '#654321',
+        textColor: 'light',
+      },
+    ],
+  });
+
+  const options = await loadApprovalFlairOptionsForSettings(optionsContext.context as never);
+
+  assert.deepEqual(options, [
+    {
+      id: 'AAA-111',
+      text: 'Verified',
+      label: 'Verified — AAA-111',
+      backgroundColor: '#123456',
+      textColor: 'light',
+    },
+    {
+      id: 'CCC-333',
+      text: 'Verified',
+      label: 'Verified — CCC-333',
+      backgroundColor: 'transparent',
+      textColor: 'dark',
+    },
+    {
+      id: 'DDD-444',
+      text: '',
+      label: '(untitled flair) — DDD-444',
+      backgroundColor: '#654321',
+      textColor: 'light',
+    },
+  ]);
+  assert.equal(optionsContext.getUserFlairTemplatesCallCount(), 1);
+});
+
+test('loadApprovalFlairOptionsForSettings keeps unique flair text labels clean', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: [
+      {
+        id: 'XYZ-123',
+        text: 'Approved',
+        modOnly: true,
+        backgroundColor: '#ffffff',
+        textColor: 'dark',
+      },
+    ],
+  });
+
+  const options = await loadApprovalFlairOptionsForSettings(optionsContext.context as never);
+
+  assert.equal(options.length, 1);
+  assert.equal(options[0].label, 'Approved');
+});
+
+test('loadApprovalFlairOptionsForSettings surfaces flair lookup failures', async () => {
+  const optionsContext = createApprovalFlairOptionsContext({
+    flairTemplates: new Error('flair lookup failed'),
+  });
+
+  await assert.rejects(
+    async () => await loadApprovalFlairOptionsForSettings(optionsContext.context as never),
+    /flair lookup failed/
+  );
+});
+
+test('looksLikeInternalModmailArchiveError matches internal conversation archive failures', () => {
+  assert.equal(
+    looksLikeInternalModmailArchiveError(
+      '2 UNKNOWN: HTTP request failed: {"explanation":"Cannot archive/unarchive internal conversations.","reason":"UNKNOWN_ERROR"}'
+    ),
+    true
+  );
+  assert.equal(looksLikeInternalModmailArchiveError('http status 500 Internal Server Error'), false);
+});
+
+test('onSaveFlairTemplateValues preserves verificationsEnabled when it is omitted', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      verifications_enabled: 'false',
+      required_photo_count: '2',
+      flair_template_id: 'OLD-123',
+      flair_css_class: 'verified',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: 'approved',
+      requiredPhotoCount: 2,
+      photoInstructions: 'Updated instructions',
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
+  assert.ok(saveContext.setFieldsCalls.every((entries) => !('verifications_enabled' in entries)));
+});
+
+test('onSaveFlairTemplateValues still updates verificationsEnabled when explicitly provided', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      verifications_enabled: 'true',
+      required_photo_count: '2',
+      flair_template_id: 'OLD-123',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: '',
+      verificationsEnabled: false,
+      requiredPhotoCount: 2,
+      photoInstructions: '',
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
+  assert.ok(saveContext.setFieldsCalls.some((entries) => entries.verifications_enabled === 'false'));
+});
+
 test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {
   assert.equal(validateMaxDenialsBeforeBlockSetting(0), undefined);
+});
+
+test('normalizeMaxDenialsBeforeBlockSetting preserves 0 and 2+ while rejecting 1', () => {
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(-1), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('-1'), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(0), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('0'), 0);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(1), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('1'), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(2), 2);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('2'), 2);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting(3), 3);
+  assert.equal(normalizeMaxDenialsBeforeBlockSetting('3'), 3);
 });
 
 test('validateMaxDenialsBeforeBlockSetting rejects 1', () => {
   assert.equal(
     validateMaxDenialsBeforeBlockSetting(1),
+    'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
+  );
+});
+
+test('validateMaxDenialsBeforeBlockSetting accepts numeric strings for install-setting validation', () => {
+  assert.equal(validateMaxDenialsBeforeBlockSetting('0'), undefined);
+  assert.equal(validateMaxDenialsBeforeBlockSetting('3'), undefined);
+  assert.equal(
+    validateMaxDenialsBeforeBlockSetting('1'),
     'Enter 0 to disable auto-block, or a whole number of denials (2 or greater).'
   );
 });
@@ -1752,6 +2105,87 @@ test('denyVerification keeps valid denials working and exposes the denied userna
   assert.equal(reviewContext.addModNoteCalls.length, 1);
   assert.equal(reviewContext.createConversationCalls.length, 1);
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
+});
+
+test('denyVerification auto-blocks once the configured denial threshold is reached', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '1',
+      },
+    },
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+  const blockedEntryRaw = reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.get('example_user');
+  const blockedEntry = blockedEntryRaw ? JSON.parse(blockedEntryRaw) : null;
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(result.denialCount, 2);
+  assert.equal(result.userBlocked, true);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '2');
+  assert.equal(blockedEntry?.username, reviewContext.record.username);
+  assert.equal(blockedEntry?.deniedCount, 2);
+  assert.equal(blockedEntry?.reason, 'Reached 2 denials');
+});
+
+test('denyVerification still auto-blocks when denial modmail archive is skipped', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '1',
+      },
+    },
+    archiveConversationResponses: [
+      new Error(
+        'http status 400 Bad Request: {"explanation":"Cannot archive/unarchive internal conversations.","message":"Bad Request","reason":"UNKNOWN_ERROR"}'
+      ),
+    ],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.applied, true);
+    assert.equal(result.denialCount, 2);
+    assert.equal(result.userBlocked, true);
+    assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '2');
+    assert.ok(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.has('example_user'));
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('repairMissingAutoBlockForUser recreates a missing block from the stored denial count', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '5',
+      },
+    },
+  });
+
+  const repaired = await repairMissingAutoBlockForUser(
+    reviewContext.context as never,
+    reviewContext.subredditId,
+    reviewContext.record.username,
+    {
+      ...buildRuntimeConfig(),
+      maxDenialsBeforeBlock: 2,
+    }
+  );
+
+  assert.equal(repaired?.username, 'example_user');
+  assert.equal(repaired?.deniedCount, 5);
+  assert.equal(repaired?.reason, 'Reached 5 denials');
+  assert.ok(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.has('example_user'));
 });
 
 test('approveVerification leaves the record pending when user validation has a transient failure', async () => {
