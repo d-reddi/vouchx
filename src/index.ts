@@ -371,12 +371,13 @@ app.get('/api/mod/state', async (_req, res) => {
 app.post('/api/mod/approve', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
+    const confirmBannedApproval = parseBooleanFlag(req.body?.confirmBannedApproval);
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     const appContext = currentContext();
-    const result = await approveVerification(appContext, verificationId);
-    if (result.outcome !== 'validation_retry') {
+    const result = await approveVerification(appContext, verificationId, confirmBannedApproval);
+    if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
       await sendRefreshSignals(appContext);
     }
     const payload = await buildModPayload(appContext);
@@ -386,6 +387,17 @@ app.post('/api/mod/approve', async (req, res) => {
         toast: {
           text: "Couldn't confirm the user account right now. Please retry.",
           tone: 'error',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'banned_confirmation_required') {
+      res.json({
+        ...payload,
+        approvalConfirm: {
+          kind: 'banned-unban',
+          verificationId,
+          username: result.username ?? '',
         },
       });
       return;
