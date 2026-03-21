@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  approveVerification,
   buildModeratorUpdateNotice,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  denyVerification,
   dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
@@ -669,6 +671,354 @@ function modmailThreadKey(subredditId: string, usernameField: string): string {
   return `subreddit:${subredditId.toLowerCase()}:modmail:thread-by-user:${normalizeUsername(usernameField)}`;
 }
 
+function subredditPrefixKey(subredditId: string): string {
+  return `subreddit:${subredditId.toLowerCase()}`;
+}
+
+function verificationRecordTestKey(subredditId: string, verificationId: string): string {
+  return `${subredditPrefixKey(subredditId)}:verification:${verificationId}`;
+}
+
+function pendingIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:pending`;
+}
+
+function approvedIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:approved`;
+}
+
+function historyDateIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:history:date`;
+}
+
+function historyByUserIndexTestKey(subredditId: string, username: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:history:user:${normalizeUsername(username)}`;
+}
+
+function historyByModeratorIndexTestKey(subredditId: string, username: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:history:mod:${normalizeUsername(username)}`;
+}
+
+function userPendingTestKey(subredditId: string, username: string): string {
+  return `${subredditPrefixKey(subredditId)}:user:${normalizeUsername(username)}:pending`;
+}
+
+function userLatestTestKey(subredditId: string, username: string): string {
+  return `${subredditPrefixKey(subredditId)}:user:${normalizeUsername(username)}:latest`;
+}
+
+function subredditConfigTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:config`;
+}
+
+function validationDueIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:validation:due`;
+}
+
+function validationHardExpireIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:validation:hard-expire`;
+}
+
+function denialCountTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:denials`;
+}
+
+function blockedUsersTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:blocked`;
+}
+
+function reopenedChildByDeniedTestKey(subredditId: string, deniedVerificationId: string): string {
+  return `${subredditPrefixKey(subredditId)}:reopened-by-denied:${deniedVerificationId.trim()}`;
+}
+
+function reopenedStateByDeniedTestKey(subredditId: string, deniedVerificationId: string): string {
+  return `${subredditPrefixKey(subredditId)}:reopened-state-by-denied:${deniedVerificationId.trim()}`;
+}
+
+function reopenedAuditByReopenedTestKey(subredditId: string, reopenedVerificationId: string): string {
+  return `${subredditPrefixKey(subredditId)}:reopened-audit-by-reopened:${reopenedVerificationId.trim()}`;
+}
+
+function auditDateIndexTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:audit:date`;
+}
+
+function auditEntryTestKey(subredditId: string, auditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:audit:${auditId}`;
+}
+
+function createReviewActionContext(options?: {
+  recordOverrides?: Record<string, unknown>;
+  moderatorName?: string;
+  validationResponses?: Array<{ username?: string; id?: string; isSuspended?: boolean } | Error | null>;
+  setUserFlairResponses?: Array<true | Error>;
+  addModNoteResponses?: Array<true | Error>;
+  createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
+  initialRedis?: Record<string, string>;
+  initialHashes?: Record<string, Record<string, string>>;
+}) {
+  const subredditId = 't5_example';
+  const subredditName = 'ExampleSub';
+  const moderatorName = options?.moderatorName ?? 'Mod_One';
+  const record = buildRecord({
+    subredditId,
+    subredditName,
+    ...options?.recordOverrides,
+  });
+  const normalizedUsername = normalizeUsername(record.username);
+  const redisStore = new Map<string, string>(Object.entries(options?.initialRedis ?? {}));
+  const hashStore = new Map<string, Map<string, string>>();
+  const zsetStore = new Map<string, Map<string, number>>();
+  const getUserByUsernameCalls: string[] = [];
+  const setUserFlairCalls: Array<Record<string, unknown>> = [];
+  const addModNoteCalls: Array<Record<string, unknown>> = [];
+  const createConversationCalls: Array<Record<string, unknown>> = [];
+  const archiveCalls: string[] = [];
+  const replyCalls: Array<Record<string, unknown>> = [];
+  const validationResponses = options?.validationResponses ?? [{ username: normalizedUsername, id: 't2_target' }];
+  const setUserFlairResponses = options?.setUserFlairResponses ?? [true];
+  const addModNoteResponses = options?.addModNoteResponses ?? [true];
+  const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
+  let validationResponseIndex = 0;
+  let setUserFlairResponseIndex = 0;
+  let addModNoteResponseIndex = 0;
+  let createConversationResponseIndex = 0;
+
+  const ensureHash = (key: string) => {
+    let hash = hashStore.get(key);
+    if (!hash) {
+      hash = new Map<string, string>();
+      hashStore.set(key, hash);
+    }
+    return hash;
+  };
+
+  const ensureZSet = (key: string) => {
+    let zset = zsetStore.get(key);
+    if (!zset) {
+      zset = new Map<string, number>();
+      zsetStore.set(key, zset);
+    }
+    return zset;
+  };
+
+  const pickResponse = <T,>(responses: T[], index: number): T => responses[Math.min(index, responses.length - 1)]!;
+
+  for (const [key, entries] of Object.entries(options?.initialHashes ?? {})) {
+    hashStore.set(key, new Map(Object.entries(entries)));
+  }
+
+  ensureHash(subredditConfigTestKey(subredditId)).set('flair_template_id', 'abc-123');
+  redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
+  redisStore.set(userPendingTestKey(subredditId, normalizedUsername), record.id);
+  redisStore.set(userLatestTestKey(subredditId, normalizedUsername), record.id);
+
+  const submittedAtMs = new Date(record.submittedAt).getTime() || Date.now();
+  ensureZSet(pendingIndexTestKey(subredditId)).set(record.id, submittedAtMs);
+  ensureZSet(historyDateIndexTestKey(subredditId)).set(record.id, submittedAtMs);
+  ensureZSet(historyByUserIndexTestKey(subredditId, normalizedUsername)).set(record.id, submittedAtMs);
+
+  if (record.parentVerificationId) {
+    redisStore.set(reopenedChildByDeniedTestKey(subredditId, record.parentVerificationId), record.id);
+    redisStore.set(reopenedStateByDeniedTestKey(subredditId, record.parentVerificationId), 'open');
+    redisStore.set(reopenedAuditByReopenedTestKey(subredditId, record.id), 'audit-reopened-1');
+    redisStore.set(
+      auditEntryTestKey(subredditId, 'audit-reopened-1'),
+      JSON.stringify({
+        id: 'audit-reopened-1',
+        subredditId,
+        subredditName,
+        username: record.username,
+        action: 'reopened',
+        actor: moderatorName,
+        at: record.submittedAt,
+        verificationId: record.id,
+        notes: 'Moved denied case back to pending re-review.',
+      })
+    );
+    ensureZSet(auditDateIndexTestKey(subredditId)).set('audit-reopened-1', submittedAtMs);
+  }
+
+  return {
+    context: {
+      subredditId,
+      subredditName,
+      reddit: {
+        async getCurrentUsername() {
+          return moderatorName;
+        },
+        async getCurrentUser() {
+          return {
+            async getModPermissionsForSubreddit() {
+              return ['access'];
+            },
+          };
+        },
+        async getCurrentSubreddit() {
+          return { name: subredditName };
+        },
+        async getUserByUsername(username: string) {
+          getUserByUsernameCalls.push(username);
+          const response = pickResponse(validationResponses, validationResponseIndex);
+          validationResponseIndex += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+          if (response === null) {
+            return null;
+          }
+          return {
+            username: response.username ?? username,
+            id: response.id ?? 't2_target',
+            isSuspended: response.isSuspended,
+          };
+        },
+        async setUserFlair(args: Record<string, unknown>) {
+          setUserFlairCalls.push(args);
+          const response = pickResponse(setUserFlairResponses, setUserFlairResponseIndex);
+          setUserFlairResponseIndex += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+        },
+        async addModNote(args: Record<string, unknown>) {
+          addModNoteCalls.push(args);
+          const response = pickResponse(addModNoteResponses, addModNoteResponseIndex);
+          addModNoteResponseIndex += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+        },
+        modMail: {
+          async unarchiveConversation() {},
+          async reply(args: Record<string, unknown>) {
+            replyCalls.push(args);
+          },
+          async createConversation(args: Record<string, unknown>) {
+            createConversationCalls.push(args);
+            const response = pickResponse(createConversationResponses, createConversationResponseIndex);
+            createConversationResponseIndex += 1;
+            if (response instanceof Error) {
+              throw response;
+            }
+            return response;
+          },
+          async archiveConversation(conversationId: string) {
+            archiveCalls.push(conversationId);
+          },
+        },
+      },
+      settings: {
+        async get() {
+          return undefined;
+        },
+      },
+      redis: {
+        async get(key: string) {
+          return redisStore.get(key) ?? null;
+        },
+        async mGet(keys: string[]) {
+          return keys.map((key) => redisStore.get(key) ?? null);
+        },
+        async set(key: string, value: string, options?: { nx?: boolean }) {
+          if (options?.nx && redisStore.has(key)) {
+            return null;
+          }
+          redisStore.set(key, value);
+          return 'OK';
+        },
+        async del(...keys: string[]) {
+          for (const key of keys) {
+            redisStore.delete(key);
+            hashStore.delete(key);
+            zsetStore.delete(key);
+          }
+          return keys.length;
+        },
+        async zAdd(key: string, entry: { member: string; score: number }) {
+          ensureZSet(key).set(entry.member, entry.score);
+          return 1;
+        },
+        async zRange(
+          key: string,
+          start: number,
+          stop: number,
+          options?: { by?: 'score' | 'rank'; reverse?: boolean; limit?: { offset: number; count: number } }
+        ) {
+          const zset = ensureZSet(key);
+          let entries = Array.from(zset.entries()).map(([member, score]) => ({ member, score }));
+          if (options?.by === 'score') {
+            entries = entries
+              .filter((entry) => entry.score >= start && entry.score <= stop)
+              .sort((left, right) => left.score - right.score);
+          } else {
+            entries = entries.sort((left, right) => {
+              return options?.reverse ? right.score - left.score : left.score - right.score;
+            });
+            const endIndex = stop < 0 ? entries.length : stop + 1;
+            entries = entries.slice(Math.max(0, start), Math.max(0, endIndex));
+          }
+          if (options?.limit) {
+            entries = entries.slice(options.limit.offset, options.limit.offset + options.limit.count);
+          }
+          return entries;
+        },
+        async zRem(key: string, members: string[]) {
+          const zset = ensureZSet(key);
+          let removed = 0;
+          for (const member of members) {
+            if (zset.delete(member)) {
+              removed += 1;
+            }
+          }
+          return removed;
+        },
+        async zCard(key: string) {
+          return ensureZSet(key).size;
+        },
+        async hGetAll(key: string) {
+          return Object.fromEntries(ensureHash(key).entries());
+        },
+        async hGet(key: string, field: string) {
+          return ensureHash(key).get(field) ?? null;
+        },
+        async hSet(key: string, entries: Record<string, string>) {
+          const hash = ensureHash(key);
+          for (const [field, value] of Object.entries(entries)) {
+            hash.set(field, value);
+          }
+          return Object.keys(entries).length;
+        },
+        async hDel(key: string, fields: string[]) {
+          const hash = ensureHash(key);
+          let removed = 0;
+          for (const field of fields) {
+            if (hash.delete(field)) {
+              removed += 1;
+            }
+          }
+          return removed;
+        },
+      },
+    },
+    record,
+    subredditId,
+    getUserByUsernameCalls,
+    setUserFlairCalls,
+    addModNoteCalls,
+    createConversationCalls,
+    archiveCalls,
+    replyCalls,
+    redisStore,
+    hashStore,
+    zsetStore,
+    getParsedRecord(recordId = record.id) {
+      const payload = redisStore.get(verificationRecordTestKey(subredditId, recordId));
+      return payload ? parseRecord(payload) : null;
+    },
+  };
+}
+
 test('normalizeSubmittedPhotoUrl accepts Reddit-hosted upload URLs', () => {
   assert.equal(
     normalizeSubmittedPhotoUrl('https://i.redd.it/example-photo.png'),
@@ -1175,6 +1525,177 @@ test('sendUserModmailWithFallback retries createConversation with u-prefixed rec
       modmailContext.createConversationCalls.map((call) => call.to),
       ['example_user', 'u/example_user']
     );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('approveVerification keeps valid approvals working', async () => {
+  const reviewContext = createReviewActionContext();
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'completed');
+  assert.deepEqual(
+    {
+      flair: result.flair.status,
+      modmail: result.modmail.status,
+      modNote: result.modNote.status,
+    },
+    {
+      flair: 'success',
+      modmail: 'created',
+      modNote: 'success',
+    }
+  );
+  assert.equal(storedRecord?.status, 'approved');
+  assert.equal(storedRecord?.moderator, 'Mod_One');
+  assert.equal(reviewContext.setUserFlairCalls.length, 1);
+  assert.equal(reviewContext.createConversationCalls.length, 1);
+  assert.equal(reviewContext.addModNoteCalls.length, 1);
+  assert.equal(reviewContext.redisStore.get(userPendingTestKey(reviewContext.subredditId, reviewContext.record.username)), undefined);
+  assert.equal(
+    reviewContext.redisStore.get(userLatestTestKey(reviewContext.subredditId, reviewContext.record.username)),
+    reviewContext.record.id
+  );
+});
+
+test('approveVerification removes pending records immediately when the account is deleted or suspended', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error('that user does not exist')],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'invalid_account_removed');
+  assert.equal(storedRecord?.status, 'removed');
+  assert.equal(storedRecord?.removedBy, 'Mod_One');
+  assert.equal(storedRecord?.moderator, 'Mod_One');
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.redisStore.get(userPendingTestKey(reviewContext.subredditId, reviewContext.record.username)), undefined);
+  assert.equal(
+    reviewContext.redisStore.get(userLatestTestKey(reviewContext.subredditId, reviewContext.record.username)),
+    reviewContext.record.id
+  );
+  assert.equal(reviewContext.zsetStore.get(pendingIndexTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+});
+
+test('denyVerification removes invalid accounts without incrementing denials or blocks', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error("that user doesn't exist")],
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'invalid_account_removed');
+  assert.equal(storedRecord?.status, 'removed');
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+  assert.equal(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+});
+
+test('approveVerification leaves the record pending when user validation has a transient failure', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF')],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'validation_retry');
+  assert.equal(storedRecord?.status, 'pending');
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+});
+
+test('approveVerification clears reopened metadata when an invalid reopened review is removed', async () => {
+  const reviewContext = createReviewActionContext({
+    recordOverrides: {
+      id: 'reopened_1',
+      parentVerificationId: 'denied_1',
+      submittedAt: '2026-03-11T15:00:00.000Z',
+    },
+    validationResponses: [new Error('account suspended')],
+  });
+
+  const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+  assert.equal(result.outcome, 'invalid_account_removed');
+  assert.equal(reviewContext.getParsedRecord()?.status, 'removed');
+  assert.equal(
+    reviewContext.redisStore.get(reopenedChildByDeniedTestKey(reviewContext.subredditId, 'denied_1')),
+    undefined
+  );
+  assert.equal(
+    reviewContext.redisStore.get(reopenedStateByDeniedTestKey(reviewContext.subredditId, 'denied_1')),
+    undefined
+  );
+  assert.equal(
+    reviewContext.redisStore.get(reopenedAuditByReopenedTestKey(reviewContext.subredditId, reviewContext.record.id)),
+    undefined
+  );
+});
+
+test('approveVerification removes the record when flair lookup later reports the account is gone', async () => {
+  const reviewContext = createReviewActionContext({
+    setUserFlairResponses: [new Error("that user doesn't exist")],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+    assert.equal(result.outcome, 'invalid_account_removed');
+    assert.equal(reviewContext.getParsedRecord()?.status, 'removed');
+    assert.ok(reviewContext.setUserFlairCalls.length >= 1);
+    assert.equal(reviewContext.createConversationCalls.length, 0);
+    assert.equal(reviewContext.addModNoteCalls.length, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('approveVerification keeps the approval when modmail fails after a valid preflight', async () => {
+  const reviewContext = createReviewActionContext({
+    createConversationResponses: [new Error("that user doesn't exist")],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.modmail.status, 'failed');
+    assert.equal(reviewContext.getParsedRecord()?.status, 'approved');
+    assert.equal(reviewContext.addModNoteCalls.length, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('denyVerification keeps the denial when modmail fails after a valid preflight', async () => {
+  const reviewContext = createReviewActionContext({
+    createConversationResponses: [new Error("that user doesn't exist")],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.modmail.status, 'failed');
+    assert.equal(reviewContext.getParsedRecord()?.status, 'denied');
+    assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
   } finally {
     console.log = originalConsoleLog;
   }

@@ -366,7 +366,30 @@ app.post('/api/mod/approve', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await approveVerification(appContext, verificationId);
-    await sendRefreshSignals(appContext);
+    if (result.outcome !== 'validation_retry') {
+      await sendRefreshSignals(appContext);
+    }
+    const payload = await buildModPayload(appContext);
+    if (result.outcome === 'validation_retry') {
+      res.json({
+        ...payload,
+        toast: {
+          text: "Couldn't confirm the user account right now. Please retry.",
+          tone: 'error',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'invalid_account_removed') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'User no longer exists or is suspended. Verification removed from review.',
+          tone: 'info',
+        },
+      });
+      return;
+    }
     const approvalFailed = result.flair.status === 'failed';
     const success = !approvalFailed && result.modmail.status !== 'failed' && result.modNote.status !== 'failed';
     const details = [
@@ -375,7 +398,7 @@ app.post('/api/mod/approve', async (req, res) => {
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
     res.json({
-      ...(await buildModPayload(appContext)),
+      ...payload,
       toast: {
         text: `${approvalFailed ? 'Approval failed' : success ? 'Approved' : 'Approved with issues'}: ${details.join('; ')}`,
         tone: success ? 'success' : 'error',
@@ -399,7 +422,30 @@ app.post('/api/mod/deny', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);
-    await sendRefreshSignals(appContext);
+    if (result.outcome !== 'validation_retry') {
+      await sendRefreshSignals(appContext);
+    }
+    const payload = await buildModPayload(appContext);
+    if (result.outcome === 'validation_retry') {
+      res.json({
+        ...payload,
+        toast: {
+          text: "Couldn't confirm the user account right now. Please retry.",
+          tone: 'error',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'invalid_account_removed') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'User no longer exists or is suspended. Verification removed from review.',
+          tone: 'info',
+        },
+      });
+      return;
+    }
     const blockText = result.userBlocked
       ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.`
       : '';
@@ -408,7 +454,6 @@ app.post('/api/mod/deny', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
-    const payload = await buildModPayload(appContext);
     const denyReasonLabel =
       payload.state.config.denyReasons.find((item) => item.id === reason)?.label?.trim() ||
       reason.replace(/_/g, ' ');

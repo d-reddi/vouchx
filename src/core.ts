@@ -246,6 +246,8 @@ type ValidationCheckResult =
 type RedisContext = Pick<Devvit.Context, 'redis'>;
 type RedditRedisContext = Pick<Devvit.Context, 'redis' | 'reddit'>;
 type SchedulerContext = Pick<Devvit.Context, 'redis' | 'scheduler'>;
+type ReviewActionKind = 'approval' | 'denial';
+type ActionOutcome = 'completed' | 'invalid_account_removed' | 'validation_retry';
 
 type FlairStepResult = {
   status: 'success' | 'failed' | 'skipped';
@@ -264,6 +266,8 @@ type ModNoteStepResult = {
 };
 
 type ActionResult = {
+  outcome: ActionOutcome;
+  outcomeReason?: string;
   flair: FlairStepResult;
   modmail: ModmailStepResult;
   modNote: ModNoteStepResult;
@@ -2131,6 +2135,114 @@ async function setPendingClaimState(
   return { item: toPendingPanelItem(updatedRecord), changed, pendingCount };
 }
 
+async function preflightReviewTargetAccount(
+  context: Pick<Devvit.Context, 'reddit'>,
+  record: VerificationRecord
+): Promise<ValidationCheckResult> {
+  return await validateVerificationUserState(context, record);
+}
+
+function buildValidationRetryActionResult(reason: string): ActionResult {
+  return {
+    outcome: 'validation_retry',
+    outcomeReason: reason,
+    flair: { status: 'skipped', reason: 'User validation could not be confirmed.' },
+    modmail: { status: 'skipped', reason: 'User validation could not be confirmed.' },
+    modNote: { status: 'skipped', reason: 'User validation could not be confirmed.' },
+  };
+}
+
+async function removeReviewTargetForInvalidAccount(
+  context: Devvit.Context,
+  subredditId: string,
+  record: VerificationRecord,
+  moderator: string,
+  actionKind: ReviewActionKind,
+  validationReason: string
+): Promise<ActionResult> {
+  const now = new Date().toISOString();
+  const normalizedUsername = normalizeUsername(record.username);
+  const updatedRecord: VerificationRecord = {
+    ...record,
+    status: 'removed',
+    moderator,
+    reviewedAt: now,
+    claimedBy: null,
+    claimedAt: null,
+    removedAt: now,
+    removedBy: moderator,
+    lastValidatedAt: null,
+    nextValidationAt: null,
+    hardExpireAt: null,
+    validationFailureCount: 0,
+    terminalValidationFailureCount: 0,
+    lastFlairReconcileAt: null,
+  };
+
+  await setRecord(context, subredditId, updatedRecord);
+  const historyAnchorMs = getHistoryRecordAnchorMs(updatedRecord);
+  await context.redis.zRem(pendingIndexKey(subredditId), [record.id]);
+  await context.redis.zRem(approvedIndexKey(subredditId), [record.id]);
+  await removeApprovedPrefixIndexEntry(context, subredditId, record.id, record.username);
+  await context.redis.zAdd(historyDateIndexKey(subredditId), {
+    member: record.id,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizedUsername), {
+    member: record.id,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
+    member: record.id,
+    score: historyAnchorMs,
+  });
+  await removeValidationTrackingForRecordIds(context, subredditId, [record.id]);
+
+  const pendingKey = userPendingKey(subredditId, normalizedUsername);
+  const pendingId = await context.redis.get(pendingKey);
+  if (pendingId === record.id) {
+    await context.redis.del(pendingKey);
+  }
+  await context.redis.set(userLatestKey(subredditId, normalizedUsername), record.id);
+
+  const cleanupKeys = new Set<string>([reopenedAuditByReopenedKey(subredditId, record.id)]);
+  const parentVerificationId = record.parentVerificationId?.trim() ?? '';
+  if (parentVerificationId) {
+    cleanupKeys.add(reopenedChildByDeniedKey(subredditId, parentVerificationId));
+    cleanupKeys.add(reopenedStateByDeniedKey(subredditId, parentVerificationId));
+  }
+  const modmailThreadKeys = Array.from(
+    new Set(usernameLookupFields(record.username).map((field) => modmailThreadByUserEntryKey(subredditId, field)))
+  );
+  modmailThreadKeys.forEach((key) => cleanupKeys.add(key));
+  if (cleanupKeys.size > 0) {
+    await context.redis.del(...Array.from(cleanupKeys));
+  }
+
+  try {
+    const reviewLabel = actionKind === 'approval' ? 'approval' : 'denial';
+    await appendAuditLog(context, {
+      subredditId,
+      subredditName: sanitizeSubredditName(record.subredditName),
+      username: record.username,
+      actor: moderator,
+      action: 'removed_by_mod',
+      verificationId: record.id,
+      notes: `Skipped ${reviewLabel} because the user account no longer exists or is suspended (${validationReason}). No review side effects were sent.`,
+    });
+  } catch (error) {
+    console.log(`Audit log write failed (invalid-account cleanup): ${errorText(error)}`);
+  }
+
+  return {
+    outcome: 'invalid_account_removed',
+    outcomeReason: validationReason,
+    flair: { status: 'skipped', reason: 'User no longer exists or is suspended.' },
+    modmail: { status: 'skipped', reason: 'User no longer exists or is suspended.' },
+    modNote: { status: 'skipped', reason: 'User no longer exists or is suspended.' },
+  };
+}
+
 async function approveVerification(context: Devvit.Context, verificationId: string): Promise<ActionResult> {
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
@@ -2148,6 +2260,7 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
 
     if (record.status === 'approved') {
       return {
+        outcome: 'completed',
         flair: { status: 'skipped', reason: 'already approved' },
         modmail: { status: 'skipped', reason: 'already approved' },
         modNote: { status: 'skipped', reason: 'already approved' },
@@ -2160,13 +2273,39 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
     assertClaimAllowsAction(record, moderator);
     const parentDeniedId = record.parentVerificationId?.trim() ?? '';
 
+    const validation = await preflightReviewTargetAccount(context, record);
+    if (validation.outcome === 'deleted_or_suspended') {
+      return await removeReviewTargetForInvalidAccount(
+        context,
+        subredditId,
+        record,
+        moderator,
+        'approval',
+        validation.reason
+      );
+    }
+    if (validation.outcome === 'retry') {
+      return buildValidationRetryActionResult(validation.reason);
+    }
+
     const config = await getRuntimeConfig(context, subredditId);
     const flairResult = await applyApprovalFlairWithFallbacks(context, record, config);
     const flair: FlairStepResult = flairResult.applied
       ? { status: 'success' }
       : { status: 'failed', reason: flairResult.error ?? 'unknown error' };
     if (!flairResult.applied) {
+      if (looksLikeDeletedOrSuspendedError((flairResult.error ?? '').toLowerCase())) {
+        return await removeReviewTargetForInvalidAccount(
+          context,
+          subredditId,
+          record,
+          moderator,
+          'approval',
+          flairResult.error ?? 'user no longer exists or is suspended'
+        );
+      }
       return {
+        outcome: 'completed',
         flair,
         modmail: { status: 'skipped', reason: 'flair not applied' },
         modNote: { status: 'skipped', reason: 'flair not applied' },
@@ -2271,7 +2410,12 @@ async function approveVerification(context: Devvit.Context, verificationId: stri
       console.log(`Audit log write failed (approved): ${errorText(error)}`);
     }
 
-    return { flair, modmail, modNote };
+    return {
+      outcome: 'completed',
+      flair,
+      modmail,
+      modNote,
+    };
   });
 }
 
@@ -2399,6 +2543,7 @@ async function denyVerification(
 
     if (record.status === 'denied') {
       return {
+        outcome: 'completed',
         flair: { status: 'skipped', reason: 'not applicable' },
         modmail: { status: 'skipped', reason: 'already denied' },
         modNote: { status: 'skipped', reason: 'already denied' },
@@ -2409,6 +2554,21 @@ async function denyVerification(
       throw new Error('Verification is no longer pending.');
     }
     assertClaimAllowsAction(record, moderator);
+
+    const validation = await preflightReviewTargetAccount(context, record);
+    if (validation.outcome === 'deleted_or_suspended') {
+      return await removeReviewTargetForInvalidAccount(
+        context,
+        subredditId,
+        record,
+        moderator,
+        'denial',
+        validation.reason
+      );
+    }
+    if (validation.outcome === 'retry') {
+      return buildValidationRetryActionResult(validation.reason);
+    }
 
     const reviewedRecord: VerificationRecord = {
       ...record,
@@ -2511,6 +2671,7 @@ async function denyVerification(
     }
 
     return {
+      outcome: 'completed',
       flair: { status: 'skipped', reason: 'not applicable' },
       modmail,
       modNote,
@@ -2717,6 +2878,7 @@ async function removeApprovedVerificationByModerator(
 
     if (record.status === 'removed') {
       return {
+        outcome: 'completed',
         flair: { status: 'skipped', reason: 'already removed' },
         modmail: { status: 'skipped', reason: 'already removed' },
         modNote: { status: 'skipped', reason: 'not applicable' },
@@ -2786,6 +2948,7 @@ async function removeApprovedVerificationByModerator(
     }
 
     return {
+      outcome: 'completed',
       flair,
       modmail,
       modNote: { status: 'skipped', reason: 'not applicable' },
@@ -6932,7 +7095,16 @@ function looksLikeDeletedOrSuspendedError(message: string): boolean {
   if (!normalized) {
     return false;
   }
+  if (normalized.includes('user_doesnt_exist')) {
+    return true;
+  }
   if (normalized.includes('does not exist') && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes("doesn't exist") && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes('doesnt exist') && normalized.includes('user')) {
     return true;
   }
   if (normalized.includes('unknown user')) {
