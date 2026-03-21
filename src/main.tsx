@@ -21,33 +21,37 @@ async function onCreateVerificationPost(
   event: FormOnSubmitEvent<CreatePostValues>,
   context: Devvit.Context
 ): Promise<void> {
-  const response = await fetchDevvitWeb(context, '/api/admin/create-post', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      postTitle: event.values.postTitle?.trim() || 'Photo Verification Hub',
-    }),
-  });
+  try {
+    const response = await fetchDevvitWeb(context, '/api/admin/create-post', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        postTitle: event.values.postTitle?.trim() || 'Photo Verification Hub',
+      }),
+    });
 
-  const payload = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    postUrl?: string;
-    toast?: { text?: string };
-  };
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      postUrl?: string;
+      toast?: { text?: string };
+    };
 
-  if (!response.ok) {
-    context.ui.showToast(payload.error ?? 'Failed to create the verification post.');
-    return;
-  }
+    if (!response.ok) {
+      context.ui.showToast(payload.error ?? 'Failed to create the verification post.');
+      return;
+    }
 
-  context.ui.showToast({
-    text: payload.toast?.text ?? 'Created NSFW verification post.',
-    appearance: 'success',
-  });
-  if (payload.postUrl) {
-    context.ui.navigateTo(payload.postUrl);
+    context.ui.showToast({
+      text: payload.toast?.text ?? 'Created NSFW verification post.',
+      appearance: 'success',
+    });
+    if (payload.postUrl) {
+      context.ui.navigateTo(payload.postUrl);
+    }
+  } catch (error) {
+    context.ui.showToast(`Failed to create the verification post: ${errorText(error)}`);
   }
 }
 
@@ -193,7 +197,11 @@ Devvit.addTrigger({
       return;
     }
 
-    await ensureUserValidationSchedule(context, subredditId, subredditName);
+    try {
+      await ensureUserValidationSchedule(context, subredditId, subredditName);
+    } catch {
+      return;
+    }
   },
 });
 
@@ -206,7 +214,11 @@ Devvit.addTrigger({
       return;
     }
 
-    await ensureUserValidationSchedule(context, subredditId, subredditName);
+    try {
+      await ensureUserValidationSchedule(context, subredditId, subredditName);
+    } catch {
+      return;
+    }
   },
 });
 

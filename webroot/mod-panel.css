@@ -986,6 +986,12 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
 }
 
+.pending-age-banned {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
 .image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

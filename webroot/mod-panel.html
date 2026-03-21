@@ -580,12 +580,12 @@
           </div>
           <div class="stats-list">
             <div class="stats-row">
-              <span class="stats-label">Previous denied attempts</span>
-              <span id="stats-previous-denials" class="stats-value">Unknown</span>
+              <span class="stats-label">Overall karma</span>
+              <span id="stats-overall-karma" class="stats-value">Unknown</span>
             </div>
             <div class="stats-row">
-              <span class="stats-label">Ban status</span>
-              <span id="stats-ban-status" class="stats-value">Unknown</span>
+              <span class="stats-label">Previous denied attempts</span>
+              <span id="stats-previous-denials" class="stats-value">Unknown</span>
             </div>
           </div>
         </div>
@@ -600,6 +600,19 @@
         <div class="row">
           <button id="block-cancel-btn" class="btn btn-secondary">Cancel</button>
           <button id="block-confirm-btn" class="btn btn-primary">Block User</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="approve-banned-modal" class="dialog-modal hidden">
+      <div class="dialog-card">
+        <h3>User is currently banned</h3>
+        <p class="muted small">
+          The user is currently banned, if you approve this will unban them. Proceed? Selecting no will take you back to the pending queue.
+        </p>
+        <div class="row">
+          <button id="approve-banned-cancel-btn" class="btn btn-secondary" type="button">No</button>
+          <button id="approve-banned-confirm-btn" class="btn btn-primary" type="button">Yes</button>
         </div>
       </div>
     </div>
