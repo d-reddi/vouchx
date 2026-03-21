@@ -461,7 +461,7 @@ app.post('/api/mod/deny', async (req, res) => {
       | { status: 'blocked' | 'already_blocked'; username: string }
       | { status: 'failed'; reason: string }
       | null = null;
-    if (blockUser && result.applied) {
+    if (blockUser && result.applied && !result.userBlocked) {
       if (!result.username) {
         requestedBlockOutcome = { status: 'failed', reason: 'Denied user could not be resolved for blocking.' };
       } else {
