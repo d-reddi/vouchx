@@ -332,6 +332,14 @@ type FlairTemplateValidationState = {
   message: string;
 };
 
+type ApprovalFlairOption = {
+  id: string;
+  text: string;
+  label: string;
+  backgroundColor: string;
+  textColor: string;
+};
+
 type FlairApplyResult = {
   applied: boolean;
   error?: string;
@@ -1442,7 +1450,7 @@ async function submitVerification(
     );
   }
 
-  const blocked = await getBlockedUser(context, subredditId, username);
+  const blocked = await repairMissingAutoBlockForUser(context, subredditId, username, config);
   if (blocked) {
     throw new Error(BLOCKED_SUBMISSION_MESSAGE);
   }
@@ -3368,8 +3376,15 @@ async function archiveModmailConversationBestEffort(
   try {
     await context.reddit.modMail.archiveConversation(conversationId);
   } catch (error) {
+    const message = errorText(error);
+    if (looksLikeInternalModmailArchiveError(message)) {
+      console.log(
+        `Modmail archive skipped for internal conversation in r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}.`
+      );
+      return;
+    }
     console.log(
-      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${errorText(error)}`
+      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${message}`
     );
   }
 }
@@ -3409,7 +3424,7 @@ async function loadDashboardData(
   if (viewerUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
   }
-  const viewerBlocked = viewerUsername ? await getBlockedUser(context, subredditId, viewerUsername) : null;
+  const viewerBlocked = viewerUsername ? await repairMissingAutoBlockForUser(context, subredditId, viewerUsername, config) : null;
   const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
   const pendingCount = canReviewUser
     ? options.includeModData
@@ -3682,6 +3697,58 @@ function extractTemplateId(value: unknown): string {
 
 function normalizeTemplateId(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function buildApprovalFlairOptionLabel(text: string, templateId: string, duplicateCount: number): string {
+  if (!text) {
+    return `(untitled flair) — ${templateId}`;
+  }
+  if (duplicateCount > 1) {
+    return `${text} — ${templateId}`;
+  }
+  return text;
+}
+
+async function loadApprovalFlairOptionsForSettings(context: Devvit.Context): Promise<ApprovalFlairOption[]> {
+  const moderator = await context.reddit.getCurrentUsername();
+  if (!moderator) {
+    throw new Error('You must be logged in as a moderator.');
+  }
+
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
+
+  const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
+  const flairTemplates = await subreddit.getUserFlairTemplates();
+  const modOnlyTemplates = flairTemplates
+    .map((template) => {
+      const templateId = String(template.id ?? '').trim();
+      return template.modOnly && templateId
+        ? {
+            id: templateId,
+            text: String(template.text ?? '').trim(),
+            backgroundColor: typeof template.backgroundColor === 'string' ? template.backgroundColor : 'transparent',
+            textColor: typeof template.textColor === 'string' ? template.textColor : 'dark',
+          }
+        : null;
+    })
+    .filter((template): template is NonNullable<typeof template> => Boolean(template));
+
+  const duplicateCounts = new Map<string, number>();
+  for (const template of modOnlyTemplates) {
+    if (!template.text) {
+      continue;
+    }
+    duplicateCounts.set(template.text, (duplicateCounts.get(template.text) ?? 0) + 1);
+  }
+
+  return modOnlyTemplates.map((template) => ({
+    id: template.id,
+    text: template.text,
+    label: buildApprovalFlairOptionLabel(template.text, template.id, duplicateCounts.get(template.text) ?? 0),
+    backgroundColor: template.backgroundColor,
+    textColor: template.textColor,
+  }));
 }
 
 async function fetchConfiguredFlairTemplateTextFromSelector(
@@ -4468,6 +4535,40 @@ async function getBlockedUser(
 
 async function isUserBlocked(context: Devvit.Context, subredditId: string, username: string): Promise<boolean> {
   return (await getBlockedUser(context, subredditId, username)) !== null;
+}
+
+async function repairMissingAutoBlockForUser(
+  context: Devvit.Context,
+  subredditId: string,
+  username: string,
+  config: RuntimeConfig
+): Promise<BlockedUserEntry | null> {
+  const existingBlocked = await getBlockedUser(context, subredditId, username);
+  if (existingBlocked) {
+    return existingBlocked;
+  }
+  if (config.maxDenialsBeforeBlock <= 0) {
+    return null;
+  }
+
+  const deniedCount = await getStoredDenialCount(context, subredditId, username);
+  if (deniedCount < config.maxDenialsBeforeBlock) {
+    return null;
+  }
+
+  const normalizedUsername = normalizeUsernameForLookup(username);
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  const entry: BlockedUserEntry = {
+    username: normalizedUsername,
+    blockedAt: new Date().toISOString(),
+    deniedCount,
+    reason: `Reached ${deniedCount} denials`,
+  };
+  await setBlockedUser(context, subredditId, entry);
+  return entry;
 }
 
 async function incrementDenialCount(context: Devvit.Context, subredditId: string, username: string): Promise<number> {
@@ -5263,7 +5364,6 @@ async function onSaveFlairTemplateValues(
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
-  const verificationsEnabled = values.verificationsEnabled !== false;
   const existingConfig = await getRuntimeConfig(context, subredditId);
   const requiredPhotoCount =
     values.requiredPhotoCount === undefined
@@ -5277,7 +5377,9 @@ async function onSaveFlairTemplateValues(
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
 
   await context.redis.hSet(subredditConfigKey(subredditId), {
-    [CONFIG_FIELD.verificationsEnabled]: `${verificationsEnabled}`,
+    ...(values.verificationsEnabled === undefined
+      ? {}
+      : { [CONFIG_FIELD.verificationsEnabled]: `${values.verificationsEnabled !== false}` }),
     [CONFIG_FIELD.requiredPhotoCount]: `${requiredPhotoCount}`,
     [CONFIG_FIELD.photoInstructions]: values.photoInstructions?.trim() ?? '',
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
@@ -5518,23 +5620,35 @@ function normalizeMaxDenialsBeforeBlockSetting(value: number | string | undefine
         ? value
         : null
       : typeof value === 'string'
-        ? parseNonNegativeInt(value, DEFAULT_MAX_DENIALS_BEFORE_BLOCK)
+        ? Number.parseInt(value.trim(), 10)
         : null;
-  return parsed === 0 || (parsed !== null && parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK)
-    ? parsed
-    : DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+  if (parsed === null || !Number.isFinite(parsed)) {
+    return DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
+  }
+  if (parsed < 0) {
+    return 0;
+  }
+  if (parsed === 0 || parsed >= MIN_MAX_DENIALS_BEFORE_BLOCK) {
+    return parsed;
+  }
+  return DEFAULT_MAX_DENIALS_BEFORE_BLOCK;
 }
 
 function validateMaxDenialsBeforeBlockSetting(value: unknown): string | undefined {
   if (value === undefined) {
     return;
   }
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
   if (
-    typeof value !== 'number' ||
-    !Number.isFinite(value) ||
-    !Number.isInteger(value) ||
-    value < 0 ||
-    value === 1
+    !Number.isFinite(parsed) ||
+    !Number.isInteger(parsed) ||
+    parsed < 0 ||
+    parsed === 1
   ) {
     return `Enter 0 to disable auto-block, or a whole number of denials (${MIN_MAX_DENIALS_BEFORE_BLOCK} or greater).`;
   }
@@ -7185,6 +7299,17 @@ function looksLikeDeletedOrSuspendedError(message: string): boolean {
   return false;
 }
 
+function looksLikeInternalModmailArchiveError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('cannot archive/unarchive internal conversations') ||
+    (normalized.includes('archive') && normalized.includes('internal conversation'))
+  );
+}
+
 function looksLikeTransientRedditTransportError(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   if (!normalized) {
@@ -7300,6 +7425,7 @@ export {
   getModeratorAccessSnapshot,
   unblockUserForModerator,
   blockUserForModerator,
+  repairMissingAutoBlockForUser,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
@@ -7315,6 +7441,7 @@ export {
   errorText,
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,
+  normalizeMaxDenialsBeforeBlockSetting,
   validateMaxDenialsBeforeBlockSetting,
   resolveThemePalette,
   clearExpiredPendingClaim,
@@ -7322,6 +7449,8 @@ export {
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,
+  loadApprovalFlairOptionsForSettings,
+  looksLikeInternalModmailArchiveError,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeSubmittedPhotoUrl,
@@ -7345,6 +7474,7 @@ export type {
   FlairTemplateValidationState,
   HubStatePayload,
   ModPanelStatePayload,
+  ApprovalFlairOption,
   PendingAccountDetailsSnapshot,
   PublicHubConfig,
   PurgeUserDataFormValues,

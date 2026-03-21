@@ -17,6 +17,7 @@ import {
   getCurrentSubredditNameCompat,
   loadHubDashboard,
   loadModDashboard,
+  loadApprovalFlairOptionsForSettings,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
@@ -285,6 +286,17 @@ app.post('/api/mod/settings/flair/validate', async (req, res) => {
   }
 });
 
+app.get('/api/mod/settings/flair/options', async (_req, res) => {
+  try {
+    const appContext = currentContext();
+    res.json({
+      options: await loadApprovalFlairOptionsForSettings(appContext),
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 app.post('/api/hub/submit', async (req, res) => {
   try {
     const appContext = currentContext();
@@ -449,7 +461,7 @@ app.post('/api/mod/deny', async (req, res) => {
       | { status: 'blocked' | 'already_blocked'; username: string }
       | { status: 'failed'; reason: string }
       | null = null;
-    if (blockUser && result.applied) {
+    if (blockUser && result.applied && !result.userBlocked) {
       if (!result.username) {
         requestedBlockOutcome = { status: 'failed', reason: 'Denied user could not be resolved for blocking.' };
       } else {
