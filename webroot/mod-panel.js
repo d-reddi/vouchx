@@ -855,15 +855,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
       setBusy(true);
       try {
+        const requestBody = {
+          type: 'saveFlair',
+          flairTemplateId,
+          flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+          requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+          photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+        };
+        const savedVerificationsEnabled = state ? state.config.verificationsEnabled !== false : true;
+        if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
+          requestBody.verificationsEnabled = Boolean(verificationsEnabledInput.checked);
+        }
         applyApiState(
-          await requestJson('/api/mod/settings/flair', {
-            type: 'saveFlair',
-            flairTemplateId,
-            flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
-            verificationsEnabled: verificationsEnabledInput ? Boolean(verificationsEnabledInput.checked) : true,
-            requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
-            photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
-          })
+          await requestJson('/api/mod/settings/flair', requestBody)
         );
       } catch (error) {
         setBusy(false);
