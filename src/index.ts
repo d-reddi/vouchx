@@ -62,6 +62,34 @@ type HttpError = Error & {
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 const REFRESH_SIGNAL = Object.freeze({ type: 'refresh' });
+let unhandledRejectionGuardInstalled = false;
+
+function shouldIgnoreDevvitLogStreamAuthRejection(reason: unknown): boolean {
+  const message = errorText(reason).toLowerCase();
+  return (
+    message.includes('unauthenticated') &&
+    message.includes('failed to authenticate plugin request') &&
+    message.includes('upstream request missing or timed out')
+  );
+}
+
+function installUnhandledRejectionGuard(): void {
+  if (unhandledRejectionGuardInstalled || typeof process === 'undefined' || typeof process.on !== 'function') {
+    return;
+  }
+  process.on('unhandledRejection', (reason) => {
+    if (shouldIgnoreDevvitLogStreamAuthRejection(reason)) {
+      return;
+    }
+    const propagatedError = reason instanceof Error ? reason : new Error(errorText(reason));
+    setImmediate(() => {
+      throw propagatedError;
+    });
+  });
+  unhandledRejectionGuardInstalled = true;
+}
+
+installUnhandledRejectionGuard();
 
 function httpError(status: number, message: string): HttpError {
   const error = new Error(message) as HttpError;
@@ -384,11 +412,12 @@ app.post('/api/mod/approve', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
     const confirmBannedApproval = parseBooleanFlag(req.body?.confirmBannedApproval);
+    const selectedFlairTemplateId = String(req.body?.selectedFlairTemplateId ?? '').trim();
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     const appContext = currentContext();
-    const result = await approveVerification(appContext, verificationId, confirmBannedApproval);
+    const result = await approveVerification(appContext, verificationId, confirmBannedApproval, selectedFlairTemplateId);
     if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
       await sendRefreshSignals(appContext);
     }
@@ -410,6 +439,7 @@ app.post('/api/mod/approve', async (req, res) => {
           kind: 'banned-unban',
           verificationId,
           username: result.username ?? '',
+          selectedFlairTemplateId,
         },
       });
       return;
