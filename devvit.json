@@ -126,6 +126,12 @@
         "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
         "defaultValue": true
       },
+      "multiple_approval_flairs_enabled": {
+        "type": "boolean",
+        "label": "Enable multiple approval flairs",
+        "helpText": "When enabled, moderators can configure additional approval flair template IDs and choose one per approval in the queue.",
+        "defaultValue": false
+      },
       "show_photo_instructions_before_submit": {
         "type": "boolean",
         "label": "Show photo instructions before verification submission",
