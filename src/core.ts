@@ -3784,11 +3784,9 @@ function configuredApprovalTemplateIds(
 ): string[] {
   const ids = [
     normalizeTemplateId(config.flairTemplateId),
-    ...(config.multipleApprovalFlairsEnabled
-      ? (Array.isArray(config.additionalApprovalFlairs) ? config.additionalApprovalFlairs : []).map((item) =>
-          normalizeTemplateId(item.templateId)
-        )
-      : []),
+    ...((Array.isArray(config.additionalApprovalFlairs) ? config.additionalApprovalFlairs : []).map((item) =>
+      normalizeTemplateId(item.templateId)
+    )),
   ].filter(Boolean);
   return dedupeNonEmpty(ids);
 }
