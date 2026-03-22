@@ -1918,6 +1918,57 @@ test('checkVerificationFlair matches additional approval flair text when templat
   });
 });
 
+test('getViewerFlairSnapshot retries transient reddit 5xx username lookups without logging them', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      {
+        username: 'DifferentViewer',
+        id: 't2_other',
+      },
+    ],
+    usernameUserResponses: [
+      new Error(
+        '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/user/HLmikemcd/about?raw_json=1 failed with error: Get "https://oauth.reddit.com/user/HLmikemcd/about?raw_json=1": httpbp.ClientError: http status 500 Internal Server Error: {"message":"Internal Server Error","error":500}'
+      ),
+      {
+        username: 'HLmikemcd',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Verified',
+          flairCssClass: 'verified',
+          flairTemplateId: 'abc123',
+        },
+      },
+    ],
+  });
+  const originalConsoleLog = console.log;
+  let consoleLogCallCount = 0;
+  console.log = () => {
+    consoleLogCallCount += 1;
+  };
+
+  try {
+    const snapshot = await getViewerFlairSnapshot(
+      snapshotContext.context as never,
+      'penis',
+      'HLmikemcd'
+    );
+
+    assert.deepEqual(snapshot, {
+      flairText: 'Verified',
+      flairCssClass: 'verified',
+      flairTemplateId: 'abc123',
+      userId: 't2_viewer',
+    });
+    assert.equal(snapshotContext.currentUserCallCount, 2);
+    assert.equal(snapshotContext.usernameLookupCallCount, 2);
+    assert.equal(snapshotContext.flairLookupCallCount, 1);
+    assert.equal(consoleLogCallCount, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
 test('sendUserModmailWithFallback rejects invalid recipients before calling modmail APIs', async () => {
   const modmailContext = createModmailContext();
 
