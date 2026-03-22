@@ -93,6 +93,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
+  const additionalApprovalFlairsInput = document.getElementById('additional-approval-flairs');
+  const multipleApprovalFlairsStatus = document.getElementById('multiple-approval-flairs-status');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
   const installSettingsRow = document.getElementById('install-settings-row');
@@ -417,6 +419,34 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return Boolean(input && input.checked);
   }
 
+  function parseAdditionalApprovalFlairLines(value) {
+    const seen = new Set();
+    const parsed = [];
+    for (const line of String(value || '').split('\n')) {
+      const templateId = normalizeTemplateIdValue(line);
+      if (!templateId || seen.has(templateId)) {
+        continue;
+      }
+      seen.add(templateId);
+      parsed.push({
+        templateId,
+        label: '',
+        text: '',
+      });
+    }
+    return parsed;
+  }
+
+  function additionalApprovalFlairsToLines(value) {
+    if (!Array.isArray(value) || value.length === 0) {
+      return '';
+    }
+    return value
+      .map((item) => normalizeTemplateIdValue(item && item.templateId))
+      .filter(Boolean)
+      .join('\n');
+  }
+
   function formatDenyReasonSlot(reasonId) {
     const match = String(reasonId || '').match(/^reason_(\d+)$/);
     return match ? `Reason ${match[1]}` : String(reasonId || '').replaceAll('_', ' ');
@@ -511,6 +541,40 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   function getDenyReasonTemplate(reasonId) {
     const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
     return match && typeof match.template === 'string' ? match.template : '';
+  }
+
+  function getConfiguredApprovalFlairChoices() {
+    if (!state || !state.config) {
+      return [];
+    }
+    const primaryTemplateId = normalizeTemplateIdValue(state.config.flairTemplateId || '');
+    if (!primaryTemplateId) {
+      return [];
+    }
+    const additional = state.config.multipleApprovalFlairsEnabled === true && Array.isArray(state.config.additionalApprovalFlairs)
+      ? state.config.additionalApprovalFlairs
+      : [];
+    const options = [
+      {
+        templateId: primaryTemplateId,
+        label: 'Default approval flair',
+      },
+      ...additional.map((item) => ({
+        templateId: normalizeTemplateIdValue(item && item.templateId),
+        label: String((item && item.label) || (item && item.text) || '').trim(),
+      })),
+    ].filter((item) => item.templateId);
+    const deduped = [];
+    for (const option of options) {
+      if (deduped.some((existing) => existing.templateId === option.templateId)) {
+        continue;
+      }
+      deduped.push(option);
+    }
+    return deduped.map((option, index) => ({
+      templateId: option.templateId,
+      label: option.label || (index === 0 ? 'Default approval flair' : option.templateId),
+    }));
   }
 
   function getSavedFlairTemplateValidation() {
@@ -840,6 +904,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     isSavingFlairSettings = true;
     syncSaveFlairButtonState();
     const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
+    const additionalApprovalFlairs = parseAdditionalApprovalFlairLines(
+      additionalApprovalFlairsInput ? additionalApprovalFlairsInput.value : ''
+    );
     try {
       try {
         const validation = await validateFlairTemplateInputValue(flairTemplateId);
@@ -849,6 +916,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           return;
         }
         clearFlairTemplateValidationOverride();
+        for (const option of additionalApprovalFlairs) {
+          const optionValidation = await validateFlairTemplateInputValue(option.templateId);
+          if (!optionValidation.isValid) {
+            showToast(`Additional flair ${option.templateId} is invalid: ${optionValidation.message}`, 'error');
+            return;
+          }
+        }
       } catch (error) {
         showToast(error instanceof Error ? error.message : String(error), 'error');
         return;
@@ -859,6 +933,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           type: 'saveFlair',
           flairTemplateId,
           flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
+          additionalApprovalFlairs,
           requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
           photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
         };
@@ -916,7 +991,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       if (!verificationId) {
         continue;
       }
-      const denyReason = card.querySelector('select.field-select');
+      const denyReason = card.querySelector('select[data-role="deny-reason"]');
       const denyNotes = card.querySelector('textarea.field-textarea');
       const reason = denyReason ? String(denyReason.value || '') : '';
       const notes = denyNotes ? String(denyNotes.value || '') : '';
@@ -936,6 +1011,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       approvalFlairManualMode,
       flairTemplateId: stringInputValue(flairTemplateInput),
       flairCssClass: stringInputValue(flairCssClassInput),
+      additionalApprovalFlairs: stringInputValue(additionalApprovalFlairsInput),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
       requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
       photoInstructions: stringInputValue(photoInstructionsInput),
@@ -944,6 +1020,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const dirty =
       draft.flairTemplateId !== String(state.config.flairTemplateId || '') ||
       draft.flairCssClass !== String(state.config.flairCssClass || '') ||
+      draft.additionalApprovalFlairs !== additionalApprovalFlairsToLines(state.config.additionalApprovalFlairs) ||
       draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
       draft.requiredPhotoCount !== savedRequiredPhotoCount ||
       draft.photoInstructions !== String(state.config.photoInstructions || '');
@@ -1045,7 +1122,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       if (!card) {
         continue;
       }
-      const denyReason = card.querySelector('select.field-select');
+      const denyReason = card.querySelector('select[data-role="deny-reason"]');
       const denyNotes = card.querySelector('textarea.field-textarea');
       if (denyReason && typeof draft.reason === 'string') {
         denyReason.value = draft.reason;
@@ -1066,6 +1143,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (flairCssClassInput) {
       flairCssClassInput.value = draft.flairCssClass;
+    }
+    if (additionalApprovalFlairsInput) {
+      additionalApprovalFlairsInput.value = draft.additionalApprovalFlairs;
     }
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = draft.verificationsEnabled;
@@ -1219,6 +1299,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       if (message.type === 'approve') {
         const payload = await requestJson('/api/mod/approve', {
           verificationId: message.verificationId,
+          selectedFlairTemplateId: message.selectedFlairTemplateId,
           confirmBannedApproval: Boolean(message.confirmBannedApproval),
         });
         applyApiState(payload);
@@ -1851,6 +1932,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const configuredReasons = getEnabledDenyReasons();
       denyReason = document.createElement('select');
       denyReason.className = 'field-select';
+      denyReason.dataset.role = 'deny-reason';
       const placeholderOption = document.createElement('option');
       placeholderOption.value = '';
       placeholderOption.selected = true;
@@ -1913,6 +1995,23 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const row = document.createElement('div');
     row.className = 'row';
     const approvalsAllowed = canApprovePendingItems();
+    const approvalFlairChoices = getConfiguredApprovalFlairChoices();
+    let approvalChoiceSelect = null;
+
+    if (!isClaimedByOther && state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1) {
+      approvalChoiceSelect = document.createElement('select');
+      approvalChoiceSelect.className = 'field-select';
+      approvalChoiceSelect.dataset.role = 'approval-flair-choice';
+      approvalChoiceSelect.style.maxWidth = '18rem';
+      for (const choice of approvalFlairChoices) {
+        const option = document.createElement('option');
+        option.value = choice.templateId;
+        option.textContent = choice.label;
+        approvalChoiceSelect.appendChild(option);
+      }
+      approvalChoiceSelect.value = approvalFlairChoices[0].templateId;
+      row.appendChild(approvalChoiceSelect);
+    }
 
     if (!isClaimedByOther) {
       const approveBtn = document.createElement('button');
@@ -1932,7 +2031,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           showToast('You selected a denial reason. Clear the denial reason before approving.', 'error');
           return;
         }
-        postWithBusy({ type: 'approve', verificationId: item.id, confirmBannedApproval: false });
+        postWithBusy({
+          type: 'approve',
+          verificationId: item.id,
+          selectedFlairTemplateId: approvalChoiceSelect ? approvalChoiceSelect.value : '',
+          confirmBannedApproval: false,
+        });
       });
       row.appendChild(approveBtn);
 
@@ -2300,6 +2404,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     flairTemplateInput.value = state.config.flairTemplateId || '';
     if (flairCssClassInput) {
       flairCssClassInput.value = state.config.flairCssClass || '';
+    }
+    if (additionalApprovalFlairsInput) {
+      additionalApprovalFlairsInput.value = additionalApprovalFlairsToLines(state.config.additionalApprovalFlairs);
+      additionalApprovalFlairsInput.disabled = !(state.config.multipleApprovalFlairsEnabled === true);
+    }
+    if (multipleApprovalFlairsStatus) {
+      multipleApprovalFlairsStatus.textContent =
+        state.config.multipleApprovalFlairsEnabled === true
+          ? 'Multiple approval flairs are enabled in install settings.'
+          : 'Enable “multiple approval flairs” in install settings to use these options in Queue.';
     }
     if (requiredPhotoCountInput) {
       const count = Number(state.config.requiredPhotoCount || 2);
@@ -2928,11 +3042,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function submitApproveBannedConfirmation() {
     const verificationId = String(pendingApproveBannedConfirmation && pendingApproveBannedConfirmation.verificationId || '').trim();
+    const selectedFlairTemplateId = String(
+      (pendingApproveBannedConfirmation && pendingApproveBannedConfirmation.selectedFlairTemplateId) || ''
+    ).trim();
     closeApproveBannedModal();
     if (!verificationId) {
       return;
     }
-    postWithBusy({ type: 'approve', verificationId, confirmBannedApproval: true });
+    postWithBusy({ type: 'approve', verificationId, selectedFlairTemplateId, confirmBannedApproval: true });
   }
 
   function submitManualBlock() {
