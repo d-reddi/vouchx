@@ -93,7 +93,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
-  const additionalApprovalFlairsInput = document.getElementById('additional-approval-flairs');
+  const approvalFlairSecondSelect = document.getElementById('approval-flair-second-select');
+  const approvalFlairThirdSelect = document.getElementById('approval-flair-third-select');
   const multipleApprovalFlairsStatus = document.getElementById('multiple-approval-flairs-status');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
@@ -208,6 +209,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let approvalFlairOptionsError = '';
   let approvalFlairOptionsRequestId = 0;
   let approvalFlairManualMode = false;
+  let additionalApprovalFlairSecondDraft = '';
+  let additionalApprovalFlairThirdDraft = '';
   const hiddenCriticalUpdateNoticeKeys = new Set();
   const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
   const queryParams = new URLSearchParams(window.location.search);
@@ -419,32 +422,34 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return Boolean(input && input.checked);
   }
 
-  function parseAdditionalApprovalFlairLines(value) {
-    const seen = new Set();
-    const parsed = [];
-    for (const line of String(value || '').split('\n')) {
-      const templateId = normalizeTemplateIdValue(line);
-      if (!templateId || seen.has(templateId)) {
-        continue;
-      }
-      seen.add(templateId);
-      parsed.push({
-        templateId,
-        label: '',
-        text: '',
-      });
-    }
-    return parsed;
+  function configuredAdditionalApprovalTemplateIds() {
+    const primaryTemplateId = normalizeTemplateIdValue(flairTemplateInput ? flairTemplateInput.value : '');
+    const selections = [
+      normalizeTemplateIdValue(approvalFlairSecondSelect ? approvalFlairSecondSelect.value : ''),
+      normalizeTemplateIdValue(approvalFlairThirdSelect ? approvalFlairThirdSelect.value : ''),
+    ].filter((templateId) => templateId && templateId !== primaryTemplateId);
+    return Array.from(new Set(selections));
   }
 
-  function additionalApprovalFlairsToLines(value) {
-    if (!Array.isArray(value) || value.length === 0) {
-      return '';
+  function selectedApprovalFlairOptionByTemplateId(templateId) {
+    const normalized = normalizeTemplateIdValue(templateId);
+    if (!normalized) {
+      return null;
     }
-    return value
-      .map((item) => normalizeTemplateIdValue(item && item.templateId))
-      .filter(Boolean)
-      .join('\n');
+    return (
+      approvalFlairOptions.find((option) => normalizeTemplateIdValue(option && option.id) === normalized) || null
+    );
+  }
+
+  function additionalApprovalFlairsFromSelection() {
+    return configuredAdditionalApprovalTemplateIds().map((templateId) => {
+      const option = selectedApprovalFlairOptionByTemplateId(templateId);
+      return {
+        templateId,
+        label: option ? String(option.label || '').trim() : templateId,
+        text: option ? String(option.text || '').trim() : '',
+      };
+    });
   }
 
   function formatDenyReasonSlot(reasonId) {
@@ -830,6 +835,64 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
 
     renderApprovalFlairPreview(manualMode ? null : matchedOption);
+    renderAdditionalApprovalFlairPickers();
+  }
+
+  function applyAdditionalFlairSelectOptions(selectEl, currentTemplateId, usedTemplateIds) {
+    if (!selectEl) {
+      return;
+    }
+    const normalizedCurrent = normalizeTemplateIdValue(currentTemplateId);
+    selectEl.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'None';
+    selectEl.appendChild(none);
+
+    const available = approvalFlairOptions.filter((option) => {
+      const templateId = normalizeTemplateIdValue(option && option.id);
+      if (!templateId) {
+        return false;
+      }
+      if (usedTemplateIds.has(templateId) && templateId !== normalizedCurrent) {
+        return false;
+      }
+      return true;
+    });
+    for (const option of available) {
+      const item = document.createElement('option');
+      item.value = String(option.id || '').trim();
+      item.textContent = String(option.label || option.text || option.id || '').trim();
+      selectEl.appendChild(item);
+    }
+    if (normalizedCurrent && !available.some((option) => normalizeTemplateIdValue(option.id) === normalizedCurrent)) {
+      const missing = document.createElement('option');
+      missing.value = normalizedCurrent;
+      missing.textContent = `Saved (unavailable): ${normalizedCurrent}`;
+      selectEl.appendChild(missing);
+    }
+    selectEl.value = normalizedCurrent;
+  }
+
+  function renderAdditionalApprovalFlairPickers() {
+    const enabled = Boolean(state && state.config && state.config.multipleApprovalFlairsEnabled === true);
+    const firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
+    const secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
+    const primaryTemplateId = normalizeTemplateIdValue(state && state.config ? state.config.flairTemplateId : '');
+    const usedTemplateIds = new Set([primaryTemplateId].filter(Boolean));
+
+    applyAdditionalFlairSelectOptions(approvalFlairSecondSelect, firstAdditional, usedTemplateIds);
+    if (firstAdditional) {
+      usedTemplateIds.add(firstAdditional);
+    }
+    applyAdditionalFlairSelectOptions(approvalFlairThirdSelect, secondAdditional, usedTemplateIds);
+
+    if (approvalFlairSecondSelect) {
+      approvalFlairSecondSelect.disabled = !enabled || approvalFlairOptionsLoading;
+    }
+    if (approvalFlairThirdSelect) {
+      approvalFlairThirdSelect.disabled = !enabled || approvalFlairOptionsLoading;
+    }
   }
 
   async function ensureApprovalFlairOptionsLoaded() {
@@ -904,9 +967,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     isSavingFlairSettings = true;
     syncSaveFlairButtonState();
     const flairTemplateId = flairTemplateInput ? String(flairTemplateInput.value || '').trim() : '';
-    const additionalApprovalFlairs = parseAdditionalApprovalFlairLines(
-      additionalApprovalFlairsInput ? additionalApprovalFlairsInput.value : ''
-    );
+    const additionalApprovalFlairs = additionalApprovalFlairsFromSelection();
     try {
       try {
         const validation = await validateFlairTemplateInputValue(flairTemplateId);
@@ -1011,7 +1072,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       approvalFlairManualMode,
       flairTemplateId: stringInputValue(flairTemplateInput),
       flairCssClass: stringInputValue(flairCssClassInput),
-      additionalApprovalFlairs: stringInputValue(additionalApprovalFlairsInput),
+      additionalApprovalFlairSecond: stringInputValue(approvalFlairSecondSelect),
+      additionalApprovalFlairThird: stringInputValue(approvalFlairThirdSelect),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
       requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
       photoInstructions: stringInputValue(photoInstructionsInput),
@@ -1020,7 +1082,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const dirty =
       draft.flairTemplateId !== String(state.config.flairTemplateId || '') ||
       draft.flairCssClass !== String(state.config.flairCssClass || '') ||
-      draft.additionalApprovalFlairs !== additionalApprovalFlairsToLines(state.config.additionalApprovalFlairs) ||
+      normalizeTemplateIdValue(draft.additionalApprovalFlairSecond) !==
+        normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[0]?.templateId || '') ||
+      normalizeTemplateIdValue(draft.additionalApprovalFlairThird) !==
+        normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '') ||
       draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
       draft.requiredPhotoCount !== savedRequiredPhotoCount ||
       draft.photoInstructions !== String(state.config.photoInstructions || '');
@@ -1144,9 +1209,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (flairCssClassInput) {
       flairCssClassInput.value = draft.flairCssClass;
     }
-    if (additionalApprovalFlairsInput) {
-      additionalApprovalFlairsInput.value = draft.additionalApprovalFlairs;
-    }
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = draft.verificationsEnabled;
     }
@@ -1156,6 +1218,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (photoInstructionsInput) {
       photoInstructionsInput.value = draft.photoInstructions;
     }
+    additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairSecond || '');
+    additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairThird || '');
     renderApprovalFlairPicker();
   }
 
@@ -2405,10 +2469,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (flairCssClassInput) {
       flairCssClassInput.value = state.config.flairCssClass || '';
     }
-    if (additionalApprovalFlairsInput) {
-      additionalApprovalFlairsInput.value = additionalApprovalFlairsToLines(state.config.additionalApprovalFlairs);
-      additionalApprovalFlairsInput.disabled = !(state.config.multipleApprovalFlairsEnabled === true);
-    }
+    additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[0]?.templateId || '');
+    additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '');
     if (multipleApprovalFlairsStatus) {
       multipleApprovalFlairsStatus.textContent =
         state.config.multipleApprovalFlairsEnabled === true
@@ -3502,6 +3564,20 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         message: 'Flair template ID looks valid.',
       });
       renderApprovalFlairPicker();
+    });
+  }
+
+  if (approvalFlairSecondSelect) {
+    approvalFlairSecondSelect.addEventListener('change', () => {
+      additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(approvalFlairSecondSelect.value);
+      renderAdditionalApprovalFlairPickers();
+    });
+  }
+
+  if (approvalFlairThirdSelect) {
+    approvalFlairThirdSelect.addEventListener('change', () => {
+      additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(approvalFlairThirdSelect.value);
+      renderAdditionalApprovalFlairPickers();
     });
   }
 

@@ -5478,7 +5478,8 @@ async function onSaveFlairTemplateValues(
     : [];
   const normalizedAdditional = additionalApprovalFlairs
     .filter((item) => item.templateId !== normalizedTemplateId)
-    .filter((item, index, all) => all.findIndex((entry) => entry.templateId === item.templateId) === index);
+    .filter((item, index, all) => all.findIndex((entry) => entry.templateId === item.templateId) === index)
+    .slice(0, 2);
   for (const option of normalizedAdditional) {
     const validation = await validateFlairTemplateIdForSubreddit(context, subredditName, option.templateId);
     if (!validation.isValid) {

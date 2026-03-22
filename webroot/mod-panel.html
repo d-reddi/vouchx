@@ -298,16 +298,21 @@
                     <input id="flair-css-class" class="field-input" type="text" />
                   </div>
                 </div>
-                <div class="field-stack">
-                  <label class="field-label" for="additional-approval-flairs">Additional approval flair template IDs (one per line)</label>
-                  <textarea
-                    id="additional-approval-flairs"
-                    class="field-textarea"
-                    rows="4"
-                    placeholder="Only used when install setting “Enable multiple approval flairs” is turned on."
-                  ></textarea>
-                  <p id="multiple-approval-flairs-status" class="muted small"></p>
+                <div class="field-grid">
+                  <div class="field-stack">
+                    <label class="field-label" for="approval-flair-second-select">Second approval flair (optional)</label>
+                    <select id="approval-flair-second-select" class="field-select" disabled>
+                      <option value="">None</option>
+                    </select>
+                  </div>
+                  <div class="field-stack">
+                    <label class="field-label" for="approval-flair-third-select">Third approval flair (optional)</label>
+                    <select id="approval-flair-third-select" class="field-select" disabled>
+                      <option value="">None</option>
+                    </select>
+                  </div>
                 </div>
+                <p id="multiple-approval-flairs-status" class="muted small"></p>
                 <p class="muted small">
                   A user counts as verified if either the flair template ID matches or the flair CSS class contains this substring.
                 </p>
