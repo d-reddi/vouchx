@@ -95,6 +95,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const flairCssClassInput = document.getElementById('flair-css-class');
   const approvalFlairSecondSelect = document.getElementById('approval-flair-second-select');
   const approvalFlairThirdSelect = document.getElementById('approval-flair-third-select');
+  const additionalApprovalFlairsRow = document.getElementById('additional-approval-flairs-row');
+  const approvalFlairSecondWrap = document.getElementById('approval-flair-second-wrap');
+  const approvalFlairThirdWrap = document.getElementById('approval-flair-third-wrap');
   const approvalFlairSecondPreview = document.getElementById('approval-flair-second-preview');
   const approvalFlairSecondPreviewChip = document.getElementById('approval-flair-second-preview-chip');
   const approvalFlairThirdPreview = document.getElementById('approval-flair-third-preview');
@@ -884,6 +887,15 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function renderAdditionalApprovalFlairPickers() {
     const enabled = Boolean(state && state.config && state.config.multipleApprovalFlairsEnabled === true);
+    if (additionalApprovalFlairsRow) {
+      additionalApprovalFlairsRow.classList.toggle('hidden', !enabled);
+    }
+    if (approvalFlairSecondWrap) {
+      approvalFlairSecondWrap.classList.toggle('hidden', !enabled);
+    }
+    if (approvalFlairThirdWrap) {
+      approvalFlairThirdWrap.classList.toggle('hidden', !enabled);
+    }
     const primaryTemplateId = normalizeTemplateIdValue(state && state.config ? state.config.flairTemplateId : '');
     let firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
     let secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
