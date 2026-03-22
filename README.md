@@ -2,31 +2,26 @@
 
 VouchX is a photo verification app for Reddit communities. It gives your subreddit a member-facing Verification Hub where users submit photos, and it gives moderators a built-in review panel for approving, denying, tracking, and maintaining verification records.
 
-This README is written for subreddit moderators and admins who are setting up or running VouchX.
+The app provides:
 
-## What VouchX Does
+- Inline verification hub post
+- Moderator review queue with claim locking
+- Automated modmail templates
+- Verification flair integration
+- Audit history and retention controls
+- Customizable themes and messaging
+- Automatic cleanup and validation jobs
 
-### For members
+---
 
-- Submit 1, 2, or 3 verification photos, depending on your setup.
-- Read photo requirements before submitting, if you enable that option.
-- See their current status in the hub: pending, verified, denied, removed, or blocked.
-- Withdraw a pending request.
-- Resubmit after a denial or after verification is removed.
-- Remove their own verification later, which removes their verification flair and stored verification data.
+**Screenshots and workflow demos:**  
+[https://www.reddit.com/r/vouchx/wiki/demo/](https://www.reddit.com/r/vouchx/wiki/demo/)
 
-### For moderators
+## Setup, Documentation & Help
+[https://www.reddit.com/r/vouchx/wiki/guide/](https://www.reddit.com/r/vouchx/wiki/guide/)
 
-- Review a queue of pending submissions.
-- Lock a request while you work it.
-- Approve with a verification flair.
-- Optionally choose from multiple approval flairs on each approval.
-- Deny with a reason template and optional moderator notes.
-- Block or unblock users from submitting.
-- Reopen denied cases for another review when the original photos are still available.
-- Revoke an approved verification later with a reason.
-- Search approved users, verification records, blocked users, and the audit trail.
-- View helpful account details on pending requests, including account age, subreddit karma, overall karma, previous denied attempts, and banned-user indicators.
+
+---
 
 ## Before You Start
 
@@ -91,16 +86,6 @@ These are the settings you manage inside `Mod Panel > Settings`:
 - denial note handling
 - hub theme preset and custom colors
 
-## Setting Up Flair
-
-VouchX is not ready until the primary approval flair is saved.
-
-### Recommended setup
-
-Use the flair picker in `Settings > General` and choose the flair that should be applied to approved users.
-
-- The picker shows mod-only user flairs.
-- This is the easiest setup and should be your default choice.
 
 ### If your flair is not listed
 
@@ -200,90 +185,6 @@ Moderators can also block the user at denial time.
 
 Separately, VouchX can auto-block users after repeated denials if you set a denial threshold in install settings.
 
-### Reopening a denied request
-
-Moderators can reopen a denied case from `History > Records` when the original photos are still available.
-
-That moves the request back into the queue as a re-review case.
-
-### Revoking an approved verification
-
-From `History > Approved`, moderators can revoke an approved verification.
-
-VouchX requires a reason, then:
-
-- removes the user's verification flair
-- marks the record as removed
-- sends the revocation modmail template
-- keeps the action in history and audit data
-
-## History, Blocked Users, and Audit Trail
-
-### History > Approved
-
-Search approved members by username and date range, and revoke approved verifications when needed.
-
-### History > Records
-
-Search verification records across pending, approved, denied, and removed entries.
-
-This is also where moderators can reopen denied requests for another review.
-
-### History > Audit
-
-Search the moderator action log by:
-
-- user
-- moderator
-- date range
-- action type
-
-Tracked actions include:
-
-- approved
-- denied
-- reopened
-- removed
-- blocked
-- unblocked
-
-### Blocked
-
-The `Blocked` tab shows:
-
-- users blocked manually
-- users auto-blocked after repeated denials
-- the reason for the block
-- the denial count, when applicable
-
-Moderators can also manually block a user or remove a block from this tab.
-
-## Modmail Templates
-
-VouchX can send modmail for:
-
-- pending review
-- approval
-- denial
-- revoked verification
-
-VouchX tries to reply in an existing modmail thread for that user when possible. If there is no usable thread, it creates a new one.
-
-### Template placeholders
-
-The template editor supports these placeholders:
-
-- `{{username}}`
-- `{{mod}}`
-- `{{subreddit}}`
-- `{{date submitted}}`
-- `{{days}}`
-
-Denial templates also support:
-
-- `{{denial_notes}}`
-
-`{{days}}` already includes the unit, such as `3 days`.
 
 ## Flair Repair and Verification Detection
 
@@ -340,12 +241,6 @@ VouchX adds moderator menu actions for:
 - `Purge Audit Log`
 - `Remove Verification Hub Post`
 
-### Audit log purge
-
-`Purge Audit Log` uses your install setting for audit retention days.
-
-- set it to `0` to purge all audit entries
-- otherwise, VouchX removes only entries older than the configured age
 
 ### Update notices
 
@@ -362,3 +257,20 @@ When a newer VouchX release is configured, moderators using the panel can see an
 - Only denial reasons with labels in install settings appear in the queue and in denial template settings.
 - If a user deletes their account or is suspended before review, VouchX removes the request from review instead of leaving a broken pending item behind.
 - If submissions are turned off, members see the disabled message from install settings.
+
+Full Changelog available at: [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
+
+## v 1.3.1
+
+New Features
+- Multiple approval flairs (optional — enable in install settings)
+- Banned member indicator in pending queue
+- Block user option on denial
+- Total karma added to "Stats" popup
+- Automatically unban users on approval (useful for banned pending verifications)
+
+Fixes & Improvements
+- Improved Modmail handling reliability
+- Fixed error when approving deleted users
+- Improved contrast for young account badge
+- Backend console: more graceful failure handling
