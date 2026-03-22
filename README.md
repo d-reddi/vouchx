@@ -1,576 +1,364 @@
 # VouchX
 
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-**A moderator-reviewed photo verification system for Reddit communities.**
+VouchX is a photo verification app for Reddit communities. It gives your subreddit a member-facing Verification Hub where users submit photos, and it gives moderators a built-in review panel for approving, denying, tracking, and maintaining verification records.
 
-VouchX provides a structured system for managing photo verification submissions inside Reddit.
+This README is written for subreddit moderators and admins who are setting up or running VouchX.
 
-Members submit photos for moderator review, and moderators manage approvals through a centralized moderation panel.
+## What VouchX Does
 
-The app provides:
+### For members
 
-- Inline verification hub post
-- Moderator review queue with claim locking
-- Automated modmail templates
-- Verification flair integration
-- Audit history and retention controls
-- Customizable themes and messaging
-- Automatic cleanup and validation jobs
+- Submit 1, 2, or 3 verification photos, depending on your setup.
+- Read photo requirements before submitting, if you enable that option.
+- See their current status in the hub: pending, verified, denied, removed, or blocked.
+- Withdraw a pending request.
+- Resubmit after a denial or after verification is removed.
+- Remove their own verification later, which removes their verification flair and stored verification data.
 
----
+### For moderators
 
-[**Screenshots and workflow demos:**](https://www.reddit.com/r/vouchx/wiki/demo/]
+- Review a queue of pending submissions.
+- Lock a request while you work it.
+- Approve with a verification flair.
+- Optionally choose from multiple approval flairs on each approval.
+- Deny with a reason template and optional moderator notes.
+- Block or unblock users from submitting.
+- Reopen denied cases for another review when the original photos are still available.
+- Revoke an approved verification later with a reason.
+- Search approved users, verification records, blocked users, and the audit trail.
+- View helpful account details on pending requests, including account age, subreddit karma, overall karma, previous denied attempts, and banned-user indicators.
 
-## Setup, Documentation & Help
-[Read the guide](https://www.reddit.com/r/vouchx/wiki/guide/)
+## Before You Start
 
-## Core Capabilities
+- Moderators need `Manage Users` permission to review requests or use the moderator panel.
+- The `Settings` tab can optionally be limited to moderators with config/settings access.
+- Opening subreddit install settings from inside VouchX requires a moderator with full permissions.
+- Updating VouchX from an in-app update notice also requires a moderator with full permissions.
 
-### Member-side
+## Quick Setup
 
-- Submit 1–3 verification photos (configurable by moderators).
-- Optional “show instructions before submit” gate.
-- Live status refresh while the hub is open.
-- Resubmission flow after denial.
-- Self-service withdraw (pending) and self-remove (approved).
+1. Install VouchX in your subreddit.
+2. From the subreddit moderator menu, run `Create Verification Hub (VouchX)`.
+   - VouchX creates the hub post and marks it NSFW.
+3. Open the hub post and click `Mod Panel`.
+4. In `Settings > General`, save your primary approval flair.
+   - This is the required first step. Until a primary approval flair is saved, the hub will show `Setup required` and approvals stay blocked.
+5. Still in `Settings > General`, choose:
+   - whether submissions are enabled
+   - how many photos are required
+   - your photo instructions
+   - optional extra approval flairs, if you have enabled that install setting
+6. In your subreddit install settings, review the subreddit-wide options such as denial reasons, auto-blocking, and auto flair repair.
+7. In `Settings > Templates`, customize the modmail messages VouchX sends.
+8. In `Settings > Themes`, optionally change the member-facing hub colors.
 
-### Moderator-side
-
-- Pending queue with claim locking to prevent double actions.
-- Approve / deny with configurable modmail templates.
-- Optional banned-user approval confirmation (approval can unban first when confirmed).
-- Reopen denied cases (when photos are still available).
-- Blocked-user management + denial-based auto-block threshold.
-- Searchable history views (records, approved, audit).
-- Per-item account stats modal (account age, karma, ban status, prior denials).
-
-### Flair system
-
-- Primary approval flair template ID support.
-- Optional **multiple approval flairs** (2nd/3rd choices) when enabled in install settings.
-- Per-approval flair selection in queue actions.
-- Verification detection checks:
-  - template ID match
-  - optional flair CSS substring match
-  - text fallback (primary cached text + additional configured flair texts when template ID is absent)
-- Optional automatic flair repair/reconciliation for approved users.
-
-### Ops & reliability
-
-- Daily scheduled reconciliation/cleanup job.
-- 45-day history/audit retention logic.
-- Sliding retention for approved records with controlled TTL bumps.
-- Update notice system for moderators (supports normal vs critical notices and dismissal behavior).
-- Realtime refresh signals for hub/mod panel without broadcasting user payloads.
-
-=======
-VouchX is a Devvit app for **photo-based verification workflows** on Reddit. It gives members a guided submission flow and gives moderators a queue-driven review panel with audit history, templates, and automated maintenance.
-
-- **Member UI:** inline verification hub post
-- **Moderator UI:** queue, history, blocked users, and settings panels
-- **Automation:** flair application/reconciliation, modmail templates, retention cleanup, scheduled validation
-
----
-
-## Core Capabilities
-
-### Member-side
-
-- Submit 1–3 verification photos (configurable by moderators).
-- Optional “show instructions before submit” gate.
-- Live status refresh while the hub is open.
-- Resubmission flow after denial.
-- Self-service withdraw (pending) and self-remove (approved).
-=======
-VouchX is a Devvit app for **photo-based verification workflows** on Reddit. It gives members a guided submission flow and gives moderators a queue-driven review panel with audit history, templates, and automated maintenance.
-
-- **Member UI:** inline verification hub post
-- **Moderator UI:** queue, history, blocked users, and settings panels
-- **Automation:** flair application/reconciliation, modmail templates, retention cleanup, scheduled validation
-
----
-=======
-VouchX is a Devvit app for **photo-based verification workflows** on Reddit. It gives members a guided submission flow and gives moderators a queue-driven review panel with audit history, templates, and automated maintenance.
-
-- **Member UI:** inline verification hub post
-- **Moderator UI:** queue, history, blocked users, and settings panels
-- **Automation:** flair application/reconciliation, modmail templates, retention cleanup, scheduled validation
-
----
-
-## Core Capabilities
-
-### Member-side
-
-- Submit 1–3 verification photos (configurable by moderators).
-- Optional “show instructions before submit” gate.
-- Live status refresh while the hub is open.
-- Resubmission flow after denial.
-- Self-service withdraw (pending) and self-remove (approved).
-
-### Moderator-side
-
-- Pending queue with claim locking to prevent double actions.
-- Approve / deny with configurable modmail templates.
-- Optional banned-user approval confirmation (approval can unban first when confirmed).
-- Reopen denied cases (when photos are still available).
-- Blocked-user management + denial-based auto-block threshold.
-- Searchable history views (records, approved, audit).
-- Per-item account stats modal (account age, karma, ban status, prior denials).
-
-### Flair system
-
-- Primary approval flair template ID support.
-- Optional **multiple approval flairs** (2nd/3rd choices) when enabled in install settings.
-- Per-approval flair selection in queue actions.
-- Verification detection checks:
-  - template ID match
-  - optional flair CSS substring match
-  - text fallback (primary cached text + additional configured flair texts when template ID is absent)
-- Optional automatic flair repair/reconciliation for approved users.
-
-### Ops & reliability
-
-- Daily scheduled reconciliation/cleanup job.
-- 45-day history/audit retention logic.
-- Sliding retention for approved records with controlled TTL bumps.
-- Update notice system for moderators (supports normal vs critical notices and dismissal behavior).
-- Realtime refresh signals for hub/mod panel without broadcasting user payloads.
->>>>>>> theirs
-
-## Core Capabilities
-
-### Member-side
-
-- Submit 1–3 verification photos (configurable by moderators).
-- Optional “show instructions before submit” gate.
-- Live status refresh while the hub is open.
-- Resubmission flow after denial.
-- Self-service withdraw (pending) and self-remove (approved).
-
-### Moderator-side
-
-- Pending queue with claim locking to prevent double actions.
-- Approve / deny with configurable modmail templates.
-- Optional banned-user approval confirmation (approval can unban first when confirmed).
-- Reopen denied cases (when photos are still available).
-- Blocked-user management + denial-based auto-block threshold.
-- Searchable history views (records, approved, audit).
-- Per-item account stats modal (account age, karma, ban status, prior denials).
-
-### Flair system
-
-- Primary approval flair template ID support.
-- Optional **multiple approval flairs** (2nd/3rd choices) when enabled in install settings.
-- Per-approval flair selection in queue actions.
-- Verification detection checks:
-  - template ID match
-  - optional flair CSS substring match
-  - text fallback (primary cached text + additional configured flair texts when template ID is absent)
-- Optional automatic flair repair/reconciliation for approved users.
-
-### Ops & reliability
-
-- Daily scheduled reconciliation/cleanup job.
-- 45-day history/audit retention logic.
-- Sliding retention for approved records with controlled TTL bumps.
-- Update notice system for moderators (supports normal vs critical notices and dismissal behavior).
-- Realtime refresh signals for hub/mod panel without broadcasting user payloads.
->>>>>>> theirs
-
-### Moderator-side
-
-<<<<<<< ours
-- Pending queue with claim locking to prevent double actions.
-- Approve / deny with configurable modmail templates.
-- Optional banned-user approval confirmation (approval can unban first when confirmed).
-- Reopen denied cases (when photos are still available).
-- Blocked-user management + denial-based auto-block threshold.
-- Searchable history views (records, approved, audit).
-- Per-item account stats modal (account age, karma, ban status, prior denials).
-
-### Flair system
-
-- Primary approval flair template ID support.
-- Optional **multiple approval flairs** (2nd/3rd choices) when enabled in install settings.
-- Per-approval flair selection in queue actions.
-- Verification detection checks:
-  - template ID match
-  - optional flair CSS substring match
-  - text fallback (primary cached text + additional configured flair texts when template ID is absent)
-- Optional automatic flair repair/reconciliation for approved users.
-
-### Ops & reliability
-
-- Daily scheduled reconciliation/cleanup job.
-- 45-day history/audit retention logic.
-- Sliding retention for approved records with controlled TTL bumps.
-- Update notice system for moderators (supports normal vs critical notices and dismissal behavior).
-- Realtime refresh signals for hub/mod panel without broadcasting user payloads.
-
->>>>>>> theirs
----
-
-## Quick Start (Moderators)
-<<<<<<< ours
-
-=======
-## Quick Start (Moderators)
-=======
->>>>>>> theirs
-
->>>>>>> theirs
-1. Install **VouchX** in your subreddit.
-2. Use moderator menu action **Create Verification Hub (VouchX)**.
-3. Open the post and launch **Mod Panel**.
-4. In **Settings → General**:
-   - enable verifications,
-   - choose an approval flair (or enter template ID manually),
-   - set required photo count,
-   - configure photo instructions.
-5. Optionally configure **Templates** and **Themes** tabs.
-<<<<<<< ours
-
-Once saved, users can submit immediately.
-<<<<<<< ours
-<<<<<<< ours
-
----
-
-## Moderator Menu Actions
-
-- **Create Verification Hub (VouchX)**
-  - Creates a new NSFW verification hub post.
-- **Purge Audit Log**
-  - Purges audit records using subreddit install setting.
-- **Remove Verification Hub Post**
-  - Removes the current app-owned verification post.
-
----
-
-## Configuration
-
-VouchX uses both **install settings** (subreddit/global) and **panel-managed runtime settings**.
+## Install Settings vs VouchX Panel Settings
 
 ### Subreddit install settings
 
-- `verifications_disabled_message`
-- `max_denials_before_block`
-- `auto_flair_reconcile_enabled`
-- `multiple_approval_flairs_enabled`
-- `show_photo_instructions_before_submit`
-- `settings_tab_requires_config_access`
-- `mod_menu_audit_purge_days`
-- `deny_reason_1_label` … `deny_reason_4_label`
+These are subreddit-wide controls in Reddit's app install settings for VouchX:
 
+- `Verifications disabled message`
+  - The message members see when submissions are turned off.
+- `Max denials before auto-block`
+  - Automatically blocks users from submitting again after they reach the chosen number of denials.
+- `Automatically repair verification flair`
+  - When enabled, VouchX checks approved users when they open the hub, up to once every 24 hours, and can restore a missing or changed verification flair.
+- `Enable multiple approval flairs`
+  - Lets you configure a second and third approval flair and choose one per approval in the queue.
+- `Show photo instructions before verification submission`
+  - Shows your saved photo instructions before the upload form opens.
+- `Restrict Settings tab to mods with config/settings access`
+  - Limits the VouchX `Settings` tab without changing queue access.
+- `Purge audit log data older than (days)`
+  - Used by the `Purge Audit Log` moderator menu action.
+- `Denial reason labels`
+  - These labels control which denial reasons are available in the queue and in template settings.
+  - Leave a label blank to hide that denial reason entirely.
 
-### Panel settings (stored per subreddit)
+### VouchX panel settings
 
-- Verification workflow (enabled toggle, flair setup, CSS matcher, required photo count, instructions)
-- Modmail templates (pending, approval, denial, removal)
-- Denial reason templates + denial notes behavior
-- Theme preset + color overrides
+These are the settings you manage inside `Mod Panel > Settings`:
 
----
+- submissions on/off
+- primary approval flair
+- optional flair template ID manual entry
+- optional flair CSS substring match
+- optional second and third approval flairs
+- required photo count
+- photo instructions
+- pending, approval, denial, and revocation modmail templates
+- denial note handling
+- hub theme preset and custom colors
 
-=======
+## Setting Up Flair
 
----
+VouchX is not ready until the primary approval flair is saved.
 
-## Moderator Menu Actions
+### Recommended setup
 
-=======
-=======
+Use the flair picker in `Settings > General` and choose the flair that should be applied to approved users.
 
-Once saved, users can submit immediately.
->>>>>>> theirs
+- The picker shows mod-only user flairs.
+- This is the easiest setup and should be your default choice.
 
----
+### If your flair is not listed
 
-## Moderator Menu Actions
-<<<<<<< ours
+Use `Manual Input` and paste the flair template ID.
 
->>>>>>> theirs
-- **Create Verification Hub (VouchX)**
-  - Creates a new NSFW verification hub post.
-- **Purge Audit Log**
-  - Purges audit records using subreddit install setting `mod_menu_audit_purge_days` (0 = purge all).
-- **Remove Verification Hub Post**
-  - Removes the current app-owned verification post.
+- This is useful when the flair is not mod-only or does not appear in the picker.
+- Approvals stay blocked if the saved primary flair template is invalid.
 
----
+### Optional flair matching fallback
 
-## Configuration
-<<<<<<< ours
+You can also set a flair CSS substring.
 
-VouchX uses both **install settings** (subreddit/global) and **panel-managed runtime settings**.
+- This is mainly for subreddits that need VouchX to recognize a valid verification flair even when the exact template ID is not enough.
+- VouchX still prefers template ID matching first.
 
-### Subreddit install settings
+### Multiple approval flairs
 
-- `verifications_disabled_message`
-- `max_denials_before_block`
-- `auto_flair_reconcile_enabled`
-- `multiple_approval_flairs_enabled`
-- `show_photo_instructions_before_submit`
-- `settings_tab_requires_config_access`
-- `mod_menu_audit_purge_days`
-- `deny_reason_1_label` … `deny_reason_4_label`
+If `Enable multiple approval flairs` is turned on in install settings:
 
-### Global install settings (release notice metadata)
-=======
+- you can save a second and third approval flair in `Settings > General`
+- moderators can choose which saved flair to apply on each approval
+- approved users keep working as verified with any of those saved approval flairs
 
-- **Create Verification Hub (VouchX)**
-  - Creates a new NSFW verification hub post.
-- **Purge Audit Log**
-  - Purges audit records using subreddit install setting `mod_menu_audit_purge_days` (0 = purge all).
-- **Remove Verification Hub Post**
-  - Removes the current app-owned verification post.
->>>>>>> theirs
+## Member Flow
 
-- `play_latest_release_version`
-- `play_latest_release_title`
-- `play_latest_release_notes`
-- `play_latest_release_link`
-- `play_latest_release_severity`
+From the member's point of view, the Verification Hub works like this:
 
-<<<<<<< ours
-Legacy `latest_release_*` aliases are also supported.
+1. They open the hub post.
+2. They review your photo requirements.
+3. Before uploading, they must confirm:
+   - they are at least 18
+   - the photos are of themselves
+   - they accept the VouchX Terms and Conditions
+4. They upload the required number of photos.
+5. VouchX places the request in the moderator queue and sends the pending-review modmail template.
 
-### Panel settings (stored per subreddit)
+Members can also:
 
-=======
-=======
-## Configuration
->>>>>>> theirs
+- withdraw a pending request
+- see when a request is denied or removed
+- resubmit later
+- remove their own verification, which removes their flair and stored verification data
 
-VouchX uses both **install settings** (subreddit/global) and **panel-managed runtime settings**.
+## Moderator Workflow
 
-### Subreddit install settings
+### Queue
 
-- `verifications_disabled_message`
-- `max_denials_before_block`
-- `auto_flair_reconcile_enabled`
-- `multiple_approval_flairs_enabled`
-- `show_photo_instructions_before_submit`
-- `settings_tab_requires_config_access`
-- `mod_menu_audit_purge_days`
-- `deny_reason_1_label` … `deny_reason_4_label`
+The `Queue` tab is where moderators review pending requests.
 
-### Global install settings (release notice metadata)
+Available tools include:
 
-- `play_latest_release_version`
-- `play_latest_release_title`
-- `play_latest_release_notes`
-- `play_latest_release_link`
-- `play_latest_release_severity`
+- username filter
+- queue age filters (`under 24h`, `24-72h`, `over 72h`)
+- lock/unlock controls so one moderator can claim a request
+- a `Stats` popup for pending users
+- badges for resubmissions and currently banned users
 
-Legacy `latest_release_*` aliases are also supported.
+Each pending request shows:
 
-### Panel settings (stored per subreddit)
+- the submitted photos
+- submission time
+- account age
+- acknowledgement timestamps
+- account snapshot details, including subreddit karma, overall karma, and previous denied attempts
 
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-- Verification workflow (enabled toggle, flair setup, CSS matcher, required photo count, instructions)
-- Modmail templates (pending, approval, denial, removal)
-- Denial reason templates + denial notes behavior
-- Theme preset + color overrides
+### Approving a request
 
----
+When a moderator approves a request, VouchX:
 
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-## Template Placeholders
+- applies the selected approval flair
+- marks the request approved
+- sends the approval modmail template
+- writes a mod note
+- stores the record in history
 
-### Photo instructions
+If the user is currently banned from the subreddit:
 
-- `{{subreddit}}`
-- `{{days}}`
+- VouchX shows a confirmation prompt
+- on confirmation, it unbans the user first and then completes the approval
 
-### Modmail templates
+If the request was reopened from a previous denial and the user had been blocked:
+
+- VouchX attempts to remove that submission block automatically on approval
+
+### Denying a request
+
+To deny a request, a moderator must choose one of the enabled denial reasons.
+
+Moderators can also add optional denial notes. Those notes are:
+
+- saved with the record
+- written to mod notes
+- available in denial modmail through `{{denial_notes}}`
+- optionally forced into denial modmail with the `Always include moderator denial notes` setting
+
+Moderators can also block the user at denial time.
+
+Separately, VouchX can auto-block users after repeated denials if you set a denial threshold in install settings.
+
+### Reopening a denied request
+
+Moderators can reopen a denied case from `History > Records` when the original photos are still available.
+
+That moves the request back into the queue as a re-review case.
+
+### Revoking an approved verification
+
+From `History > Approved`, moderators can revoke an approved verification.
+
+VouchX requires a reason, then:
+
+- removes the user's verification flair
+- marks the record as removed
+- sends the revocation modmail template
+- keeps the action in history and audit data
+
+## History, Blocked Users, and Audit Trail
+
+### History > Approved
+
+Search approved members by username and date range, and revoke approved verifications when needed.
+
+### History > Records
+
+Search verification records across pending, approved, denied, and removed entries.
+
+This is also where moderators can reopen denied requests for another review.
+
+### History > Audit
+
+Search the moderator action log by:
+
+- user
+- moderator
+- date range
+- action type
+
+Tracked actions include:
+
+- approved
+- denied
+- reopened
+- removed
+- blocked
+- unblocked
+
+### Blocked
+
+The `Blocked` tab shows:
+
+- users blocked manually
+- users auto-blocked after repeated denials
+- the reason for the block
+- the denial count, when applicable
+
+Moderators can also manually block a user or remove a block from this tab.
+
+## Modmail Templates
+
+VouchX can send modmail for:
+
+- pending review
+- approval
+- denial
+- revoked verification
+
+VouchX tries to reply in an existing modmail thread for that user when possible. If there is no usable thread, it creates a new one.
+
+### Template placeholders
+
+The template editor supports these placeholders:
 
 - `{{username}}`
 - `{{mod}}`
 - `{{subreddit}}`
 - `{{date submitted}}`
 - `{{days}}`
-- Denial templates additionally support `{{denial_notes}}` (and legacy alias `{{reason}}`).
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 
----
+Denial templates also support:
 
-## Data & Retention
+- `{{denial_notes}}`
 
-Stored data includes verification records, indexes, blocked entries, denial counters, config, and audit entries. Uploaded images themselves are not stored by the app; only returned media URLs are persisted.
+`{{days}}` already includes the unit, such as `3 days`.
 
-Retention defaults:
+## Flair Repair and Verification Detection
 
-Non-approved verification records are retained for **45 days**.
+VouchX mainly identifies verified users by approval flair.
 
-Approved records use a **sliding 45-day retention window**.
+In plain terms:
 
-Approved records store a `lastTtlBumpAt` timestamp, and retention may be refreshed when verified users interact with the app.
+- template ID is the main check
+- optional CSS substring matching can also count as verified
+- if Reddit does not return a flair template ID, VouchX can fall back to the saved flair text
 
-Retention bumps are rate-limited to **once every 24 hours per record**.
+If automatic flair repair is enabled:
 
----
-## v1.3.1
-- Multiple flairs supported (enable install settings switch)
-- Fix Modmail Handling
-- Fix Deleted user error on approve
-- Fix young account pill badge low contrast
-- Added banned member tagging in pending card
-- Added block user option on denial
-- Added total karma on "stats" popup 
-- Added option to unban users on approval. (useful for banned pending verification)
-- Backend Console fixes for more graceful falures. 
+- VouchX checks an approved user when they open the hub
+- it runs at most once every 24 hours per approved user
+- if the verification flair is missing or changed, VouchX tries to restore it
+- if the user's current flair still matches your saved CSS substring rule, VouchX does not replace it
 
+## Permissions
 
-## v1.2.1
+### Who can review
 
-- Account age now shown on pending queue cards
-- New Stats button showing subreddit karma, previous denials, and ban status
-- Clearer color-coded status badges and improved action instructions
-- Install setting to restrict Settings tab to mods with config/everything permissions
-- Install setting to require viewing photo instructions before submission
-- Optional submission limits (block after X submissions or disable resubmits)
-- Main verification hub now updates live when status changes
-- Improved mod note handling
-- Simpler first-time setup flow
-- Flair Template ID verification before save
-- Android fix for photo instructions scrolling
-- Performance improvements for moderators and users
-- Report a Bug / Request a Feature link added to the mod panel
-- How to Use This App link added to the hub
-- Clearer status instructions for users
-- Notifications for updates, and critical update messages
+Moderators with `Manage Users` permission can:
 
-## v1.1.2
+- open the moderator panel
+- review the queue
+- approve
+- deny
+- reopen
+- revoke
+- block and unblock
+- search records and audit history
 
-- critical fix: initialize the daily retention / validation scheduler from live dashboard loads so subreddit installs do not miss scheduled cleanup
-- refine the moderator panel into a cleaner dark dashboard layout with better mobile workflow and queue prioritization
-- fix stale moderator history / approved / audit views after moderation actions
-- fix history, approved, and audit search consistency after approve, deny, remove, and reopen flows
-- fix history search date-window and pagination behavior so records do not disappear or duplicate after search
-- refresh the verification hub after stale withdraw attempts when the pending request has already been resolved
-- update the optional flair CSS matcher to use substring matching
+### Who can change VouchX settings
 
-## v1.0.10
+If you enable `Restrict Settings tab to mods with config/settings access`, only moderators with config/settings access can use the `Settings` tab.
 
-- initial public Reddit release
-=======
+Queue access does not change.
 
----
+### Who can open install settings or update the app
 
-## Data & Retention
+Only moderators with full permissions can:
 
-Stored data includes verification records, indexes, blocked entries, denial counters, config, and audit entries. Uploaded images themselves are not stored by the app; only returned media URLs are persisted.
+- use the `Open install settings` link inside VouchX
+- use the in-app `Update Now` action from moderator update notices
 
-Retention defaults:
+## Maintenance and Update Notices
 
-- History records: **45 days**
-- Audit records: **45 days**
-- Verified record retention window: **45 days** (sliding behavior)
+### Moderator menu actions
 
----
+VouchX adds moderator menu actions for:
 
-## Development
+- `Create Verification Hub (VouchX)`
+- `Purge Audit Log`
+- `Remove Verification Hub Post`
 
-=======
+### Audit log purge
 
----
+`Purge Audit Log` uses your install setting for audit retention days.
 
-## Data & Retention
+- set it to `0` to purge all audit entries
+- otherwise, VouchX removes only entries older than the configured age
 
-Stored data includes verification records, indexes, blocked entries, denial counters, config, and audit entries. Uploaded images themselves are not stored by the app; only returned media URLs are persisted.
+### Update notices
 
-Retention defaults:
+When a newer VouchX release is configured, moderators using the panel can see an update notice.
 
-- History records: **45 days**
-- Audit records: **45 days**
-- Verified record retention window: **45 days** (sliding behavior)
+- standard notices can be dismissed for 7 days
+- critical notices reappear until the app is updated
+- moderators without full permissions can still see the notice, but they are told to ask a moderator with full permissions to update VouchX
 
----
+## Important Notes
 
-## Development
-
->>>>>>> theirs
-### Scripts
-
-- `npm run dev` — launch local playtest
-- `npm run build` — Vite build
-- `npm run check` — TypeScript type-check
-- `npm test` — Node test suite (`src/core.test.ts`)
-- `npm run deploy` — build + upload via Devvit CLI
-
-### Project structure (high level)
-
-- `src/core.ts` — verification domain logic, storage, moderation workflows
-- `src/index.ts` — API routes / server wiring
-- `src/main.tsx` — Devvit menu items, triggers, scheduler job registration
-- `webroot/` — hub + mod panel front-end assets
-- `devvit.json` — app manifest, permissions, and settings schema
-
----
-
-## Legal
-
-- [Privacy Policy](./PRIVACY_POLICY.md)
-- [Terms of Service](./TERMS_OF_SERVICE.md)
-- [License](./LICENSE)
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
-
----
-
-## Data & Retention
-
-Stored data includes verification records, indexes, blocked entries, denial counters, config, and audit entries. Uploaded images themselves are not stored by the app; only returned media URLs are persisted.
-
-Retention defaults:
-
-- History records: **45 days**
-- Audit records: **45 days**
-- Verified record retention window: **45 days** (sliding behavior)
-
----
-
-## Development
-
-### Scripts
-
-- `npm run dev` — launch local playtest
-- `npm run build` — Vite build
-- `npm run check` — TypeScript type-check
-- `npm test` — Node test suite (`src/core.test.ts`)
-- `npm run deploy` — build + upload via Devvit CLI
-
-### Project structure (high level)
-
-- `src/core.ts` — verification domain logic, storage, moderation workflows
-- `src/index.ts` — API routes / server wiring
-- `src/main.tsx` — Devvit menu items, triggers, scheduler job registration
-- `webroot/` — hub + mod panel front-end assets
-- `devvit.json` — app manifest, permissions, and settings schema
-
----
-
-## Legal
-
-- [Privacy Policy](./PRIVACY_POLICY.md)
-- [Terms of Service](./TERMS_OF_SERVICE.md)
-- [License](./LICENSE)
->>>>>>> theirs
+- If the hub says `Setup required`, save the primary approval flair in `Settings > General`.
+- If the flair picker does not show the flair you want, use `Manual Input` and paste the template ID.
+- Only denial reasons with labels in install settings appear in the queue and in denial template settings.
+- If a user deletes their account or is suspended before review, VouchX removes the request from review instead of leaving a broken pending item behind.
+- If submissions are turned off, members see the disabled message from install settings.

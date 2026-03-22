@@ -350,6 +350,14 @@ type ApprovalFlairOption = {
   textColor: string;
 };
 
+type UserFlairTemplateSummary = {
+  id: string;
+  text: string;
+  modOnly: boolean;
+  backgroundColor: string;
+  textColor: string;
+};
+
 type FlairApplyResult = {
   applied: boolean;
   appliedTemplateId?: string;
@@ -3794,6 +3802,75 @@ function buildApprovalFlairOptionLabel(text: string, templateId: string, duplica
   return text;
 }
 
+async function listUserFlairTemplatesForSubreddit(
+  context: Devvit.Context,
+  subredditName: string
+): Promise<UserFlairTemplateSummary[]> {
+  const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
+  const flairTemplates = await subreddit.getUserFlairTemplates();
+  return flairTemplates
+    .map((template): UserFlairTemplateSummary | null => {
+      const templateId = String(template.id ?? '').trim();
+      if (!templateId) {
+        return null;
+      }
+      return {
+        id: templateId,
+        text: String(template.text ?? '').trim(),
+        modOnly: template.modOnly === true,
+        backgroundColor: typeof template.backgroundColor === 'string' ? String(template.backgroundColor) : 'transparent',
+        textColor: typeof template.textColor === 'string' ? String(template.textColor) : 'dark',
+      };
+    })
+    .filter((template): template is UserFlairTemplateSummary => template !== null);
+}
+
+function refreshAdditionalApprovalFlairConfigsFromTemplates(
+  configuredFlairs: ApprovalFlairConfig[],
+  flairTemplates: UserFlairTemplateSummary[]
+): ApprovalFlairConfig[] {
+  if (!Array.isArray(configuredFlairs) || configuredFlairs.length === 0) {
+    return [];
+  }
+
+  const duplicateCounts = new Map<string, number>();
+  for (const template of flairTemplates) {
+    if (!template.text) {
+      continue;
+    }
+    duplicateCounts.set(template.text, (duplicateCounts.get(template.text) ?? 0) + 1);
+  }
+
+  const templatesById = new Map(
+    flairTemplates.map((template) => [
+      normalizeTemplateId(template.id),
+      template,
+    ])
+  );
+
+  return configuredFlairs
+    .map((item) => {
+      const normalized = normalizeApprovalFlairConfig(item);
+      if (!normalized) {
+        return null;
+      }
+      const matchedTemplate = templatesById.get(normalized.templateId);
+      if (!matchedTemplate) {
+        return normalized;
+      }
+      return {
+        templateId: normalized.templateId,
+        label: buildApprovalFlairOptionLabel(
+          matchedTemplate.text,
+          matchedTemplate.id,
+          duplicateCounts.get(matchedTemplate.text) ?? 0
+        ),
+        text: matchedTemplate.text,
+      };
+    })
+    .filter((item): item is ApprovalFlairConfig => Boolean(item));
+}
+
 async function loadApprovalFlairOptionsForSettings(context: Devvit.Context): Promise<ApprovalFlairOption[]> {
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
@@ -3803,21 +3880,9 @@ async function loadApprovalFlairOptionsForSettings(context: Devvit.Context): Pro
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
 
-  const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
-  const flairTemplates = await subreddit.getUserFlairTemplates();
-  const modOnlyTemplates = flairTemplates
-    .map((template) => {
-      const templateId = String(template.id ?? '').trim();
-      return template.modOnly && templateId
-        ? {
-            id: templateId,
-            text: String(template.text ?? '').trim(),
-            backgroundColor: typeof template.backgroundColor === 'string' ? template.backgroundColor : 'transparent',
-            textColor: typeof template.textColor === 'string' ? template.textColor : 'dark',
-          }
-        : null;
-    })
-    .filter((template): template is NonNullable<typeof template> => Boolean(template));
+  const modOnlyTemplates = (await listUserFlairTemplatesForSubreddit(context, subredditName)).filter(
+    (template) => template.modOnly
+  );
 
   const duplicateCounts = new Map<string, number>();
   for (const template of modOnlyTemplates) {
@@ -3836,24 +3901,6 @@ async function loadApprovalFlairOptionsForSettings(context: Devvit.Context): Pro
   }));
 }
 
-async function fetchConfiguredFlairTemplateTextFromSelector(
-  context: Devvit.Context,
-  subredditName: string,
-  _lookupName: string,
-  configuredTemplateId: string
-): Promise<string | null> {
-  try {
-    const subreddit = await context.reddit.getSubredditByName(sanitizeSubredditName(subredditName));
-    const flairTemplates = await subreddit.getUserFlairTemplates();
-    const normalizedTemplateId = normalizeTemplateId(configuredTemplateId);
-    const matchedTemplate = flairTemplates.find((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
-    return matchedTemplate?.text?.trim() ?? null;
-  } catch (error) {
-    console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
-    return null;
-  }
-}
-
 async function validateFlairTemplateIdForSubreddit(
   context: Devvit.Context,
   subredditName: string,
@@ -3867,8 +3914,7 @@ async function validateFlairTemplateIdForSubreddit(
   const normalizedSubredditName = sanitizeSubredditName(subredditName);
   const normalizedTemplateId = normalizeTemplateId(String(flairTemplateId ?? ''));
   try {
-    const subreddit = await context.reddit.getSubredditByName(normalizedSubredditName);
-    const flairTemplates = await subreddit.getUserFlairTemplates();
+    const flairTemplates = await listUserFlairTemplatesForSubreddit(context, normalizedSubredditName);
     const exists = flairTemplates.some((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
     if (!exists) {
       return {
@@ -3896,7 +3942,7 @@ async function refreshConfiguredFlairTemplateCache(
   context: Devvit.Context,
   subredditId: string,
   subredditName: string,
-  lookupUsername: string,
+  _lookupUsername: string,
   config: RuntimeConfig,
   forceRefresh = false
 ): Promise<RuntimeConfig> {
@@ -3916,11 +3962,22 @@ async function refreshConfiguredFlairTemplateCache(
     return config;
   }
 
+  let flairTemplates: UserFlairTemplateSummary[] | null = null;
+  try {
+    flairTemplates = await listUserFlairTemplatesForSubreddit(context, subredditName);
+  } catch (error) {
+    console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
+  }
+
   const cachedTemplateText =
-    (await fetchConfiguredFlairTemplateTextFromSelector(context, subredditName, lookupUsername, configuredTemplateId)) ??
+    flairTemplates?.find((template) => normalizeTemplateId(template.id) === configuredTemplateId)?.text?.trim() ??
     (cachedTemplateId === configuredTemplateId ? config.flairTemplateCacheText : '');
+  const refreshedAdditionalApprovalFlairs = flairTemplates
+    ? refreshAdditionalApprovalFlairConfigsFromTemplates(config.additionalApprovalFlairs, flairTemplates)
+    : config.additionalApprovalFlairs;
 
   await context.redis.hSet(subredditConfigKey(subredditId), {
+    [CONFIG_FIELD.additionalApprovalFlairs]: serializeAdditionalApprovalFlairs(refreshedAdditionalApprovalFlairs),
     [CONFIG_FIELD.flairTemplateCacheTemplateId]: configuredTemplateId,
     [CONFIG_FIELD.flairTemplateCacheText]: cachedTemplateText,
     [CONFIG_FIELD.flairTemplateCacheCheckedAt]: `${nowMs}`,
@@ -3928,6 +3985,7 @@ async function refreshConfiguredFlairTemplateCache(
 
   return {
     ...config,
+    additionalApprovalFlairs: refreshedAdditionalApprovalFlairs,
     flairTemplateCacheTemplateId: configuredTemplateId,
     flairTemplateCacheText: cachedTemplateText,
     flairTemplateCacheCheckedAt: nowMs,
@@ -7582,6 +7640,8 @@ export {
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,
+  checkVerificationFlair,
+  refreshConfiguredFlairTemplateCache,
   loadApprovalFlairOptionsForSettings,
   looksLikeInternalModmailArchiveError,
   sendUserModmailWithFallback,

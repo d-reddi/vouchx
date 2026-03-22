@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   approveVerification,
   buildModeratorUpdateNotice,
+  checkVerificationFlair,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
   denyVerification,
@@ -25,6 +26,7 @@ import {
   parseRecord,
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
+  refreshConfiguredFlairTemplateCache,
   toModPanelState,
   toPublicHubConfig,
   toHubState,
@@ -932,6 +934,7 @@ function createReviewActionContext(options?: {
   createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
   archiveConversationResponses?: Array<true | Error>;
   maxDenialsBeforeBlock?: number | string;
+  multipleApprovalFlairsEnabled?: boolean | string;
   initialRedis?: Record<string, string>;
   initialHashes?: Record<string, Record<string, string>>;
 }) {
@@ -1122,6 +1125,9 @@ function createReviewActionContext(options?: {
         async get(key: string) {
           if (key === 'max_denials_before_block') {
             return options?.maxDenialsBeforeBlock;
+          }
+          if (key === 'multiple_approval_flairs_enabled') {
+            return options?.multipleApprovalFlairsEnabled;
           }
           return undefined;
         },
@@ -1431,6 +1437,64 @@ test('loadApprovalFlairOptionsForSettings surfaces flair lookup failures', async
   await assert.rejects(
     async () => await loadApprovalFlairOptionsForSettings(optionsContext.context as never),
     /flair lookup failed/
+  );
+});
+
+test('refreshConfiguredFlairTemplateCache refreshes additional approval flair metadata from subreddit templates', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    flairTemplates: [
+      {
+        id: 'ABC-123',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+      {
+        id: 'DEF-456',
+        text: 'Trusted Verified',
+        modOnly: true,
+        backgroundColor: '#654321',
+        textColor: 'dark',
+      },
+    ],
+  });
+
+  const refreshed = await refreshConfiguredFlairTemplateCache(
+    saveContext.context as never,
+    't5_example',
+    'example',
+    'mod_one',
+    {
+      ...buildRuntimeConfig(),
+      flairTemplateId: 'ABC-123',
+      additionalApprovalFlairs: [
+        { templateId: 'def-456', label: 'Old label', text: 'Old text' },
+      ],
+      flairTemplateCacheTemplateId: '',
+      flairTemplateCacheText: '',
+      flairTemplateCacheCheckedAt: 0,
+    },
+    true
+  );
+
+  assert.deepEqual(refreshed.additionalApprovalFlairs, [
+    {
+      templateId: 'def-456',
+      label: 'Trusted Verified',
+      text: 'Trusted Verified',
+    },
+  ]);
+  assert.equal(refreshed.flairTemplateCacheText, 'Verified');
+  assert.deepEqual(
+    JSON.parse(saveContext.hashStore.get(saveContext.configKey)?.get('additional_approval_flairs_json') ?? '[]'),
+    [
+      {
+        templateId: 'def-456',
+        label: 'Trusted Verified',
+        text: 'Trusted Verified',
+      },
+    ]
   );
 });
 
@@ -1824,6 +1888,36 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
   }
 });
 
+test('checkVerificationFlair matches additional approval flair text when template id is absent', async () => {
+  const result = await checkVerificationFlair(
+    {} as never,
+    'example',
+    'example_user',
+    {
+      ...buildRuntimeConfig(),
+      flairTemplateId: 'abc-123',
+      multipleApprovalFlairsEnabled: true,
+      additionalApprovalFlairs: [
+        { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+      ],
+    },
+    {
+      flairText: 'Trusted Verified',
+      flairCssClass: '',
+      flairTemplateId: '',
+      userId: 't2_example',
+    }
+  );
+
+  assert.deepEqual(result, {
+    verified: true,
+    configuredTemplateId: 'abc-123',
+    detectedTemplateId: 'def-456',
+    source: 'viewer-snapshot:additional-text-match',
+    error: null,
+  });
+});
+
 test('sendUserModmailWithFallback rejects invalid recipients before calling modmail APIs', async () => {
   const modmailContext = createModmailContext();
 
@@ -2001,6 +2095,35 @@ test('approveVerification keeps valid approvals working', async () => {
     reviewContext.redisStore.get(userLatestTestKey(reviewContext.subredditId, reviewContext.record.username)),
     reviewContext.record.id
   );
+});
+
+test('approveVerification applies the selected additional approval flair when multi-flair is enabled', async () => {
+  const reviewContext = createReviewActionContext({
+    multipleApprovalFlairsEnabled: true,
+    initialHashes: {
+      [subredditConfigTestKey('t5_example')]: {
+        additional_approval_flairs_json: JSON.stringify([
+          { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+          { templateId: 'ghi-789', label: 'VIP', text: 'VIP Verified' },
+        ]),
+      },
+    },
+  });
+
+  const result = await approveVerification(
+    reviewContext.context as never,
+    reviewContext.record.id,
+    false,
+    'ghi-789'
+  );
+  const storedRecord = reviewContext.getParsedRecord();
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(reviewContext.setUserFlairCalls.length, 1);
+  assert.equal(reviewContext.setUserFlairCalls[0]?.flairTemplateId, 'ghi-789');
+  assert.equal(storedRecord?.status, 'approved');
+  assert.equal(storedRecord?.lastAppliedFlairTemplateId, 'ghi-789');
 });
 
 test('approveVerification requires confirmation before approving a currently banned user', async () => {
