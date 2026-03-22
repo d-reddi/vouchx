@@ -4051,6 +4051,12 @@ async function checkVerificationFlair(
   const detectedCssClass = normalizeCssClass(snapshot.flairCssClass);
   const cssMatched = configuredCssClass ? cssClassMatchesSubstring(configuredCssClass, detectedCssClass) : false;
   const cachedTemplateText = config.flairTemplateCacheText.trim().toLowerCase();
+  const additionalTemplateTextMatches = (Array.isArray(config.additionalApprovalFlairs) ? config.additionalApprovalFlairs : [])
+    .map((item) => ({
+      templateId: normalizeTemplateId(item.templateId),
+      text: String(item.text ?? '').trim().toLowerCase(),
+    }))
+    .filter((item) => item.templateId && item.text);
   const snapshotText = snapshot.flairText.trim().toLowerCase();
 
   let detectedTemplateId = snapshotTemplateId;
@@ -4080,6 +4086,19 @@ async function checkVerificationFlair(
       source: 'viewer-snapshot:cached-text-match',
       error: null,
     };
+  }
+
+  if (templateCheckEnabled && !snapshotTemplateId && snapshotText) {
+    const additionalTextMatch = additionalTemplateTextMatches.find((item) => item.text === snapshotText);
+    if (additionalTextMatch) {
+      return {
+        verified: true,
+        configuredTemplateId,
+        detectedTemplateId: additionalTextMatch.templateId,
+        source: 'viewer-snapshot:additional-text-match',
+        error: null,
+      };
+    }
   }
 
   if (!configuredTemplateId && !configuredCssClass) {
