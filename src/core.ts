@@ -7506,6 +7506,7 @@ function looksLikeTransientRedditTransportError(message: string): boolean {
     return false;
   }
   return (
+    (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
     normalized.includes('unexpected eof') ||
     normalized.includes('upstream request missing or timed out') ||
     normalized.includes('timed out') ||
