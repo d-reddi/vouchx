@@ -107,6 +107,8 @@ function buildRuntimeConfig(): RuntimeConfig {
     flairText: 'Verified',
     flairTemplateId: 'abc123',
     flairCssClass: 'verified',
+    multipleApprovalFlairsEnabled: false,
+    additionalApprovalFlairs: [],
     flairTemplateCacheTemplateId: '',
     flairTemplateCacheText: '',
     flairTemplateCacheCheckedAt: 0,

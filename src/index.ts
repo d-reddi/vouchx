@@ -384,11 +384,12 @@ app.post('/api/mod/approve', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
     const confirmBannedApproval = parseBooleanFlag(req.body?.confirmBannedApproval);
+    const selectedFlairTemplateId = String(req.body?.selectedFlairTemplateId ?? '').trim();
     if (!verificationId) {
       throw httpError(400, 'Missing verification ID.');
     }
     const appContext = currentContext();
-    const result = await approveVerification(appContext, verificationId, confirmBannedApproval);
+    const result = await approveVerification(appContext, verificationId, confirmBannedApproval, selectedFlairTemplateId);
     if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
       await sendRefreshSignals(appContext);
     }
@@ -410,6 +411,7 @@ app.post('/api/mod/approve', async (req, res) => {
           kind: 'banned-unban',
           verificationId,
           username: result.username ?? '',
+          selectedFlairTemplateId,
         },
       });
       return;
