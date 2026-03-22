@@ -3340,9 +3340,7 @@ async function sendUserModmailWithFallback(
         await archiveModmailConversationBestEffort(context, subredditName, username, existingConversationId);
         return { status: 'replied', conversationId: existingConversationId };
       } catch (error) {
-        console.log(
-          `Modmail reply failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${existingConversationId}: ${errorText(error)}`
-        );
+        void error;
         if (userThreadKeys.length > 0) {
           await context.redis.del(...userThreadKeys);
         }
@@ -3373,7 +3371,6 @@ async function sendUserModmailWithFallback(
         return { status: 'created', conversationId };
       } catch (error) {
         lastError = errorText(error);
-        console.log(`Modmail send failed for recipient "<redacted>" in r/${subredditName}: ${lastError}`);
       }
     }
 
