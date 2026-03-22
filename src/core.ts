@@ -100,6 +100,8 @@ type RuntimeConfig = {
   flairText: string;
   flairTemplateId: string;
   flairCssClass: string;
+  multipleApprovalFlairsEnabled: boolean;
+  additionalApprovalFlairs: ApprovalFlairConfig[];
   flairTemplateCacheTemplateId: string;
   flairTemplateCacheText: string;
   flairTemplateCacheCheckedAt: number;
@@ -113,6 +115,12 @@ type RuntimeConfig = {
   customPrimary: string;
   customAccent: string;
   customBackground: string;
+};
+
+type ApprovalFlairConfig = {
+  templateId: string;
+  label: string;
+  text: string;
 };
 
 type ThemePresetName =
@@ -301,6 +309,8 @@ type FlairTemplateFormValues = {
   photoInstructions?: string;
   flairTemplateId?: string;
   flairCssClass?: string;
+  multipleApprovalFlairsEnabled?: boolean;
+  additionalApprovalFlairs?: ApprovalFlairConfig[];
 };
 
 type ModmailTemplatesFormData = {
@@ -342,6 +352,7 @@ type ApprovalFlairOption = {
 
 type FlairApplyResult = {
   applied: boolean;
+  appliedTemplateId?: string;
   error?: string;
 };
 
@@ -514,6 +525,7 @@ const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
 const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
+const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flairs_enabled';
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
@@ -809,6 +821,7 @@ const CONFIG_FIELD = {
   flairText: 'flair_text',
   flairTemplateId: 'flair_template_id',
   flairCssClass: 'flair_css_class',
+  additionalApprovalFlairs: 'additional_approval_flairs_json',
   flairTemplateCacheTemplateId: 'flair_template_cache_template_id',
   flairTemplateCacheText: 'flair_template_cache_text',
   flairTemplateCacheCheckedAt: 'flair_template_cache_checked_at',
@@ -2278,7 +2291,8 @@ async function removeReviewTargetForInvalidAccount(
 async function approveVerification(
   context: Devvit.Context,
   verificationId: string,
-  confirmBannedApproval = false
+  confirmBannedApproval = false,
+  selectedFlairTemplateId?: string
 ): Promise<ActionResult> {
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
@@ -2353,7 +2367,13 @@ async function approveVerification(
     }
 
     const config = await getRuntimeConfig(context, subredditId);
-    const flairResult = await applyApprovalFlairWithFallbacks(context, record, config);
+    const configuredTemplateIds = configuredApprovalTemplateIds(config);
+    const selectedTemplateId = normalizeTemplateId(selectedFlairTemplateId ?? '');
+    const templateIdForApproval =
+      config.multipleApprovalFlairsEnabled && selectedTemplateId && configuredTemplateIds.includes(selectedTemplateId)
+        ? selectedTemplateId
+        : normalizeTemplateId(config.flairTemplateId);
+    const flairResult = await applyApprovalFlairWithFallbacks(context, record, config, templateIdForApproval);
     const flair: FlairStepResult = flairResult.applied
       ? { status: 'success' }
       : { status: 'failed', reason: flairResult.error ?? 'unknown error' };
@@ -2399,7 +2419,7 @@ async function approveVerification(
       validationFailureCount: 0,
       terminalValidationFailureCount: 0,
       lastTtlBumpAt: Date.now(),
-      lastAppliedFlairTemplateId: normalizeTemplateId(config.flairTemplateId),
+      lastAppliedFlairTemplateId: normalizeTemplateId(flairResult.appliedTemplateId ?? templateIdForApproval),
       lastFlairReconcileAt: null,
     };
     const validationScheduledRecord = applyValidationSchedule(reviewedRecord, Date.now());
@@ -2519,7 +2539,8 @@ async function removeSupersededDeniedRecord(
 async function applyApprovalFlairWithFallbacks(
   context: Devvit.Context,
   record: VerificationRecord,
-  config: RuntimeConfig
+  config: RuntimeConfig,
+  preferredTemplateId?: string
 ): Promise<FlairApplyResult> {
   const rawSubreddit = record.subredditName.trim();
   const sanitizedSubreddit = sanitizeSubredditName(record.subredditName);
@@ -2543,7 +2564,7 @@ async function applyApprovalFlairWithFallbacks(
       strictUsername ? `u/${strictUsername}` : '',
     ])
   ).filter((value) => value.trim());
-  const configuredTemplateId = config.flairTemplateId.trim() || undefined;
+  const configuredTemplateId = normalizeTemplateId(preferredTemplateId ?? config.flairTemplateId);
   if (!configuredTemplateId) {
     return { applied: false, error: 'Missing flair template ID.' };
   }
@@ -2564,7 +2585,7 @@ async function applyApprovalFlairWithFallbacks(
             username: usernameAttempt,
             flairTemplateId: attempt.flairTemplateId,
           });
-          return { applied: true };
+          return { applied: true, appliedTemplateId: normalizeTemplateId(attempt.flairTemplateId) };
         } catch (error) {
           lastError = errorText(error);
           errorLines.push(`${subredditAttempt}/${usernameAttempt}/template-only=${lastError}`);
@@ -3319,9 +3340,7 @@ async function sendUserModmailWithFallback(
         await archiveModmailConversationBestEffort(context, subredditName, username, existingConversationId);
         return { status: 'replied', conversationId: existingConversationId };
       } catch (error) {
-        console.log(
-          `Modmail reply failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${existingConversationId}: ${errorText(error)}`
-        );
+        void error;
         if (userThreadKeys.length > 0) {
           await context.redis.del(...userThreadKeys);
         }
@@ -3352,7 +3371,6 @@ async function sendUserModmailWithFallback(
         return { status: 'created', conversationId };
       } catch (error) {
         lastError = errorText(error);
-        console.log(`Modmail send failed for recipient "<redacted>" in r/${subredditName}: ${lastError}`);
       }
     }
 
@@ -3369,23 +3387,19 @@ async function sendUserModmailWithFallback(
 
 async function archiveModmailConversationBestEffort(
   context: Devvit.Context,
-  subredditName: string,
-  username: string,
-  conversationId: string
+  _subredditName: string,
+  _username: string,
+  _conversationId: string
 ): Promise<void> {
   try {
-    await context.reddit.modMail.archiveConversation(conversationId);
+    await context.reddit.modMail.archiveConversation(_conversationId);
   } catch (error) {
     const message = errorText(error);
     if (looksLikeInternalModmailArchiveError(message)) {
-      console.log(
-        `Modmail archive skipped for internal conversation in r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}.`
-      );
       return;
     }
-    console.log(
-      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${message}`
-    );
+    void _subredditName;
+    void _username;
   }
 }
 
@@ -3488,14 +3502,19 @@ async function loadDashboardData(
       );
     }
     const previousAppliedTemplateId = normalizeTemplateId(userLatest.lastAppliedFlairTemplateId ?? '');
+    const configuredTemplateIds = configuredApprovalTemplateIds(config);
     const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
+    const desiredTemplateId =
+      previousAppliedTemplateId && configuredTemplateIds.includes(previousAppliedTemplateId)
+        ? previousAppliedTemplateId
+        : configuredTemplateId;
     const detectedTemplateIdBeforeReconcile = normalizeTemplateId(
       viewerFlairSnapshot.flairTemplateId || flairCheck.detectedTemplateId
     );
     if (
       previousAppliedTemplateId &&
-      configuredTemplateId &&
-      previousAppliedTemplateId !== configuredTemplateId &&
+      desiredTemplateId &&
+      previousAppliedTemplateId !== desiredTemplateId &&
       detectedTemplateIdBeforeReconcile === previousAppliedTemplateId
     ) {
       const cleared = await removeUserFlairWithFallbacks(context, subredditName, viewerUsername);
@@ -3505,14 +3524,19 @@ async function loadDashboardData(
         );
       }
     }
-    const reconcileResult = await applyApprovalFlairWithFallbacks(context, userLatest, config);
+    const reconcileResult = await applyApprovalFlairWithFallbacks(context, userLatest, config, desiredTemplateId);
     if (reconcileResult.applied) {
       viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName, viewerUsername);
       flairCheck = await checkVerificationFlair(context, subredditName, viewerUsername, config, viewerFlairSnapshot);
-      const updatedTemplateId = normalizeTemplateId(config.flairTemplateId);
-      const reconcileConfirmed =
+      const updatedTemplateId = normalizeTemplateId(reconcileResult.appliedTemplateId ?? desiredTemplateId);
+      const detectedTemplateAfterReconcile = normalizeTemplateId(
+        viewerFlairSnapshot.flairTemplateId || flairCheck.detectedTemplateId
+      );
+      const reconcileConfirmed = Boolean(
         flairCheck.verified &&
-        (flairCheck.source.includes('template-match') || flairCheck.source.includes('cached-text-match'));
+          detectedTemplateAfterReconcile &&
+          configuredTemplateIds.includes(detectedTemplateAfterReconcile)
+      );
       if (updatedTemplateId && reconcileConfirmed) {
         try {
           const refreshedUserLatest: VerificationRecord = {
@@ -3699,6 +3723,67 @@ function normalizeTemplateId(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function normalizeApprovalFlairConfig(value: Partial<ApprovalFlairConfig> | null | undefined): ApprovalFlairConfig | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const templateId = normalizeTemplateId(String(value.templateId ?? ''));
+  if (!templateId) {
+    return null;
+  }
+  return {
+    templateId,
+    label: String(value.label ?? '').trim(),
+    text: String(value.text ?? '').trim(),
+  };
+}
+
+function parseAdditionalApprovalFlairs(value: string | undefined): ApprovalFlairConfig[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const normalized: ApprovalFlairConfig[] = [];
+    for (const item of parsed) {
+      const flair = normalizeApprovalFlairConfig(item as Partial<ApprovalFlairConfig>);
+      if (!flair) {
+        continue;
+      }
+      if (!normalized.some((existing) => existing.templateId === flair.templateId)) {
+        normalized.push(flair);
+      }
+    }
+    return normalized;
+  } catch {
+    return [];
+  }
+}
+
+function serializeAdditionalApprovalFlairs(value: ApprovalFlairConfig[]): string {
+  const normalized = Array.isArray(value)
+    ? value
+        .map((item) => normalizeApprovalFlairConfig(item))
+        .filter((item): item is ApprovalFlairConfig => Boolean(item))
+    : [];
+  return JSON.stringify(normalized);
+}
+
+function configuredApprovalTemplateIds(
+  config: Pick<RuntimeConfig, 'flairTemplateId' | 'additionalApprovalFlairs' | 'multipleApprovalFlairsEnabled'>
+): string[] {
+  const ids = [
+    normalizeTemplateId(config.flairTemplateId),
+    ...((Array.isArray(config.additionalApprovalFlairs) ? config.additionalApprovalFlairs : []).map((item) =>
+      normalizeTemplateId(item.templateId)
+    )),
+  ].filter(Boolean);
+  return dedupeNonEmpty(ids);
+}
+
 function buildApprovalFlairOptionLabel(text: string, templateId: string, duplicateCount: number): string {
   if (!text) {
     return `(untitled flair) — ${templateId}`;
@@ -3858,8 +3943,9 @@ function shouldReconcileApprovedViewerFlair(
   if (latestRecord.status !== 'approved') {
     return false;
   }
+  const configuredTemplateIds = configuredApprovalTemplateIds(config);
   const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
-  if (!configuredTemplateId || !isLikelyFlairTemplateId(configuredTemplateId)) {
+  if (!configuredTemplateId || !isLikelyFlairTemplateId(configuredTemplateId) || configuredTemplateIds.length === 0) {
     return false;
   }
   if (isManualFlairCheckSource(flairCheck.source)) {
@@ -3872,14 +3958,14 @@ function shouldReconcileApprovedViewerFlair(
   }
 
   const detectedTemplateId = normalizeTemplateId(flairCheck.detectedTemplateId || viewerFlairSnapshot.flairTemplateId);
-  if (detectedTemplateId === configuredTemplateId && flairCheck.source.includes('template-match')) {
+  if (detectedTemplateId && configuredTemplateIds.includes(detectedTemplateId)) {
     return false;
   }
   if (detectedTemplateId) {
     if (detectedTemplateId !== lastAppliedTemplateId) {
       return false;
     }
-    return detectedTemplateId !== configuredTemplateId;
+    return !configuredTemplateIds.includes(detectedTemplateId);
   }
 
   const detectedText = viewerFlairSnapshot.flairText.trim().toLowerCase();
@@ -3888,7 +3974,7 @@ function shouldReconcileApprovedViewerFlair(
     return true;
   }
 
-  return lastAppliedTemplateId !== configuredTemplateId;
+  return !configuredTemplateIds.includes(lastAppliedTemplateId);
 }
 
 function isViewerFlairReconcileDue(record: VerificationRecord, nowMs: number): boolean {
@@ -3949,6 +4035,7 @@ async function checkVerificationFlair(
   viewerFlairSnapshot?: ViewerFlairSnapshot
 ): Promise<FlairVerificationCheck> {
   const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
+  const configuredTemplateIds = configuredApprovalTemplateIds(config);
   const templateCheckEnabled = Boolean(configuredTemplateId);
   const configuredCssClass = normalizeCssClass(config.flairCssClass);
   const snapshot =
@@ -3957,12 +4044,18 @@ async function checkVerificationFlair(
   const detectedCssClass = normalizeCssClass(snapshot.flairCssClass);
   const cssMatched = configuredCssClass ? cssClassMatchesSubstring(configuredCssClass, detectedCssClass) : false;
   const cachedTemplateText = config.flairTemplateCacheText.trim().toLowerCase();
+  const additionalTemplateTextMatches = (Array.isArray(config.additionalApprovalFlairs) ? config.additionalApprovalFlairs : [])
+    .map((item) => ({
+      templateId: normalizeTemplateId(item.templateId),
+      text: String(item.text ?? '').trim().toLowerCase(),
+    }))
+    .filter((item) => item.templateId && item.text);
   const snapshotText = snapshot.flairText.trim().toLowerCase();
 
   let detectedTemplateId = snapshotTemplateId;
   let templateSource = snapshotTemplateId ? 'viewer-snapshot' : '';
 
-  if (templateCheckEnabled && snapshotTemplateId && snapshotTemplateId === configuredTemplateId) {
+  if (templateCheckEnabled && snapshotTemplateId && configuredTemplateIds.includes(snapshotTemplateId)) {
     return {
       verified: true,
       configuredTemplateId,
@@ -3986,6 +4079,19 @@ async function checkVerificationFlair(
       source: 'viewer-snapshot:cached-text-match',
       error: null,
     };
+  }
+
+  if (templateCheckEnabled && !snapshotTemplateId && snapshotText) {
+    const additionalTextMatch = additionalTemplateTextMatches.find((item) => item.text === snapshotText);
+    if (additionalTextMatch) {
+      return {
+        verified: true,
+        configuredTemplateId,
+        detectedTemplateId: additionalTextMatch.templateId,
+        source: 'viewer-snapshot:additional-text-match',
+        error: null,
+      };
+    }
   }
 
   if (!configuredTemplateId && !configuredCssClass) {
@@ -5375,6 +5481,21 @@ async function onSaveFlairTemplateValues(
     throw new Error(flairTemplateValidation.message);
   }
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
+  const additionalApprovalFlairs = Array.isArray(values.additionalApprovalFlairs)
+    ? values.additionalApprovalFlairs
+        .map((item) => normalizeApprovalFlairConfig(item))
+        .filter((item): item is ApprovalFlairConfig => Boolean(item))
+    : [];
+  const normalizedAdditional = additionalApprovalFlairs
+    .filter((item) => item.templateId !== normalizedTemplateId)
+    .filter((item, index, all) => all.findIndex((entry) => entry.templateId === item.templateId) === index)
+    .slice(0, 2);
+  for (const option of normalizedAdditional) {
+    const validation = await validateFlairTemplateIdForSubreddit(context, subredditName, option.templateId);
+    if (!validation.isValid) {
+      throw new Error(`Additional flair (${option.templateId}) is invalid: ${validation.message}`);
+    }
+  }
 
   await context.redis.hSet(subredditConfigKey(subredditId), {
     ...(values.verificationsEnabled === undefined
@@ -5384,6 +5505,7 @@ async function onSaveFlairTemplateValues(
     [CONFIG_FIELD.photoInstructions]: values.photoInstructions?.trim() ?? '',
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
     [CONFIG_FIELD.flairCssClass]: values.flairCssClass?.trim() ?? '',
+    [CONFIG_FIELD.additionalApprovalFlairs]: serializeAdditionalApprovalFlairs(normalizedAdditional),
     [CONFIG_FIELD.flairTemplateCacheTemplateId]: normalizedTemplateId,
     [CONFIG_FIELD.flairTemplateCacheText]: '',
     [CONFIG_FIELD.flairTemplateCacheCheckedAt]: '0',
@@ -5499,6 +5621,9 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawMultipleApprovalFlairsEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED
+  );
   const rawMaxDenialsBeforeBlock = await context.settings.get<number | string>(INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK);
   const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
     INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
@@ -5512,6 +5637,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const multipleApprovalFlairsEnabled =
+    typeof rawMultipleApprovalFlairsEnabled === 'boolean'
+      ? rawMultipleApprovalFlairsEnabled
+      : parseBooleanString(rawMultipleApprovalFlairsEnabled, false);
   const maxDenialsBeforeBlock = normalizeMaxDenialsBeforeBlockSetting(rawMaxDenialsBeforeBlock);
   const showPhotoInstructionsBeforeSubmit =
     typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
@@ -5531,6 +5660,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const flairTemplateCacheCheckedAt = parseNonNegativeInt(stored[CONFIG_FIELD.flairTemplateCacheCheckedAt], 0) ?? 0;
   const useCustomColors = parseBooleanString(stored[CONFIG_FIELD.useCustomColors], false);
   const denyReasons = await getConfiguredDenyReasons(context, stored);
+  const additionalApprovalFlairs = parseAdditionalApprovalFlairs(stored[CONFIG_FIELD.additionalApprovalFlairs]);
 
   return {
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
@@ -5553,6 +5683,8 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     flairText: firstNonEmpty(stored[CONFIG_FIELD.flairText]) ?? DEFAULT_FLAIR_TEXT,
     flairTemplateId: firstNonEmpty(stored[CONFIG_FIELD.flairTemplateId]) ?? '',
     flairCssClass: firstNonEmpty(stored[CONFIG_FIELD.flairCssClass]) ?? '',
+    multipleApprovalFlairsEnabled,
+    additionalApprovalFlairs,
     flairTemplateCacheTemplateId,
     flairTemplateCacheText,
     flairTemplateCacheCheckedAt,
@@ -7393,6 +7525,7 @@ export {
   DENY_REASON_INSTALL_SETTINGS,
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
+  INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED,
   INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
   INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT,
   INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
