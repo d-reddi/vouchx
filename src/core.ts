@@ -3390,23 +3390,19 @@ async function sendUserModmailWithFallback(
 
 async function archiveModmailConversationBestEffort(
   context: Devvit.Context,
-  subredditName: string,
-  username: string,
-  conversationId: string
+  _subredditName: string,
+  _username: string,
+  _conversationId: string
 ): Promise<void> {
   try {
-    await context.reddit.modMail.archiveConversation(conversationId);
+    await context.reddit.modMail.archiveConversation(_conversationId);
   } catch (error) {
     const message = errorText(error);
     if (looksLikeInternalModmailArchiveError(message)) {
-      console.log(
-        `Modmail archive skipped for internal conversation in r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}.`
-      );
       return;
     }
-    console.log(
-      `Modmail archive failed for r/${subredditName} u/${maskUsernameForLog(username)} conversation=${conversationId}: ${message}`
-    );
+    void _subredditName;
+    void _username;
   }
 }
 
