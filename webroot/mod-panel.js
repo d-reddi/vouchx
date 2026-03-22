@@ -884,9 +884,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function renderAdditionalApprovalFlairPickers() {
     const enabled = Boolean(state && state.config && state.config.multipleApprovalFlairsEnabled === true);
-    const firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
-    const secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
     const primaryTemplateId = normalizeTemplateIdValue(state && state.config ? state.config.flairTemplateId : '');
+    let firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
+    let secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
+    if (firstAdditional && firstAdditional === primaryTemplateId) {
+      firstAdditional = '';
+      additionalApprovalFlairSecondDraft = '';
+    }
+    if (secondAdditional && (secondAdditional === primaryTemplateId || secondAdditional === firstAdditional)) {
+      secondAdditional = '';
+      additionalApprovalFlairThirdDraft = '';
+    }
     const usedTemplateIds = new Set([primaryTemplateId].filter(Boolean));
 
     applyAdditionalFlairSelectOptions(approvalFlairSecondSelect, firstAdditional, usedTemplateIds);
