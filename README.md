@@ -305,7 +305,7 @@ These actions delete the user’s verification records and associated audit entr
 
 ---
 
-## v 1.3.0
+## v 1.3.1
 
 New Features
 - Multiple approval flairs (optional — enable in install settings)
