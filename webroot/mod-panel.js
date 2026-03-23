@@ -90,6 +90,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const approvalFlairSelectHelp = document.getElementById('approval-flair-select-help');
   const approvalFlairPreview = document.getElementById('approval-flair-preview');
   const approvalFlairPreviewChip = document.getElementById('approval-flair-preview-chip');
+  const primaryApprovalFlairTemplateWrap = document.getElementById('primary-approval-flair-template-wrap');
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
@@ -102,7 +103,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const approvalFlairSecondPreviewChip = document.getElementById('approval-flair-second-preview-chip');
   const approvalFlairThirdPreview = document.getElementById('approval-flair-third-preview');
   const approvalFlairThirdPreviewChip = document.getElementById('approval-flair-third-preview-chip');
-  const multipleApprovalFlairsStatus = document.getElementById('multiple-approval-flairs-status');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
   const installSettingsRow = document.getElementById('install-settings-row');
@@ -837,6 +837,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     approvalFlairSelect.value = manualMode ? APPROVAL_FLAIR_MANUAL_VALUE : matchedOption ? matchedOption.id : '';
     approvalFlairSelect.disabled = false;
     flairTemplateInput.disabled = !manualMode;
+    if (primaryApprovalFlairTemplateWrap) {
+      primaryApprovalFlairTemplateWrap.classList.toggle('hidden', !manualMode);
+      primaryApprovalFlairTemplateWrap.setAttribute('aria-hidden', manualMode ? 'false' : 'true');
+    }
 
     if (approvalFlairOptionsLoading) {
       setApprovalFlairHelp('Loading mod-only user flairs...', 'info');
@@ -2532,12 +2536,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[0]?.templateId || '');
     additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '');
-    if (multipleApprovalFlairsStatus) {
-      multipleApprovalFlairsStatus.textContent =
-        state.config.multipleApprovalFlairsEnabled === true
-          ? 'Multiple approval flairs are enabled in install settings.'
-          : 'Enable “multiple approval flairs” in install settings to use these options in Queue.';
-    }
     if (requiredPhotoCountInput) {
       const count = Number(state.config.requiredPhotoCount || 2);
       requiredPhotoCountInput.value = `${count >= 1 && count <= 3 ? count : 2}`;

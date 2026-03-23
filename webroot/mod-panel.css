@@ -603,7 +603,7 @@ textarea {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--panel-border) 66%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--panel-surface-soft) 88%, black 12%);
+  background-color: color-mix(in srgb, var(--panel-surface-soft) 88%, black 12%);
   color: var(--text);
   padding: 10px 12px;
   min-height: 40px;
@@ -614,7 +614,23 @@ textarea {
 }
 
 .field-select {
+  --select-chevron-color: color-mix(in srgb, var(--muted) 76%, white 24%);
+  --select-divider-color: color-mix(in srgb, var(--panel-border) 44%, transparent);
   appearance: none;
+  padding-right: 42px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--select-chevron-color) 50%),
+    linear-gradient(135deg, var(--select-chevron-color) 50%, transparent 50%),
+    linear-gradient(180deg, var(--select-divider-color), var(--select-divider-color));
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px),
+    calc(100% - 30px) 50%;
+  background-size:
+    6px 6px,
+    6px 6px,
+    1px 18px;
+  background-repeat: no-repeat;
 }
 
 .field-textarea {
@@ -629,26 +645,49 @@ textarea {
   border-color: color-mix(in srgb, var(--panel-border-strong) 58%, transparent);
 }
 
+.field-select:hover {
+  --select-chevron-color: color-mix(in srgb, var(--text) 48%, var(--muted) 52%);
+  --select-divider-color: color-mix(in srgb, var(--panel-border-strong) 54%, transparent);
+}
+
 .field-input:focus,
 .field-select:focus,
 .field-textarea:focus {
   border-color: color-mix(in srgb, var(--primary) 56%, var(--panel-border) 44%);
-  background: color-mix(in srgb, var(--panel-surface-soft) 94%, var(--primary-soft) 6%);
+  background-color: color-mix(in srgb, var(--panel-surface-soft) 94%, var(--primary-soft) 6%);
 }
 
-#flair-template-id:disabled {
+.field-select:focus {
+  --select-chevron-color: color-mix(in srgb, var(--primary) 68%, white 32%);
+  --select-divider-color: color-mix(in srgb, var(--primary) 38%, transparent);
+}
+
+.field-input:disabled,
+.field-select:disabled {
   color: color-mix(in srgb, var(--muted) 82%, white 18%);
   -webkit-text-fill-color: color-mix(in srgb, var(--muted) 82%, white 18%);
-  background: color-mix(in srgb, var(--panel-surface-soft) 94%, black 6%);
+  background-color: color-mix(in srgb, var(--panel-surface-soft) 94%, black 6%);
   border-color: color-mix(in srgb, var(--panel-border) 54%, transparent);
   cursor: not-allowed;
+}
+
+.field-select:disabled {
+  --select-chevron-color: color-mix(in srgb, var(--muted) 60%, transparent);
+  --select-divider-color: color-mix(in srgb, var(--panel-border) 28%, transparent);
 }
 
 .field-input-invalid,
 .field-input-invalid:hover,
 .field-input-invalid:focus {
   border-color: color-mix(in srgb, var(--danger) 54%, var(--panel-border) 46%);
-  background: color-mix(in srgb, var(--panel-surface-soft) 90%, var(--danger-soft) 10%);
+  background-color: color-mix(in srgb, var(--panel-surface-soft) 90%, var(--danger-soft) 10%);
+}
+
+.field-select.field-input-invalid,
+.field-select.field-input-invalid:hover,
+.field-select.field-input-invalid:focus {
+  --select-chevron-color: color-mix(in srgb, var(--danger) 62%, white 38%);
+  --select-divider-color: color-mix(in srgb, var(--danger) 34%, transparent);
 }
 
 .field-feedback {
@@ -1003,13 +1042,24 @@ textarea {
 .approval-flair-preview {
   display: flex;
   align-items: center;
+  gap: 10px;
   margin-top: 10px;
+}
+
+.approval-flair-preview-label {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .approval-flair-preview-chip {
   color: var(--text);
   background: color-mix(in srgb, var(--panel-surface-soft) 92%, transparent);
   border: 1px solid color-mix(in srgb, var(--panel-border) 76%, transparent);
+}
+
+#additional-approval-flairs-row.hidden + #flair-css-class-wrap {
+  margin-top: 8px;
 }
 
 .image-grid {
