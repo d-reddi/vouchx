@@ -257,6 +257,19 @@ async function sendRefreshSignals(appContext: Devvit.Context): Promise<void> {
   await Promise.allSettled(channels.map((channel) => sendRealtimeRefreshSignal(channel)));
 }
 
+function sendFastModRefreshResponse(
+  res: express.Response,
+  appContext: Devvit.Context,
+  toast: ToastPayload
+): void {
+  void sendRefreshSignals(appContext);
+  res.json({
+    realtimeChannel: modRealtimeChannel(appContext),
+    refreshRequested: true,
+    toast,
+  });
+}
+
 function submitToast(result: Awaited<ReturnType<typeof submitVerification>>): ToastPayload {
   const pendingModmailSent =
     result.pendingModmail.status === 'created' ||
@@ -768,10 +781,9 @@ app.post('/api/mod/settings/flair', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveFlairTemplateValues(req.body ?? {}, appContext);
-    await sendRefreshSignals(appContext);
-    res.json({
-      ...(await buildModPayload(appContext)),
-      toast: { text: 'Saved verification settings.', tone: 'success' },
+    sendFastModRefreshResponse(res, appContext, {
+      text: 'Saved verification settings.',
+      tone: 'success',
     });
   } catch (error) {
     sendError(res, error);
@@ -782,10 +794,9 @@ app.post('/api/mod/settings/templates', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveModmailTemplatesValues(req.body ?? {}, appContext);
-    await sendRefreshSignals(appContext);
-    res.json({
-      ...(await buildModPayload(appContext)),
-      toast: { text: 'Saved modmail templates.', tone: 'success' },
+    sendFastModRefreshResponse(res, appContext, {
+      text: 'Saved modmail templates.',
+      tone: 'success',
     });
   } catch (error) {
     sendError(res, error);
@@ -796,10 +807,9 @@ app.post('/api/mod/settings/theme', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveThemeValues(req.body ?? {}, appContext);
-    await sendRefreshSignals(appContext);
-    res.json({
-      ...(await buildModPayload(appContext)),
-      toast: { text: 'Saved theme settings.', tone: 'success' },
+    sendFastModRefreshResponse(res, appContext, {
+      text: 'Saved theme settings.',
+      tone: 'success',
     });
   } catch (error) {
     sendError(res, error);

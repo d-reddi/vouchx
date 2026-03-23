@@ -314,6 +314,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (payload && payload.toast) {
       handleMessage({ type: 'toast', payload: payload.toast });
     }
+    if (payload && payload.refreshRequested === true) {
+      window.setTimeout(() => {
+        void refreshFromRealtimeSignal();
+      }, 0);
+    }
   }
 
   function scheduleRealtimeReconnect(channel) {
@@ -1008,19 +1013,37 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const additionalApprovalFlairs = additionalApprovalFlairsFromSelection();
     try {
       try {
-        const validation = await validateFlairTemplateInputValue(flairTemplateId);
-        if (!validation.isValid) {
-          setFlairTemplateValidationOverride(validation);
-          showToast(validation.message, 'error');
-          return;
+        const savedPrimaryTemplateId = normalizeTemplateIdValue(state && state.config ? state.config.flairTemplateId : '');
+        const savedAdditionalTemplateIds = Array.isArray(state && state.config && state.config.additionalApprovalFlairs)
+          ? state.config.additionalApprovalFlairs.map((item) => normalizeTemplateIdValue(item && item.templateId))
+          : [];
+        const templateIdsToValidate = [];
+        if (normalizeTemplateIdValue(flairTemplateId) !== savedPrimaryTemplateId) {
+          templateIdsToValidate.push({ kind: 'primary', templateId: flairTemplateId });
         }
+        additionalApprovalFlairs.forEach((option, index) => {
+          if (normalizeTemplateIdValue(option.templateId) !== String(savedAdditionalTemplateIds[index] || '')) {
+            templateIdsToValidate.push({ kind: 'additional', templateId: option.templateId });
+          }
+        });
         clearFlairTemplateValidationOverride();
-        for (const option of additionalApprovalFlairs) {
-          const optionValidation = await validateFlairTemplateInputValue(option.templateId);
-          if (!optionValidation.isValid) {
-            showToast(`Additional flair ${option.templateId} is invalid: ${optionValidation.message}`, 'error');
+        const validations = await Promise.all(
+          templateIdsToValidate.map(async (item) => ({
+            ...item,
+            validation: await validateFlairTemplateInputValue(item.templateId),
+          }))
+        );
+        for (const result of validations) {
+          if (result.validation.isValid) {
+            continue;
+          }
+          if (result.kind === 'primary') {
+            setFlairTemplateValidationOverride(result.validation);
+            showToast(result.validation.message, 'error');
             return;
           }
+          showToast(`Additional flair ${result.templateId} is invalid: ${result.validation.message}`, 'error');
+          return;
         }
       } catch (error) {
         showToast(error instanceof Error ? error.message : String(error), 'error');
