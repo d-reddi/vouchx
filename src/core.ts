@@ -537,11 +537,11 @@ const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flai
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
 const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
-const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'play_latest_release_version';
-const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'play_latest_release_title';
-const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'play_latest_release_notes';
-const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'play_latest_release_link';
-const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'play_latest_release_severity';
+const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
+const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
+const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
+const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
+const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -3746,6 +3746,13 @@ function normalizeApprovalFlairConfig(value: Partial<ApprovalFlairConfig> | null
   };
 }
 
+function approvalFlairTemplateIdsMatch(left: ApprovalFlairConfig[], right: ApprovalFlairConfig[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((item, index) => item.templateId === right[index]?.templateId);
+}
+
 function parseAdditionalApprovalFlairs(value: string | undefined): ApprovalFlairConfig[] {
   if (!value) {
     return [];
@@ -3906,28 +3913,10 @@ async function validateFlairTemplateIdForSubreddit(
   subredditName: string,
   flairTemplateId: string | null | undefined
 ): Promise<FlairTemplateValidationState> {
-  const formatValidation = validateFlairTemplateId(flairTemplateId);
-  if (!formatValidation.isValid) {
-    return formatValidation;
-  }
-
   const normalizedSubredditName = sanitizeSubredditName(subredditName);
-  const normalizedTemplateId = normalizeTemplateId(String(flairTemplateId ?? ''));
   try {
     const flairTemplates = await listUserFlairTemplatesForSubreddit(context, normalizedSubredditName);
-    const exists = flairTemplates.some((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
-    if (!exists) {
-      return {
-        isValid: false,
-        code: 'not_found',
-        message: `Flair template ID was not found in r/${normalizedSubredditName}.`,
-      };
-    }
-    return {
-      isValid: true,
-      code: 'valid',
-      message: 'Flair template ID looks valid.',
-    };
+    return validateFlairTemplateIdAgainstTemplates(normalizedSubredditName, flairTemplateId, flairTemplates);
   } catch (error) {
     console.log(`Flair template validation lookup failed for r/${normalizedSubredditName}: ${errorText(error)}`);
     return {
@@ -3938,13 +3927,41 @@ async function validateFlairTemplateIdForSubreddit(
   }
 }
 
+function validateFlairTemplateIdAgainstTemplates(
+  subredditName: string,
+  flairTemplateId: string | null | undefined,
+  flairTemplates: UserFlairTemplateSummary[]
+): FlairTemplateValidationState {
+  const formatValidation = validateFlairTemplateId(flairTemplateId);
+  if (!formatValidation.isValid) {
+    return formatValidation;
+  }
+
+  const normalizedSubredditName = sanitizeSubredditName(subredditName);
+  const normalizedTemplateId = normalizeTemplateId(String(flairTemplateId ?? ''));
+  const exists = flairTemplates.some((template) => normalizeTemplateId(template.id) === normalizedTemplateId);
+  if (!exists) {
+    return {
+      isValid: false,
+      code: 'not_found',
+      message: `Flair template ID was not found in r/${normalizedSubredditName}.`,
+    };
+  }
+  return {
+    isValid: true,
+    code: 'valid',
+    message: 'Flair template ID looks valid.',
+  };
+}
+
 async function refreshConfiguredFlairTemplateCache(
   context: Devvit.Context,
   subredditId: string,
   subredditName: string,
   _lookupUsername: string,
   config: RuntimeConfig,
-  forceRefresh = false
+  forceRefresh = false,
+  preloadedFlairTemplates?: UserFlairTemplateSummary[] | null
 ): Promise<RuntimeConfig> {
   const configuredTemplateId = normalizeTemplateId(config.flairTemplateId);
   if (!configuredTemplateId || !isLikelyFlairTemplateId(configuredTemplateId)) {
@@ -3962,11 +3979,13 @@ async function refreshConfiguredFlairTemplateCache(
     return config;
   }
 
-  let flairTemplates: UserFlairTemplateSummary[] | null = null;
-  try {
-    flairTemplates = await listUserFlairTemplatesForSubreddit(context, subredditName);
-  } catch (error) {
-    console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
+  let flairTemplates = preloadedFlairTemplates ?? null;
+  if (preloadedFlairTemplates === undefined) {
+    try {
+      flairTemplates = await listUserFlairTemplatesForSubreddit(context, subredditName);
+    } catch (error) {
+      console.log(`Configured flair template text lookup failed for r/${subredditName}: ${errorText(error)}`);
+    }
   }
 
   const cachedTemplateText =
@@ -5534,24 +5553,51 @@ async function onSaveFlairTemplateValues(
       ? existingConfig.requiredPhotoCount
       : parseRequiredPhotoCount(values.requiredPhotoCount, existingConfig.requiredPhotoCount);
   const flairTemplateId = values.flairTemplateId?.trim() ?? '';
-  const flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, flairTemplateId);
+  const flairTemplateValidation = validateFlairTemplateId(flairTemplateId);
   if (!flairTemplateValidation.isValid) {
     throw new Error(flairTemplateValidation.message);
   }
   const normalizedTemplateId = normalizeTemplateId(flairTemplateId);
-  const additionalApprovalFlairs = Array.isArray(values.additionalApprovalFlairs)
+  const requestedAdditionalApprovalFlairs = Array.isArray(values.additionalApprovalFlairs)
     ? values.additionalApprovalFlairs
         .map((item) => normalizeApprovalFlairConfig(item))
         .filter((item): item is ApprovalFlairConfig => Boolean(item))
     : [];
-  const normalizedAdditional = additionalApprovalFlairs
+  const effectiveAdditionalApprovalFlairs = existingConfig.multipleApprovalFlairsEnabled
+    ? requestedAdditionalApprovalFlairs
+    : existingConfig.additionalApprovalFlairs;
+  const normalizedAdditional = effectiveAdditionalApprovalFlairs
+    .map((item) => normalizeApprovalFlairConfig(item))
+    .filter((item): item is ApprovalFlairConfig => Boolean(item))
     .filter((item) => item.templateId !== normalizedTemplateId)
     .filter((item, index, all) => all.findIndex((entry) => entry.templateId === item.templateId) === index)
     .slice(0, 2);
-  for (const option of normalizedAdditional) {
-    const validation = await validateFlairTemplateIdForSubreddit(context, subredditName, option.templateId);
-    if (!validation.isValid) {
-      throw new Error(`Additional flair (${option.templateId}) is invalid: ${validation.message}`);
+  const existingNormalizedTemplateId = normalizeTemplateId(existingConfig.flairTemplateId);
+  const templateSelectionChanged =
+    existingNormalizedTemplateId !== normalizedTemplateId ||
+    !approvalFlairTemplateIdsMatch(existingConfig.additionalApprovalFlairs, normalizedAdditional);
+  const cacheFields: Record<string, string> = templateSelectionChanged
+    ? {
+        [CONFIG_FIELD.flairTemplateCacheTemplateId]: normalizedTemplateId,
+        [CONFIG_FIELD.flairTemplateCacheText]: '',
+        [CONFIG_FIELD.flairTemplateCacheCheckedAt]: '0',
+      }
+    : {};
+
+  let flairTemplatesForSave: UserFlairTemplateSummary[] | undefined;
+  if (templateSelectionChanged) {
+    flairTemplatesForSave = await listUserFlairTemplatesForSubreddit(context, subredditName);
+    const templateValidation = validateFlairTemplateIdAgainstTemplates(subredditName, flairTemplateId, flairTemplatesForSave);
+    if (!templateValidation.isValid) {
+      throw new Error(templateValidation.message);
+    }
+    if (existingConfig.multipleApprovalFlairsEnabled) {
+      for (const option of normalizedAdditional) {
+        const validation = validateFlairTemplateIdAgainstTemplates(subredditName, option.templateId, flairTemplatesForSave);
+        if (!validation.isValid) {
+          throw new Error(`Additional flair (${option.templateId}) is invalid: ${validation.message}`);
+        }
+      }
     }
   }
 
@@ -5564,13 +5610,33 @@ async function onSaveFlairTemplateValues(
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
     [CONFIG_FIELD.flairCssClass]: values.flairCssClass?.trim() ?? '',
     [CONFIG_FIELD.additionalApprovalFlairs]: serializeAdditionalApprovalFlairs(normalizedAdditional),
-    [CONFIG_FIELD.flairTemplateCacheTemplateId]: normalizedTemplateId,
-    [CONFIG_FIELD.flairTemplateCacheText]: '',
-    [CONFIG_FIELD.flairTemplateCacheCheckedAt]: '0',
+    ...cacheFields,
   });
 
-  const refreshedConfig = await getRuntimeConfig(context, subredditId);
-  await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, moderator, refreshedConfig, true);
+  const refreshedConfig: RuntimeConfig = {
+    ...existingConfig,
+    verificationsEnabled: values.verificationsEnabled === undefined ? existingConfig.verificationsEnabled : values.verificationsEnabled !== false,
+    requiredPhotoCount,
+    photoInstructions: values.photoInstructions?.trim() ?? '',
+    flairTemplateId,
+    flairCssClass: values.flairCssClass?.trim() ?? '',
+    additionalApprovalFlairs: normalizedAdditional,
+    flairTemplateCacheTemplateId: templateSelectionChanged ? normalizedTemplateId : existingConfig.flairTemplateCacheTemplateId,
+    flairTemplateCacheText: templateSelectionChanged ? '' : existingConfig.flairTemplateCacheText,
+    flairTemplateCacheCheckedAt: templateSelectionChanged ? 0 : existingConfig.flairTemplateCacheCheckedAt,
+  };
+
+  if (templateSelectionChanged) {
+    await refreshConfiguredFlairTemplateCache(
+      context,
+      subredditId,
+      subredditName,
+      moderator,
+      refreshedConfig,
+      true,
+      flairTemplatesForSave
+    );
+  }
 }
 
 async function onSaveModmailTemplatesValues(
