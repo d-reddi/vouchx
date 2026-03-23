@@ -544,12 +544,14 @@ function createFlairSettingsSaveContext(options?: {
     backgroundColor?: string;
     textColor?: string;
   }>;
+  multipleApprovalFlairsEnabled?: boolean | string;
   settingsTabRequiresConfigAccess?: boolean;
 }) {
   const hashStore = new Map<string, Map<string, string>>();
   const setFieldsCalls: Array<Record<string, string>> = [];
   const configKey = 'subreddit:t5_example:config';
   const storedConfig = options?.storedConfig ?? {};
+  let flairTemplateFetchCount = 0;
   hashStore.set(configKey, new Map(Object.entries(storedConfig)));
 
   const ensureHash = (key: string) => {
@@ -579,6 +581,9 @@ function createFlairSettingsSaveContext(options?: {
           if (key === 'max_denials_before_block') {
             return 3;
           }
+          if (key === 'multiple_approval_flairs_enabled') {
+            return options?.multipleApprovalFlairsEnabled ?? false;
+          }
           if (key === 'verifications_disabled_message') {
             return 'Disabled';
           }
@@ -602,6 +607,7 @@ function createFlairSettingsSaveContext(options?: {
         async getSubredditByName() {
           return {
             async getUserFlairTemplates() {
+              flairTemplateFetchCount += 1;
               return options?.flairTemplates ?? [
                 {
                   id: 'ABC-123',
@@ -632,6 +638,9 @@ function createFlairSettingsSaveContext(options?: {
     hashStore,
     setFieldsCalls,
     configKey,
+    get flairTemplateFetchCount() {
+      return flairTemplateFetchCount;
+    },
   };
 }
 
@@ -1554,6 +1563,183 @@ test('onSaveFlairTemplateValues still updates verificationsEnabled when explicit
 
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
   assert.ok(saveContext.setFieldsCalls.some((entries) => entries.verifications_enabled === 'false'));
+});
+
+test('onSaveFlairTemplateValues reuses a single flair template lookup when template selections change', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    multipleApprovalFlairsEnabled: true,
+    storedConfig: {
+      flair_template_id: 'OLD-123',
+      additional_approval_flairs_json: JSON.stringify([{ templateId: 'old-456', label: 'Old', text: 'Old' }]),
+    },
+    flairTemplates: [
+      {
+        id: 'ABC-123',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+      {
+        id: 'DEF-456',
+        text: 'Trusted Verified',
+        modOnly: true,
+        backgroundColor: '#654321',
+        textColor: 'dark',
+      },
+      {
+        id: 'GHI-789',
+        text: 'VIP Verified',
+        modOnly: true,
+        backgroundColor: '#111111',
+        textColor: 'light',
+      },
+    ],
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: 'verified',
+      requiredPhotoCount: 2,
+      photoInstructions: 'Updated instructions',
+      additionalApprovalFlairs: [
+        { templateId: 'DEF-456', label: 'Trusted', text: 'Trusted Verified' },
+        { templateId: 'GHI-789', label: 'VIP', text: 'VIP Verified' },
+      ],
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.flairTemplateFetchCount, 1);
+});
+
+test('onSaveFlairTemplateValues preserves legacy additional flairs without validating them when multi-flair is disabled', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    multipleApprovalFlairsEnabled: false,
+    storedConfig: {
+      flair_template_id: 'OLD-123',
+      flair_template_cache_template_id: 'old-123',
+      flair_template_cache_text: 'Old Verified',
+      additional_approval_flairs_json: JSON.stringify([
+        { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+        { templateId: 'ghi-789', label: 'VIP', text: 'VIP Verified' },
+      ]),
+    },
+    flairTemplates: [
+      {
+        id: 'ABC-123',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+    ],
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: 'verified',
+      requiredPhotoCount: 2,
+      photoInstructions: 'Updated instructions',
+      additionalApprovalFlairs: [],
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.flairTemplateFetchCount, 1);
+  assert.deepEqual(
+    JSON.parse(saveContext.hashStore.get(saveContext.configKey)?.get('additional_approval_flairs_json') ?? '[]'),
+    [
+      { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+      { templateId: 'ghi-789', label: 'VIP', text: 'VIP Verified' },
+    ]
+  );
+});
+
+test('onSaveFlairTemplateValues validates saved additional flairs when multi-flair is enabled', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    multipleApprovalFlairsEnabled: true,
+    storedConfig: {
+      flair_template_id: 'OLD-123',
+      additional_approval_flairs_json: JSON.stringify([
+        { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+      ]),
+    },
+    flairTemplates: [
+      {
+        id: 'ABC-123',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+    ],
+  });
+
+  await assert.rejects(
+    onSaveFlairTemplateValues(
+      {
+        flairTemplateId: 'ABC-123',
+        flairCssClass: 'verified',
+        requiredPhotoCount: 2,
+        photoInstructions: 'Updated instructions',
+        additionalApprovalFlairs: [
+          { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+        ],
+      },
+      saveContext.context as never
+    ),
+    /Additional flair \(def-456\) is invalid: Flair template ID was not found/
+  );
+  assert.equal(saveContext.flairTemplateFetchCount, 1);
+});
+
+test('onSaveFlairTemplateValues skips flair template lookups when template selections are unchanged', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      flair_template_id: 'ABC-123',
+      flair_css_class: 'verified',
+      flair_template_cache_template_id: 'abc-123',
+      flair_template_cache_text: 'Verified',
+      flair_template_cache_checked_at: `${Date.now()}`,
+      additional_approval_flairs_json: JSON.stringify([{ templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' }]),
+    },
+    flairTemplates: [
+      {
+        id: 'ABC-123',
+        text: 'Verified',
+        modOnly: true,
+        backgroundColor: '#123456',
+        textColor: 'light',
+      },
+      {
+        id: 'DEF-456',
+        text: 'Trusted Verified',
+        modOnly: true,
+        backgroundColor: '#654321',
+        textColor: 'dark',
+      },
+    ],
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: 'approved',
+      requiredPhotoCount: 3,
+      photoInstructions: 'Updated instructions',
+      additionalApprovalFlairs: [
+        { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+      ],
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.flairTemplateFetchCount, 0);
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('flair_template_cache_text'), 'Verified');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('flair_template_cache_template_id'), 'abc-123');
 });
 
 test('validateMaxDenialsBeforeBlockSetting allows 0 to disable auto-block', () => {

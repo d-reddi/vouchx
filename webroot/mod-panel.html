@@ -279,23 +279,20 @@
                 <h4 class="minor-heading">Flair Setup</h4>
                 <div id="primary-approval-flair-row" class="field-grid">
                   <div id="primary-approval-flair-select-wrap" class="field-stack">
-                    <label class="field-label" for="approval-flair-select">Select the flair that will be applied to approved users. Only mod-only flairs are shown.</label>
+                    <label class="field-label" for="approval-flair-select">Select the flair that will be applied to approved users. Only mod-only flairs are shown. Multiple flairs can be enabled in install settings.</label>
                     <select id="approval-flair-select" class="field-select" disabled>
                       <option value="">Choose a mod-only user flair...</option>
                     </select>
                     <p id="approval-flair-select-help" class="field-feedback muted small hidden" aria-live="polite"></p>
                     <div id="approval-flair-preview" class="approval-flair-preview hidden" aria-live="polite">
+                      <span class="approval-flair-preview-label muted small">Flair Preview:</span>
                       <span id="approval-flair-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
                   </div>
-                  <div id="primary-approval-flair-template-wrap" class="field-stack">
-                    <label class="field-label" for="flair-template-id">If your flair isn’t listed above (for example, if it’s not mod-only), enter its template ID here. This field is only editable when “Manual Input” is selected above.</label>
+                  <div id="primary-approval-flair-template-wrap" class="field-stack hidden" aria-hidden="true">
+                    <label class="field-label" for="flair-template-id">If your flair isn’t listed above (for example, if it’s not mod-only), enter its template ID here. This field is only shown when “Manual Input” is selected above.</label>
                     <input id="flair-template-id" class="field-input" type="text" />
                     <p id="flair-template-validation-feedback" class="field-feedback small hidden" aria-live="polite"></p>
-                  </div>
-                  <div class="field-stack">
-                    <label class="field-label" for="flair-css-class">Flair CSS substring to match (optional)</label>
-                    <input id="flair-css-class" class="field-input" type="text" />
                   </div>
                 </div>
                 <div id="additional-approval-flairs-row" class="field-grid">
@@ -305,6 +302,7 @@
                       <option value="">None</option>
                     </select>
                     <div id="approval-flair-second-preview" class="approval-flair-preview hidden" aria-live="polite">
+                      <span class="approval-flair-preview-label muted small">Flair Preview:</span>
                       <span id="approval-flair-second-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
                   </div>
@@ -314,11 +312,15 @@
                       <option value="">None</option>
                     </select>
                     <div id="approval-flair-third-preview" class="approval-flair-preview hidden" aria-live="polite">
+                      <span class="approval-flair-preview-label muted small">Flair Preview:</span>
                       <span id="approval-flair-third-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
                   </div>
                 </div>
-                <p id="multiple-approval-flairs-status" class="muted small"></p>
+                <div id="flair-css-class-wrap" class="field-stack">
+                  <label class="field-label" for="flair-css-class">Flair CSS substring to match (optional)</label>
+                  <input id="flair-css-class" class="field-input" type="text" />
+                </div>
                 <p class="muted small">
                   A user counts as verified if either the flair template ID matches or the flair CSS class contains this substring.
                 </p>
