@@ -10,14 +10,14 @@ The app provides:
 - Verification flair integration
 - Audit history and retention controls
 - Customizable themes and messaging
-- Automatic cleanup and validation jobs
+- Automatic cleanup and validation jobs 
 
 ---
 
-##**Screenshots and workflow demos:**  
+## Screenshots and workflow demos: 
 [https://www.reddit.com/r/vouchx/wiki/demo/](https://www.reddit.com/r/vouchx/wiki/demo/)
 
-## Setup, Documentation & Help
+## Full Setup, Features, Documentation & Help:
 [https://www.reddit.com/r/vouchx/wiki/guide/](https://www.reddit.com/r/vouchx/wiki/guide/)
 
 
@@ -47,29 +47,6 @@ The app provides:
 7. In `Settings > Templates`, customize the modmail messages VouchX sends.
 8. In `Settings > Themes`, optionally change the member-facing hub colors.
 
-## Install Settings vs VouchX Panel Settings
-
-### Subreddit install settings
-
-These are subreddit-wide controls in Reddit's app install settings for VouchX:
-
-- `Verifications disabled message`
-  - The message members see when submissions are turned off.
-- `Max denials before auto-block`
-  - Automatically blocks users from submitting again after they reach the chosen number of denials.
-- `Automatically repair verification flair`
-  - When enabled, VouchX checks approved users when they open the hub, up to once every 24 hours, and can restore a missing or changed verification flair.
-- `Enable multiple approval flairs`
-  - Lets you configure a second and third approval flair and choose one per approval in the queue.
-- `Show photo instructions before verification submission`
-  - Shows your saved photo instructions before the upload form opens.
-- `Restrict Settings tab to mods with config/settings access`
-  - Limits the VouchX `Settings` tab without changing queue access.
-- `Purge audit log data older than (days)`
-  - Used by the `Purge Audit Log` moderator menu action.
-- `Denial reason labels`
-  - These labels control which denial reasons are available in the queue and in template settings.
-  - Leave a label blank to hide that denial reason entirely.
 
 ### VouchX panel settings
 
@@ -85,21 +62,6 @@ These are the settings you manage inside `Mod Panel > Settings`:
 - pending, approval, denial, and revocation modmail templates
 - denial note handling
 - hub theme preset and custom colors
-
-
-### If your flair is not listed
-
-Use `Manual Input` and paste the flair template ID.
-
-- This is useful when the flair is not mod-only or does not appear in the picker.
-- Approvals stay blocked if the saved primary flair template is invalid.
-
-### Optional flair matching fallback
-
-You can also set a flair CSS substring.
-
-- This is mainly for subreddits that need VouchX to recognize a valid verification flair even when the exact template ID is not enough.
-- VouchX still prefers template ID matching first.
 
 ### Multiple approval flairs
 
@@ -185,7 +147,6 @@ Moderators can also block the user at denial time.
 
 Separately, VouchX can auto-block users after repeated denials if you set a denial threshold in install settings.
 
-
 ## Flair Repair and Verification Detection
 
 VouchX mainly identifies verified users by approval flair.
@@ -204,19 +165,6 @@ If automatic flair repair is enabled:
 - if the user's current flair still matches your saved CSS substring rule, VouchX does not replace it
 
 ## Permissions
-
-### Who can review
-
-Moderators with `Manage Users` permission can:
-
-- open the moderator panel
-- review the queue
-- approve
-- deny
-- reopen
-- revoke
-- block and unblock
-- search records and audit history
 
 ### Who can change VouchX settings
 
@@ -241,7 +189,6 @@ VouchX adds moderator menu actions for:
 - `Purge Audit Log`
 - `Remove Verification Hub Post`
 
-
 ### Update notices
 
 When a newer VouchX release is configured, moderators using the panel can see an update notice.
@@ -249,16 +196,6 @@ When a newer VouchX release is configured, moderators using the panel can see an
 - standard notices can be dismissed for 7 days
 - critical notices reappear until the app is updated
 - moderators without full permissions can still see the notice, but they are told to ask a moderator with full permissions to update VouchX
-
-## Important Notes
-
-- If the hub says `Setup required`, save the primary approval flair in `Settings > General`.
-- If the flair picker does not show the flair you want, use `Manual Input` and paste the template ID.
-- Only denial reasons with labels in install settings appear in the queue and in denial template settings.
-- If a user deletes their account or is suspended before review, VouchX removes the request from review instead of leaving a broken pending item behind.
-- If submissions are turned off, members see the disabled message from install settings.
-
-Full Changelog available at: [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 ---
 
@@ -304,6 +241,10 @@ Users may:
 These actions delete the user’s verification records and associated audit entries.
 
 ---
+
+# Changelog 
+
+Full Changelog available at: [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 ## v 1.3.2
 
