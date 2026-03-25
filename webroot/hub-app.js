@@ -1086,8 +1086,8 @@ export function mountHub(options = {}) {
         ? 'Your verification is being reviewed again by the moderators.'
         : 'Your verification is pending moderator review.';
     } else if (!state.viewerVerifiedByFlair && isRestricted) {
-      commandTitle = 'Verification submissions are blocked';
-      infoText = 'You cannot submit a verification request.';
+      commandTitle = 'You are blocked from submitting verification on this subreddit.';
+      infoText = 'This restriction is only for this subreddit and is based on your activity or verification history.';
     } else if (state.viewerVerifiedByFlair) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
       if (state.userLatest?.reviewedAt) {
