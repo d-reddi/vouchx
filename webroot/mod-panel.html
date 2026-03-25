@@ -279,7 +279,7 @@
                 <h4 class="minor-heading">Flair Setup</h4>
                 <div id="primary-approval-flair-row" class="field-grid">
                   <div id="primary-approval-flair-select-wrap" class="field-stack">
-                    <label class="field-label" for="approval-flair-select">Select the flair that will be applied to approved users. Only mod-only flairs are shown. Multiple flairs can be enabled in install settings.</label>
+                    <label class="field-label" for="approval-flair-select">Select the flair to apply to approved users. Only mod-only flairs are shown. Enable multiple flairs in Install Settings to choose more than one.</label>
                     <select id="approval-flair-select" class="field-select" disabled>
                       <option value="">Choose a mod-only user flair...</option>
                     </select>
@@ -317,13 +317,16 @@
                     </div>
                   </div>
                 </div>
+                <div class="form-section">
                 <div id="flair-css-class-wrap" class="field-stack">
-                  <label class="field-label" for="flair-css-class">Flair CSS substring to match (optional)</label>
+                  <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
                   <input id="flair-css-class" class="field-input" type="text" />
                 </div>
-                <p class="muted small">
-                  A user counts as verified if either the flair template ID matches or the flair CSS class contains this substring.
+                <p class="muted small field-help">
+                  Most subs will leave this field blank. Treat users as “verified” automatically if their set flair’s CSS class contains this value.
+                  See documentation for details and examples.
                 </p>
+              </div>
               </div>
 
               <div class="form-section">
@@ -341,9 +344,9 @@
                 <p class="muted small field-help">Controls how many upload fields users see in the submit form.</p>
 
                 <label class="minor-heading field-subsection-heading" for="photo-instructions">Photo instructions</label>
+                <label class="field-label" for="photo-instructions">Instructions shown when user presses Photo Requirements</label>
                 <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
                 <p class="muted small field-help">
-                  Instructions shown when user presses photo instructions.
                   <a
                     id="markdown-guide-link"
                     href="https://support.reddithelp.com/hc/en-us/articles/360043033952-Formatting-Guide#h_01HEK5SNJM44XVSJFH0BT5QS9X"
@@ -608,7 +611,7 @@
         </div>
         <div class="stats-section">
           <div class="stats-primary-row">
-            <span class="stats-label">Subreddit Karma</span>
+            <span class="stats-label">Subreddit karma</span>
             <span id="stats-subreddit-karma" class="stats-primary-value">Unknown</span>
           </div>
           <div class="stats-list">
