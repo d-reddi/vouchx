@@ -420,6 +420,43 @@ type AuditSearchResponsePayload = {
   requestId: number;
 };
 
+type ModeratorStatsRange = 'weekly' | 'monthly';
+
+type ModeratorStatsLeader = {
+  moderator: string;
+  count: number;
+};
+
+type ModeratorStatsModeratorRow = {
+  moderator: string;
+  approvals: number;
+  denials: number;
+  reopens: number;
+  totalActions: number;
+};
+
+type ModeratorStatsPayload = {
+  range: ModeratorStatsRange;
+  generatedAt: string;
+  summary: {
+    currentlyVerified: number;
+    approvals: number;
+    denials: number;
+    reopens: number;
+    activeModerators: number;
+  };
+  leaders: {
+    topApprover: ModeratorStatsLeader | null;
+    topDenier: ModeratorStatsLeader | null;
+  };
+  moderators: ModeratorStatsModeratorRow[];
+};
+
+type AuditWindowCandidate = {
+  id: string;
+  entry: AuditLogEntry | null;
+};
+
 type HistorySearchPanelItem = {
   id: string;
   username: string;
@@ -4555,6 +4592,87 @@ async function searchApprovedRecords(
   };
 }
 
+function normalizeModeratorStatsRange(value: string | undefined | null): ModeratorStatsRange {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'monthly' ? 'monthly' : 'weekly';
+}
+
+function moderatorStatsLookbackDays(range: ModeratorStatsRange): number {
+  return range === 'monthly' ? 30 : 7;
+}
+
+function moderatorStatsActorKey(actor: string): string {
+  const normalized = normalizeUsernameForLookup(actor);
+  if (normalized) {
+    return normalized;
+  }
+  const trimmed = String(actor || '').trim().toLowerCase();
+  return trimmed || 'unknown';
+}
+
+async function loadAuditWindowCandidates(
+  context: RedisContext,
+  subredditId: string,
+  query: {
+    minScore: number;
+    maxScore: number;
+    offset?: number;
+    count?: number;
+  }
+): Promise<AuditWindowCandidate[]> {
+  const rangeQuery: {
+    by: 'score';
+    reverse: boolean;
+    limit?: { offset: number; count: number };
+  } = {
+    by: 'score',
+    reverse: true,
+  };
+  if (typeof query.offset === 'number' && typeof query.count === 'number') {
+    rangeQuery.limit = {
+      offset: Math.max(0, Math.floor(query.offset)),
+      count: Math.max(1, Math.floor(query.count)),
+    };
+  }
+
+  const candidates = await context.redis.zRange(auditDateIndexKey(subredditId), query.minScore, query.maxScore, rangeQuery);
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const candidateIds = candidates.map((entry) => entry.member);
+  const payloads = await mGetStringValuesInChunks(
+    context,
+    candidateIds.map((auditId) => auditEntryKey(subredditId, auditId))
+  );
+
+  const staleIds: string[] = [];
+  const loadedCandidates: AuditWindowCandidate[] = [];
+  for (let index = 0; index < candidateIds.length; index++) {
+    const auditId = candidateIds[index];
+    const payload = payloads[index];
+    if (!payload) {
+      staleIds.push(auditId);
+      loadedCandidates.push({ id: auditId, entry: null });
+      continue;
+    }
+
+    const parsed = parseAuditEntry(payload);
+    if (!parsed) {
+      staleIds.push(auditId);
+      loadedCandidates.push({ id: auditId, entry: null });
+      continue;
+    }
+
+    loadedCandidates.push({ id: auditId, entry: parsed });
+  }
+
+  if (staleIds.length > 0) {
+    await context.redis.zRem(auditDateIndexKey(subredditId), Array.from(new Set(staleIds)));
+  }
+
+  return loadedCandidates;
+}
+
 async function searchAuditEntries(
   context: Devvit.Context,
   subredditId: string,
@@ -4584,35 +4702,22 @@ async function searchAuditEntries(
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
 
-  const candidates = await context.redis.zRange(auditDateIndexKey(subredditId), minScore, maxScore, {
-    by: 'score',
-    reverse: true,
-    limit: { offset, count: limit * 4 },
+  const candidates = await loadAuditWindowCandidates(context, subredditId, {
+    minScore,
+    maxScore,
+    offset,
+    count: limit * 4,
   });
   if (candidates.length === 0) {
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
 
-  const candidateIds = candidates.map((entry) => entry.member);
-  const payloads = await mGetStringValuesInChunks(
-    context,
-    candidateIds.map((auditId) => auditEntryKey(subredditId, auditId))
-  );
-
   const items: AuditSearchPanelItem[] = [];
-  const staleIds: string[] = [];
   let scannedCount = 0;
-  for (let index = 0; index < payloads.length; index++) {
+  for (const candidate of candidates) {
     scannedCount += 1;
-    const payload = payloads[index];
-    const auditId = candidateIds[index];
-    if (!payload) {
-      staleIds.push(auditId);
-      continue;
-    }
-    const parsed = parseAuditEntry(payload);
+    const parsed = candidate.entry;
     if (!parsed) {
-      staleIds.push(auditId);
       continue;
     }
     if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
@@ -4637,15 +4742,113 @@ async function searchAuditEntries(
     }
   }
 
-  if (staleIds.length > 0) {
-    await context.redis.zRem(auditDateIndexKey(subredditId), Array.from(new Set(staleIds)));
-  }
-
   return {
     items,
     offset: offset + scannedCount,
     hasMore: scannedCount < candidates.length || candidates.length >= limit * 4,
     requestId: 0,
+  };
+}
+
+async function getModeratorStats(
+  context: RedisContext,
+  subredditId: string,
+  requestedRange: ModeratorStatsRange
+): Promise<ModeratorStatsPayload> {
+  const range = normalizeModeratorStatsRange(requestedRange);
+  const nowMs = Date.now();
+  const minScore = Math.max(0, nowMs - moderatorStatsLookbackDays(range) * MILLIS_PER_DAY);
+  const maxScore = nowMs;
+
+  const [currentlyVerified, auditCandidates] = await Promise.all([
+    context.redis.zCard(approvedIndexKey(subredditId)),
+    loadAuditWindowCandidates(context, subredditId, {
+      minScore,
+      maxScore,
+    }),
+  ]);
+
+  const moderatorsByActor = new Map<string, ModeratorStatsModeratorRow>();
+  let approvals = 0;
+  let denials = 0;
+  let reopens = 0;
+
+  // Period counts come from the audit trail, while current verified comes from the live approved index.
+  for (const candidate of auditCandidates) {
+    const entry = candidate.entry;
+    if (!entry || (entry.action !== 'approved' && entry.action !== 'denied' && entry.action !== 'reopened')) {
+      continue;
+    }
+
+    const moderatorKey = moderatorStatsActorKey(entry.actor);
+    const current = moderatorsByActor.get(moderatorKey) ?? {
+      moderator: moderatorKey,
+      approvals: 0,
+      denials: 0,
+      reopens: 0,
+      totalActions: 0,
+    };
+
+    if (entry.action === 'approved') {
+      current.approvals += 1;
+      approvals += 1;
+    } else if (entry.action === 'denied') {
+      current.denials += 1;
+      denials += 1;
+    } else {
+      current.reopens += 1;
+      reopens += 1;
+    }
+    current.totalActions += 1;
+    moderatorsByActor.set(moderatorKey, current);
+  }
+
+  const moderators = Array.from(moderatorsByActor.values()).sort((left, right) => {
+    if (right.totalActions !== left.totalActions) {
+      return right.totalActions - left.totalActions;
+    }
+    if (right.approvals !== left.approvals) {
+      return right.approvals - left.approvals;
+    }
+    return left.moderator.localeCompare(right.moderator);
+  });
+
+  const topApproverSource = moderators
+    .filter((row) => row.approvals > 0)
+    .sort((left, right) => {
+      if (right.approvals !== left.approvals) {
+        return right.approvals - left.approvals;
+      }
+      return left.moderator.localeCompare(right.moderator);
+    })[0];
+  const topDenierSource = moderators
+    .filter((row) => row.denials > 0)
+    .sort((left, right) => {
+      if (right.denials !== left.denials) {
+        return right.denials - left.denials;
+      }
+      return left.moderator.localeCompare(right.moderator);
+    })[0];
+
+  return {
+    range,
+    generatedAt: new Date(nowMs).toISOString(),
+    summary: {
+      currentlyVerified,
+      approvals,
+      denials,
+      reopens,
+      activeModerators: moderators.length,
+    },
+    leaders: {
+      topApprover: topApproverSource
+        ? { moderator: topApproverSource.moderator, count: topApproverSource.approvals }
+        : null,
+      topDenier: topDenierSource
+        ? { moderator: topDenierSource.moderator, count: topDenierSource.denials }
+        : null,
+    },
+    moderators,
   };
 }
 
@@ -7679,6 +7882,7 @@ export {
   searchHistoryRecords,
   searchApprovedRecords,
   searchAuditEntries,
+  getModeratorStats,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   unblockUserForModerator,

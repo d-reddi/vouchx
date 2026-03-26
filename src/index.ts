@@ -25,6 +25,7 @@ import {
   removeApprovedVerificationByModerator,
   reopenDeniedVerification,
   sanitizeSubredditId,
+  getModeratorStats,
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
@@ -829,6 +830,18 @@ app.post('/api/mod/update-notice/dismiss', async (req, res) => {
       ...(await buildModPayload(appContext)),
       toast: { text: `We'll remind you about ${targetVersion} again in 7 days.`, tone: 'success' },
     });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.get('/api/mod/stats', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    await requireReviewAccess(appContext);
+    const requestedRange = String(req.query?.range ?? '').trim().toLowerCase();
+    const range = requestedRange === 'monthly' ? 'monthly' : 'weekly';
+    res.json(await getModeratorStats(appContext, sanitizeSubredditId(appContext.subredditId), range));
   } catch (error) {
     sendError(res, error);
   }
