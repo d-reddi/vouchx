@@ -12,10 +12,12 @@ import {
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
+  getModeratorStats,
   getViewerFlairSnapshot,
   loadApprovalFlairOptionsForSettings,
   looksLikeInternalModmailArchiveError,
   onSaveFlairTemplateValues,
+  removeApprovedVerificationByModerator,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
   normalizeMaxDenialsBeforeBlockSetting,
@@ -175,6 +177,17 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
     auditHasMore: false,
     ...overrides,
   };
+}
+
+async function withFixedNow<ValueType>(iso: string, callback: (nowMs: number) => Promise<ValueType> | ValueType) {
+  const nowMs = new Date(iso).getTime();
+  const originalDateNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    return await callback(nowMs);
+  } finally {
+    Date.now = originalDateNow;
+  }
 }
 
 function createSchedulerRegistrationContext(options?: {
@@ -930,6 +943,55 @@ function auditDateIndexTestKey(subredditId: string): string {
 
 function auditEntryTestKey(subredditId: string, auditId: string): string {
   return `${subredditPrefixKey(subredditId)}:audit:${auditId}`;
+}
+
+function ensureTestZSet(store: Map<string, Map<string, number>>, key: string) {
+  let zset = store.get(key);
+  if (!zset) {
+    zset = new Map<string, number>();
+    store.set(key, zset);
+  }
+  return zset;
+}
+
+function seedApprovedIndexMembers(
+  reviewContext: ReturnType<typeof createReviewActionContext>,
+  members: Array<{ id: string; score: number }>
+) {
+  const zset = ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId));
+  for (const member of members) {
+    zset.set(member.id, member.score);
+  }
+}
+
+function seedAuditEntries(
+  reviewContext: ReturnType<typeof createReviewActionContext>,
+  entries: Array<{
+    id: string;
+    username?: string;
+    action: 'approved' | 'denied' | 'reopened' | 'removed_by_mod' | 'blocked' | 'unblocked';
+    actor: string;
+    at: string;
+    verificationId?: string;
+    notes?: string;
+  }>
+) {
+  const auditZset = ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId));
+  for (const entry of entries) {
+    const fullEntry = {
+      subredditId: reviewContext.subredditId,
+      subredditName: reviewContext.record.subredditName,
+      username: reviewContext.record.username,
+      verificationId: entry.verificationId ?? entry.id,
+      notes: entry.notes ?? '',
+      ...entry,
+    };
+    reviewContext.redisStore.set(
+      auditEntryTestKey(reviewContext.subredditId, fullEntry.id),
+      JSON.stringify(fullEntry)
+    );
+    auditZset.set(fullEntry.id, new Date(fullEntry.at).getTime());
+  }
 }
 
 function createReviewActionContext(options?: {
@@ -2300,6 +2362,170 @@ test('sendUserModmailWithFallback retries createConversation with u-prefixed rec
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('getModeratorStats returns empty recent activity while preserving current verified totals', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async (nowMs) => {
+    seedApprovedIndexMembers(reviewContext, [
+      { id: 'approved_1', score: nowMs - 2_000 },
+      { id: 'approved_2', score: nowMs - 1_000 },
+    ]);
+
+    const stats = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+
+    assert.deepEqual(stats, {
+      range: 'weekly',
+      generatedAt: '2026-03-26T12:00:00.000Z',
+      summary: {
+        currentlyVerified: 2,
+        approvals: 0,
+        denials: 0,
+        reopens: 0,
+        activeModerators: 0,
+      },
+      leaders: {
+        topApprover: null,
+        topDenier: null,
+      },
+      moderators: [],
+    });
+  });
+});
+
+test('getModeratorStats aggregates weekly and monthly moderator activity from the audit log', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async (nowMs) => {
+    seedApprovedIndexMembers(reviewContext, [
+      { id: 'approved_1', score: nowMs - 1_000 },
+      { id: 'approved_2', score: nowMs - 2_000 },
+      { id: 'approved_3', score: nowMs - 3_000 },
+    ]);
+    seedAuditEntries(reviewContext, [
+      { id: 'audit_approved_1', action: 'approved', actor: 'Mod_One', at: '2026-03-25T12:00:00.000Z' },
+      { id: 'audit_approved_2', action: 'approved', actor: 'Mod_One', at: '2026-03-24T12:00:00.000Z' },
+      { id: 'audit_denied_1', action: 'denied', actor: 'Mod_Two', at: '2026-03-23T12:00:00.000Z' },
+      { id: 'audit_reopened_1', action: 'reopened', actor: 'Mod_Two', at: '2026-03-22T12:00:00.000Z' },
+      { id: 'audit_denied_2', action: 'denied', actor: 'Mod_Two', at: '2026-03-18T12:00:00.000Z' },
+      { id: 'audit_approved_3', action: 'approved', actor: 'Mod_Three', at: '2026-03-05T12:00:00.000Z' },
+    ]);
+
+    const weekly = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.deepEqual(weekly.summary, {
+      currentlyVerified: 3,
+      approvals: 2,
+      denials: 1,
+      reopens: 1,
+      activeModerators: 2,
+    });
+    assert.deepEqual(weekly.leaders, {
+      topApprover: { moderator: 'mod_one', count: 2 },
+      topDenier: { moderator: 'mod_two', count: 1 },
+    });
+    assert.deepEqual(weekly.moderators, [
+      { moderator: 'mod_one', approvals: 2, denials: 0, reopens: 0, totalActions: 2 },
+      { moderator: 'mod_two', approvals: 0, denials: 1, reopens: 1, totalActions: 2 },
+    ]);
+
+    const monthly = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'monthly');
+    assert.deepEqual(monthly.summary, {
+      currentlyVerified: 3,
+      approvals: 3,
+      denials: 2,
+      reopens: 1,
+      activeModerators: 3,
+    });
+    assert.deepEqual(monthly.leaders, {
+      topApprover: { moderator: 'mod_one', count: 2 },
+      topDenier: { moderator: 'mod_two', count: 2 },
+    });
+    assert.deepEqual(monthly.moderators, [
+      { moderator: 'mod_two', approvals: 0, denials: 2, reopens: 1, totalActions: 3 },
+      { moderator: 'mod_one', approvals: 2, denials: 0, reopens: 0, totalActions: 2 },
+      { moderator: 'mod_three', approvals: 1, denials: 0, reopens: 0, totalActions: 1 },
+    ]);
+  });
+});
+
+test('getModeratorStats breaks ties by moderator name for leader cards and ranked rows', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async () => {
+    seedAuditEntries(reviewContext, [
+      { id: 'audit_mod_b', action: 'approved', actor: 'Mod_B', at: '2026-03-25T10:00:00.000Z' },
+      { id: 'audit_mod_a', action: 'approved', actor: 'Mod_A', at: '2026-03-25T11:00:00.000Z' },
+    ]);
+
+    const stats = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+
+    assert.deepEqual(stats.leaders.topApprover, { moderator: 'mod_a', count: 1 });
+    assert.deepEqual(stats.moderators, [
+      { moderator: 'mod_a', approvals: 1, denials: 0, reopens: 0, totalActions: 1 },
+      { moderator: 'mod_b', approvals: 1, denials: 0, reopens: 0, totalActions: 1 },
+    ]);
+  });
+});
+
+test('getModeratorStats ignores and cleans stale audit entries', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async (nowMs) => {
+    seedAuditEntries(reviewContext, [
+      { id: 'audit_valid', action: 'approved', actor: 'Mod_One', at: '2026-03-25T12:00:00.000Z' },
+    ]);
+    ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).set('audit_missing', nowMs - 500);
+    reviewContext.redisStore.set(auditEntryTestKey(reviewContext.subredditId, 'audit_invalid'), 'not json');
+    ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).set('audit_invalid', nowMs - 250);
+
+    const stats = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+
+    assert.equal(stats.summary.approvals, 1);
+    assert.equal(
+      ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).has('audit_missing'),
+      false
+    );
+    assert.equal(
+      ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).has('audit_invalid'),
+      false
+    );
+  });
+});
+
+test('getModeratorStats current verified total follows approval and moderator revocation', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async () => {
+    const beforeApproval = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.equal(beforeApproval.summary.currentlyVerified, 0);
+
+    await approveVerification(reviewContext.context as never, reviewContext.record.id);
+    const afterApproval = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.equal(afterApproval.summary.currentlyVerified, 1);
+
+    await removeApprovedVerificationByModerator(
+      reviewContext.context as never,
+      reviewContext.record.id,
+      'Verification revoked for testing.'
+    );
+    const afterRemoval = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.equal(afterRemoval.summary.currentlyVerified, 0);
+  });
+});
+
+test('getModeratorStats reflects cleanup-style approved index removals after approval', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async () => {
+    await approveVerification(reviewContext.context as never, reviewContext.record.id);
+    const afterApproval = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.equal(afterApproval.summary.currentlyVerified, 1);
+
+    await reviewContext.context.redis.zRem(approvedIndexTestKey(reviewContext.subredditId), [reviewContext.record.id]);
+    const afterCleanup = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+    assert.equal(afterCleanup.summary.currentlyVerified, 0);
+  });
 });
 
 test('approveVerification keeps valid approvals working', async () => {

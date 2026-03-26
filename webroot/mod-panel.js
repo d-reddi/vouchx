@@ -11,6 +11,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     pending: document.getElementById('tab-pending'),
     blocked: document.getElementById('tab-blocked'),
     history: document.getElementById('tab-history'),
+    stats: document.getElementById('tab-stats'),
     settings: document.getElementById('tab-settings'),
   };
 
@@ -70,6 +71,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const auditClearBtn = document.getElementById('audit-clear-btn');
   const auditSearchResults = document.getElementById('audit-search-results');
   const auditLoadMoreBtn = document.getElementById('audit-load-more-btn');
+  const teamStatsRangeButtons = Array.from(document.querySelectorAll('.team-stats-range-btn'));
+  const teamStatsFeedback = document.getElementById('team-stats-feedback');
+  const teamStatsCurrentlyVerified = document.getElementById('team-stats-currently-verified');
+  const teamStatsApprovals = document.getElementById('team-stats-approvals');
+  const teamStatsDenials = document.getElementById('team-stats-denials');
+  const teamStatsReopens = document.getElementById('team-stats-reopens');
+  const teamStatsActiveMods = document.getElementById('team-stats-active-mods');
+  const teamStatsTopApproverName = document.getElementById('team-stats-top-approver-name');
+  const teamStatsTopApproverCount = document.getElementById('team-stats-top-approver-count');
+  const teamStatsTopDenierName = document.getElementById('team-stats-top-denier-name');
+  const teamStatsTopDenierCount = document.getElementById('team-stats-top-denier-count');
+  const teamStatsBreakdownToggle = document.getElementById('team-stats-breakdown-toggle');
+  const teamStatsBreakdown = document.getElementById('team-stats-breakdown');
   const blockedList = document.getElementById('blocked-list');
   const blockedSearchInput = document.getElementById('blocked-search');
   const storageMeterFill = document.getElementById('storage-meter-fill');
@@ -183,8 +197,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let isSavingFlairSettings = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
+  let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
+  let activeStatsRange = 'weekly';
   let selectedThemePreset = 'coastal_light';
   let lastStateUpdatedAt = 0;
   let historySearchItems = [];
@@ -202,6 +218,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let historySearchRequestId = 0;
   let approvedSearchRequestId = 0;
   let auditSearchRequestId = 0;
+  let statsRequestId = 0;
   let selectedAuditActionFilter = 'all';
   let realtimeChannel = '';
   let realtimeConnectedChannel = '';
@@ -218,6 +235,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let approvalFlairManualMode = false;
   let additionalApprovalFlairSecondDraft = '';
   let additionalApprovalFlairThirdDraft = '';
+  let statsLoading = false;
+  let statsError = '';
+  let statsBreakdownExpanded = false;
+  let statsAutoRefreshTimerId = 0;
+  let lastStatsFetchAt = 0;
+  const statsCache = {
+    weekly: null,
+    monthly: null,
+  };
+  const statsCacheStale = {
+    weekly: false,
+    monthly: false,
+  };
   const hiddenCriticalUpdateNoticeKeys = new Set();
   const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
   const queryParams = new URLSearchParams(window.location.search);
@@ -225,6 +255,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+  const STATS_AUTO_REFRESH_INTERVAL_MS = 20 * 1000;
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
   const prefersDarkMedia =
     typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1622,6 +1653,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       lastStateUpdatedAt = Date.now();
       if (hadPriorState) {
         invalidateHistoryCaches();
+        invalidateStatsCache({ preserveData: true });
       } else if (Array.isArray(state.approved)) {
         approvedSearchItems = state.approved.slice();
         approvedSearchOffset = approvedSearchItems.length;
@@ -1660,6 +1692,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
             runAuditSearchWithInputGuard(true);
           }
         }
+      }
+      if (isStatsTabVisible()) {
+        queueStatsAutoRefresh();
       }
       return;
     }
@@ -1723,7 +1758,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function setTab(tabName) {
-    const requestedTab = tabName === 'history' || tabName === 'blocked' || tabName === 'settings' ? tabName : 'pending';
+    const requestedTab =
+      tabName === 'history' || tabName === 'stats' || tabName === 'blocked' || tabName === 'settings'
+        ? tabName
+        : 'pending';
     const resolvedTab = requestedTab === 'settings' && !canAccessSettingsTab() ? 'pending' : requestedTab;
     for (const [name, panel] of Object.entries(tabPanels)) {
       if (!panel) {
@@ -1742,6 +1780,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         btn.classList.remove('tab-btn-active');
       }
     }
+    activePrimaryTab = resolvedTab;
     return resolvedTab;
   }
 
@@ -2336,6 +2375,323 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
       card.appendChild(row);
       blockedList.appendChild(card);
+    }
+  }
+
+  function isStatsTabVisible() {
+    return Boolean(tabPanels.stats && !tabPanels.stats.classList.contains('hidden'));
+  }
+
+  function clearStatsAutoRefreshTimer() {
+    if (!statsAutoRefreshTimerId) {
+      return;
+    }
+    window.clearTimeout(statsAutoRefreshTimerId);
+    statsAutoRefreshTimerId = 0;
+  }
+
+  function invalidateStatsCache(options) {
+    const preserveData = Boolean(options && options.preserveData);
+    statsRequestId += 1;
+    statsLoading = false;
+    statsError = '';
+    statsCacheStale.weekly = true;
+    statsCacheStale.monthly = true;
+    if (!preserveData) {
+      statsCache.weekly = null;
+      statsCache.monthly = null;
+    }
+  }
+
+  function queueStatsAutoRefresh() {
+    if (!isStatsTabVisible() || !statsCacheStale[activeStatsRange]) {
+      return;
+    }
+
+    const elapsedMs = lastStatsFetchAt > 0 ? Date.now() - lastStatsFetchAt : Number.POSITIVE_INFINITY;
+    if (elapsedMs >= STATS_AUTO_REFRESH_INTERVAL_MS) {
+      clearStatsAutoRefreshTimer();
+      void loadStats({ force: true });
+      return;
+    }
+
+    if (statsAutoRefreshTimerId) {
+      return;
+    }
+
+    statsAutoRefreshTimerId = window.setTimeout(() => {
+      statsAutoRefreshTimerId = 0;
+      if (!isStatsTabVisible() || !statsCacheStale[activeStatsRange]) {
+        return;
+      }
+      void loadStats({ force: true });
+    }, STATS_AUTO_REFRESH_INTERVAL_MS - elapsedMs);
+  }
+
+  function getActiveStatsPayload() {
+    return statsCache[activeStatsRange] && typeof statsCache[activeStatsRange] === 'object'
+      ? statsCache[activeStatsRange]
+      : null;
+  }
+
+  function setStatsRange(nextRange) {
+    const nextResolvedRange = nextRange === 'monthly' ? 'monthly' : 'weekly';
+    if (nextResolvedRange !== activeStatsRange) {
+      statsBreakdownExpanded = false;
+    }
+    activeStatsRange = nextResolvedRange;
+    for (const button of teamStatsRangeButtons) {
+      const isActive = String(button.dataset.statsRange || 'weekly') === activeStatsRange;
+      button.classList.toggle('btn-primary', isActive);
+      button.classList.toggle('btn-secondary', !isActive);
+    }
+  }
+
+  function setStatsFeedback(text, tone) {
+    if (!teamStatsFeedback) {
+      return;
+    }
+    const hasText = Boolean(text);
+    teamStatsFeedback.textContent = hasText ? text : '';
+    teamStatsFeedback.classList.toggle('hidden', !hasText);
+    teamStatsFeedback.classList.toggle('team-stats-feedback-error', tone === 'error');
+  }
+
+  function formatStatsMetricValue(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '--';
+  }
+
+  function formatStatsModeratorName(value) {
+    const normalized = normalizeUsernameForCompare(value);
+    if (!normalized || normalized === 'unknown') {
+      return 'Unknown moderator';
+    }
+    return `u/${normalized}`;
+  }
+
+  function createStatsModeratorCell(username) {
+    const normalized = normalizeUsernameForCompare(username);
+    if (!normalized || normalized === 'unknown') {
+      const label = document.createElement('span');
+      label.className = 'team-stats-moderator-label';
+      label.textContent = 'Unknown moderator';
+      return label;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'username-link team-stats-moderator-link';
+    button.textContent = `u/${normalized}`;
+    button.addEventListener('click', () => {
+      post({ type: 'openUserProfile', username: normalized });
+    });
+    return button;
+  }
+
+  function createStatsBreakdownToken(labelText, value, fullLabel) {
+    const metric = document.createElement('span');
+    metric.className = 'team-stats-breakdown-token';
+    metric.setAttribute('aria-label', `${fullLabel}: ${formatStatsMetricValue(value)}`);
+
+    const label = document.createElement('span');
+    label.className = 'team-stats-breakdown-token-label';
+    label.textContent = labelText;
+    metric.appendChild(label);
+
+    const metricValue = document.createElement('span');
+    metricValue.className = 'team-stats-breakdown-token-value';
+    metricValue.textContent = formatStatsMetricValue(value);
+    metric.appendChild(metricValue);
+
+    return metric;
+  }
+
+  function renderStatsBreakdownToggle(totalRows) {
+    if (!teamStatsBreakdownToggle) {
+      return;
+    }
+
+    const count = Number.isFinite(totalRows) ? totalRows : 0;
+    const shouldShow = count > 3;
+    teamStatsBreakdownToggle.classList.toggle('hidden', !shouldShow);
+    if (!shouldShow) {
+      teamStatsBreakdownToggle.textContent = 'Show all';
+      return;
+    }
+
+    teamStatsBreakdownToggle.textContent = statsBreakdownExpanded ? 'Show fewer' : `Show all ${count}`;
+  }
+
+  function renderStatsBreakdownRows(rows, hasVerifiedUsers) {
+    if (!teamStatsBreakdown) {
+      return;
+    }
+    teamStatsBreakdown.innerHTML = '';
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      renderStatsBreakdownToggle(0);
+      renderEmptyState(
+        teamStatsBreakdown,
+        hasVerifiedUsers ? 'No recent moderator actions' : 'No stats yet',
+        hasVerifiedUsers
+          ? 'Verified users exist, but no tracked actions landed in this range.'
+          : 'Moderator activity will appear here once the team starts reviewing.'
+      );
+      return;
+    }
+
+    const sortedRows = rows.slice().sort((left, right) => {
+      const leftVisibleTotal = Number(left && left.approvals || 0) + Number(left && left.denials || 0);
+      const rightVisibleTotal = Number(right && right.approvals || 0) + Number(right && right.denials || 0);
+      if (rightVisibleTotal !== leftVisibleTotal) {
+        return rightVisibleTotal - leftVisibleTotal;
+      }
+      const leftApprovals = Number(left && left.approvals || 0);
+      const rightApprovals = Number(right && right.approvals || 0);
+      if (rightApprovals !== leftApprovals) {
+        return rightApprovals - leftApprovals;
+      }
+      return normalizeUsernameForCompare(left && left.moderator).localeCompare(normalizeUsernameForCompare(right && right.moderator));
+    });
+
+    renderStatsBreakdownToggle(sortedRows.length);
+    const visibleRows = statsBreakdownExpanded ? sortedRows : sortedRows.slice(0, 3);
+
+    for (const row of visibleRows) {
+      const item = document.createElement('article');
+      item.className = 'team-stats-breakdown-item';
+
+      const moderatorLine = document.createElement('div');
+      moderatorLine.className = 'team-stats-breakdown-summary';
+      moderatorLine.appendChild(createStatsModeratorCell(row.moderator));
+      item.appendChild(moderatorLine);
+
+      const metrics = document.createElement('div');
+      metrics.className = 'team-stats-breakdown-metrics';
+      metrics.appendChild(createStatsBreakdownToken('Approvals', row.approvals, 'Approvals'));
+      metrics.appendChild(createStatsBreakdownToken('Denials', row.denials, 'Denials'));
+      item.appendChild(metrics);
+
+      teamStatsBreakdown.appendChild(item);
+    }
+  }
+
+  function renderStats() {
+    const payload = getActiveStatsPayload();
+    const hasPayload = Boolean(payload && typeof payload === 'object');
+    const summary = hasPayload && payload.summary && typeof payload.summary === 'object' ? payload.summary : null;
+    const leaders = hasPayload && payload.leaders && typeof payload.leaders === 'object' ? payload.leaders : null;
+
+    if (statsError) {
+      setStatsFeedback(statsError, 'error');
+    } else if (statsLoading) {
+      setStatsFeedback(
+        hasPayload ? 'Refreshing moderator stats…' : 'Loading moderator stats…',
+        'info'
+      );
+    } else {
+      setStatsFeedback('', 'info');
+    }
+
+    if (teamStatsCurrentlyVerified) {
+      teamStatsCurrentlyVerified.textContent = summary ? formatStatsMetricValue(summary.currentlyVerified) : '--';
+    }
+    if (teamStatsApprovals) {
+      teamStatsApprovals.textContent = summary ? formatStatsMetricValue(summary.approvals) : '--';
+    }
+    if (teamStatsDenials) {
+      teamStatsDenials.textContent = summary ? formatStatsMetricValue(summary.denials) : '--';
+    }
+    if (teamStatsReopens) {
+      teamStatsReopens.textContent = summary ? formatStatsMetricValue(summary.reopens) : '--';
+    }
+    if (teamStatsActiveMods) {
+      teamStatsActiveMods.textContent = summary ? formatStatsMetricValue(summary.activeModerators) : '--';
+    }
+
+    const topApprover = leaders && leaders.topApprover ? leaders.topApprover : null;
+    if (teamStatsTopApproverName) {
+      teamStatsTopApproverName.textContent = topApprover ? formatStatsModeratorName(topApprover.moderator) : '--';
+    }
+    if (teamStatsTopApproverCount) {
+      teamStatsTopApproverCount.textContent = topApprover
+        ? `${formatStatsMetricValue(topApprover.count)} approval${topApprover.count === 1 ? '' : 's'}`
+        : hasPayload
+          ? 'No approvals yet'
+          : 'Not loaded';
+    }
+
+    const topDenier = leaders && leaders.topDenier ? leaders.topDenier : null;
+    if (teamStatsTopDenierName) {
+      teamStatsTopDenierName.textContent = topDenier ? formatStatsModeratorName(topDenier.moderator) : '--';
+    }
+    if (teamStatsTopDenierCount) {
+      teamStatsTopDenierCount.textContent = topDenier
+        ? `${formatStatsMetricValue(topDenier.count)} denial${topDenier.count === 1 ? '' : 's'}`
+        : hasPayload
+          ? 'No denials yet'
+          : 'Not loaded';
+    }
+
+    if (!teamStatsBreakdown) {
+      renderStatsBreakdownToggle(0);
+      return;
+    }
+    if (!hasPayload) {
+      renderStatsBreakdownToggle(0);
+      renderEmptyState(
+        teamStatsBreakdown,
+        statsLoading ? 'Loading team stats' : statsError ? 'Could not load stats' : 'No stats loaded',
+        statsError
+          ? 'Try refreshing the panel or reopening the Stats tab.'
+          : 'Weekly and monthly team activity will load here.'
+      );
+      return;
+    }
+
+    renderStatsBreakdownRows(
+      Array.isArray(payload.moderators) ? payload.moderators : [],
+      Boolean(summary && Number(summary.currentlyVerified || 0) > 0)
+    );
+  }
+
+  async function loadStats(options) {
+    const force = Boolean(options && options.force);
+    const cached = getActiveStatsPayload();
+    if (!force && cached && !statsCacheStale[activeStatsRange]) {
+      renderStats();
+      return cached;
+    }
+
+    clearStatsAutoRefreshTimer();
+    const range = activeStatsRange;
+    const requestId = statsRequestId + 1;
+    statsRequestId = requestId;
+    statsLoading = true;
+    statsError = '';
+    lastStatsFetchAt = Date.now();
+    renderStats();
+
+    try {
+      const payload = await requestJson(`/api/mod/stats?range=${encodeURIComponent(range)}`);
+      if (requestId !== statsRequestId) {
+        return null;
+      }
+      statsCache[range] = payload && typeof payload === 'object' ? payload : null;
+      statsCacheStale[range] = false;
+      statsError = '';
+      return statsCache[range];
+    } catch (error) {
+      if (requestId !== statsRequestId) {
+        return null;
+      }
+      statsError = error instanceof Error ? error.message : String(error);
+      return null;
+    } finally {
+      if (requestId === statsRequestId) {
+        statsLoading = false;
+        renderStats();
+      }
     }
   }
 
@@ -3017,11 +3373,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       persistThemeSnapshot(state.resolvedTheme);
     }
     renderPrimaryTabs();
+    activePrimaryTab = setTab(activePrimaryTab);
     updateHeroMeta();
     renderUpdateNotice();
     renderPendingFlairWarning();
     renderPending();
     renderBlocked();
+    setStatsRange(activeStatsRange);
+    renderStats();
     setHistoryView(activeHistoryView);
     renderHistorySearchResults();
     renderApprovedSearchResults();
@@ -3891,6 +4250,31 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
   }
 
+  if (teamStatsRangeButtons.length) {
+    for (const button of teamStatsRangeButtons) {
+      button.addEventListener('click', () => {
+        const nextRange = String(button.dataset.statsRange || 'weekly');
+        if (nextRange === activeStatsRange && getActiveStatsPayload()) {
+          setStatsRange(nextRange);
+          renderStats();
+          return;
+        }
+        setStatsRange(nextRange);
+        renderStats();
+        if (tabPanels.stats && !tabPanels.stats.classList.contains('hidden')) {
+          void loadStats();
+        }
+      });
+    }
+  }
+
+  if (teamStatsBreakdownToggle) {
+    teamStatsBreakdownToggle.addEventListener('click', () => {
+      statsBreakdownExpanded = !statsBreakdownExpanded;
+      renderStats();
+    });
+  }
+
   saveFlairBtn.addEventListener('click', () => {
     void saveFlairSettings();
   });
@@ -4080,6 +4464,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
               runAuditSearchWithInputGuard(true);
             }
           }
+        } else if (activeTab === 'stats') {
+          setStatsRange(activeStatsRange);
+          renderStats();
+          void loadStats();
         } else if (activeTab === 'settings') {
           setSettingsTab(activeSettingsTab);
         }
@@ -4111,6 +4499,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   setAuditSearchHintVisible(false);
   setAuditActionFilter('all');
   setHistoryView('records');
+  setStatsRange('weekly');
   setSettingsTab('general');
 
   function startHandshake() {

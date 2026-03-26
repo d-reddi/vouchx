@@ -55,6 +55,7 @@
         <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>
         <button class="tab-btn" data-tab="blocked">Blocked</button>
+        <button class="tab-btn" data-tab="stats">Stats</button>
         <button class="tab-btn hidden" data-tab="settings">Settings</button>
       </nav>
 
@@ -221,6 +222,95 @@
                 <button id="audit-load-more-btn" class="btn btn-secondary hidden">Load More</button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section id="tab-stats" class="tab-panel hidden">
+          <div class="team-stats-head">
+            <div>
+              <h2>Stats</h2>
+              <p class="section-copy muted">Check recent moderator activity and current verification volume at a glance.</p>
+            </div>
+          </div>
+
+          <div class="subtabs segmented-control team-stats-range-control" aria-label="Stats range">
+            <button id="team-stats-range-weekly" class="btn btn-primary team-stats-range-btn" data-stats-range="weekly">
+              Weekly
+            </button>
+            <button id="team-stats-range-monthly" class="btn btn-secondary team-stats-range-btn" data-stats-range="monthly">
+              Monthly
+            </button>
+          </div>
+
+          <p id="team-stats-feedback" class="muted small team-stats-feedback hidden" aria-live="polite"></p>
+
+          <article class="team-stats-overview-card">
+            <div class="team-stats-overview-head">
+              <p class="team-stats-overview-title">Overview</p>
+              <details class="team-stats-help">
+                <summary class="team-stats-help-button" aria-label="Explain currently verified and approvals">?</summary>
+                <div class="team-stats-help-tooltip" role="note">
+                  <p><strong>Currently Verified</strong> shows the live total after removals or expirations.</p>
+                  <p><strong>Approvals</strong> counts actions during the selected time range.</p>
+                </div>
+              </details>
+            </div>
+
+            <div class="team-stats-summary-grid" aria-live="polite">
+              <article class="team-stats-card team-stats-card-primary team-stats-card-verified">
+                <p class="team-stats-card-label">Currently Verified</p>
+                <p id="team-stats-currently-verified" class="team-stats-card-value">--</p>
+              </article>
+              <article class="team-stats-card team-stats-card-approvals">
+                <p class="team-stats-card-label">Approvals</p>
+                <p id="team-stats-approvals" class="team-stats-card-value">--</p>
+              </article>
+              <article class="team-stats-card team-stats-card-denials">
+                <p class="team-stats-card-label">Denials</p>
+                <p id="team-stats-denials" class="team-stats-card-value">--</p>
+              </article>
+              <article class="team-stats-card team-stats-card-reopens">
+                <p class="team-stats-card-label">Reopens</p>
+                <p id="team-stats-reopens" class="team-stats-card-value">--</p>
+              </article>
+              <article class="team-stats-card team-stats-card-active-mods">
+                <p class="team-stats-card-label">Active Mods</p>
+                <p id="team-stats-active-mods" class="team-stats-card-value">--</p>
+              </article>
+            </div>
+
+            <div class="team-stats-top-strip">
+              <div class="team-stats-top-strip-head">
+                <h3>Top Mods</h3>
+              </div>
+              <div class="team-stats-top-list">
+                <div class="team-stats-top-row team-stats-top-row-approvals">
+                  <div class="team-stats-top-meta">
+                    <p class="team-stats-card-label">Top Approver</p>
+                    <p id="team-stats-top-approver-name" class="team-stats-top-name">--</p>
+                  </div>
+                  <p id="team-stats-top-approver-count" class="team-stats-top-count muted small">No approvals yet.</p>
+                </div>
+                <div class="team-stats-top-row team-stats-top-row-denials">
+                  <div class="team-stats-top-meta">
+                    <p class="team-stats-card-label">Top Denier</p>
+                    <p id="team-stats-top-denier-name" class="team-stats-top-name">--</p>
+                  </div>
+                  <p id="team-stats-top-denier-count" class="team-stats-top-count muted small">No denials yet.</p>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <div class="team-stats-breakdown-card">
+            <div class="team-stats-section-head team-stats-breakdown-head">
+              <div>
+                <h3>Moderator Breakdown</h3>
+                <p class="team-stats-section-copy muted small">Approvals and denials by moderator in the selected range.</p>
+              </div>
+              <button id="team-stats-breakdown-toggle" class="btn btn-secondary team-stats-breakdown-toggle hidden" type="button">Show all</button>
+            </div>
+            <div id="team-stats-breakdown" class="team-stats-breakdown"></div>
           </div>
         </section>
 
