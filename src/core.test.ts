@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  assertCanReview,
   approveVerification,
   buildModeratorUpdateNotice,
   checkVerificationFlair,
@@ -133,6 +134,12 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
   return {
     viewerUsername: 'example_user',
     subredditName: 'example',
+    moderatorAccess: {
+      state: 'denied',
+      permissionState: 'unknown',
+      isModerator: false,
+      permissions: [],
+    },
     isModerator: false,
     canReview: false,
     canManageUsers: false,
@@ -1873,9 +1880,69 @@ test('getModeratorAccessSnapshot falls back to cached moderator role when modera
     assert.deepEqual(first.permissions, []);
     assert.equal(second.isModerator, true);
     assert.deepEqual(second.permissions, []);
+    assert.equal(first.state, 'confirmed');
+    assert.equal(second.state, 'cached');
     assert.equal(lookupContext.permissionCallCount, 2);
-    assert.equal(lookupContext.broadCallCount, 2);
+    assert.equal(lookupContext.broadCallCount, 1);
     assert.equal(lookupContext.filteredCallCount, 1);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('getModeratorAccessSnapshot prefers the filtered moderator lookup and skips broad listing on success', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
+    filteredModeratorResponses: [[{ username: 'mod_one' }]],
+    broadModeratorResponses: [[{ username: 'mod_one' }]],
+  });
+
+  const access = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+
+  assert.equal(access.isModerator, true);
+  assert.equal(access.state, 'confirmed');
+  assert.equal(lookupContext.filteredCallCount, 1);
+  assert.equal(lookupContext.broadCallCount, 0);
+});
+
+test('getModeratorAccessSnapshot does not fall back to broad listing when the filtered lookup confirms absence', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
+    filteredModeratorResponses: [[]],
+    broadModeratorResponses: [[{ username: 'mod_one' }]],
+  });
+
+  const access = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_two');
+
+  assert.equal(access.isModerator, false);
+  assert.equal(access.state, 'denied');
+  assert.equal(lookupContext.filteredCallCount, 1);
+  assert.equal(lookupContext.broadCallCount, 0);
+});
+
+test('assertCanReview returns a temporary error when moderator lookup is transiently unavailable', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
+    filteredModeratorResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
+    broadModeratorResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
+  });
+  const originalConsoleLog = console.log;
+  let loggedMessages = 0;
+  console.log = () => {
+    loggedMessages += 1;
+  };
+
+  try {
+    await assert.rejects(
+      () => assertCanReview(lookupContext.context as never, 'ExampleSub', 'mod_one'),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        assert.equal((error as Error & { status?: number }).status, 503);
+        assert.equal((error as Error).message, 'Unable to verify moderator access right now. Please retry.');
+        return true;
+      }
+    );
+    assert.equal(loggedMessages, 0);
   } finally {
     console.log = originalConsoleLog;
   }
@@ -2305,6 +2372,35 @@ test('sendUserModmailWithFallback clears stale thread keys and falls back to cre
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('sendUserModmailWithFallback preserves cached thread aliases when reply fails transiently', async () => {
+  const threadKeys = Array.from(
+    new Set(usernameLookupFields('Example_User').map((field) => modmailThreadKey('t5_example', field)))
+  );
+  const modmailContext = createModmailContext({
+    initialRedis: {
+      [threadKeys[0]!]: '39to20',
+    },
+    replyError: new Error('2 UNKNOWN: upstream request missing or timed out'),
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'Example_User',
+  });
+
+  assert.deepEqual(result, {
+    status: 'failed',
+    reason: '2 UNKNOWN: upstream request missing or timed out',
+  });
+  assert.equal(modmailContext.replyCalls.length, 1);
+  assert.equal(modmailContext.createConversationCalls.length, 0);
+  assert.equal(modmailContext.delCalls.length, 0);
+  assert.equal(modmailContext.redisStore.get(threadKeys[0]!), '39to20');
 });
 
 test('sendUserModmailWithFallback purges invalid cached conversation ids before creating a new thread', async () => {

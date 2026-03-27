@@ -14,6 +14,7 @@ import {
   denyVerification,
   errorText,
   getModeratorAccessSnapshot,
+  getModeratorMembershipError,
   getCurrentSubredditNameCompat,
   loadHubDashboard,
   loadModDashboard,
@@ -31,6 +32,7 @@ import {
   searchHistoryRecords,
   setPendingClaimState,
   submitVerification,
+  moderatorPermissionLookupNeedsRetry,
   toHubState,
   toModPanelState,
   unblockUserForModerator,
@@ -64,6 +66,7 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 const REFRESH_SIGNAL = Object.freeze({ type: 'refresh' });
 let unhandledRejectionGuardInstalled = false;
+type RouteModeratorAccess = Awaited<ReturnType<typeof getModeratorAccessSnapshot>>;
 
 function shouldIgnoreDevvitLogStreamAuthRejection(reason: unknown): boolean {
   const message = errorText(reason).toLowerCase();
@@ -164,28 +167,36 @@ function validateDenyReasonLabel(value: unknown): string | undefined {
   }
 }
 
-async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+async function requireModeratorIdentity(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
   const moderator = await appContext.reddit.getCurrentUsername();
   if (!moderator) {
     throw httpError(403, 'You must be logged in as a moderator.');
   }
 
   const subredditName = await getCurrentSubredditNameCompat(appContext);
-  const access = await getModeratorAccessSnapshot(appContext, subredditName, moderator);
-  if (!access.isModerator) {
-    throw httpError(403, 'Only moderators can create verification posts.');
-  }
+  return { moderator, subredditName };
+}
 
+async function requireRouteModeratorAccess(
+  appContext: Devvit.Context
+): Promise<{ moderator: string; subredditName: string; access: RouteModeratorAccess }> {
+  const { moderator, subredditName } = await requireModeratorIdentity(appContext);
+  const access = await getModeratorAccessSnapshot(appContext, subredditName, moderator);
+  return { moderator, subredditName, access };
+}
+
+async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+  const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
+  const accessError = getModeratorMembershipError(access, 'Only moderators can create verification posts.');
+  if (accessError) {
+    throw accessError;
+  }
   return { moderator, subredditName };
 }
 
 async function requireReviewAccess(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
-  const { moderator, subredditName } = await requireModerator(appContext);
-  try {
-    await assertCanReview(appContext, subredditName, moderator);
-  } catch {
-    throw httpError(403, 'Only moderators with Manage Users permission can review verifications.');
-  }
+  const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
+  await assertCanReview(appContext, subredditName, moderator, access);
   return { moderator, subredditName };
 }
 
@@ -204,6 +215,19 @@ async function buildHubPayload(appContext: Devvit.Context) {
 
 async function buildModPayload(appContext: Devvit.Context) {
   const dashboard = await loadModDashboard(appContext);
+  if (!dashboard.viewerUsername) {
+    throw httpError(403, 'You must be logged in as a moderator.');
+  }
+  const membershipError = getModeratorMembershipError(
+    dashboard.moderatorAccess,
+    'Only moderators can use the moderator panel.'
+  );
+  if (membershipError) {
+    throw membershipError;
+  }
+  if (moderatorPermissionLookupNeedsRetry(dashboard.moderatorAccess)) {
+    throw httpError(503, 'Unable to verify moderator permissions right now. Please retry.');
+  }
   if (!dashboard.canReview) {
     throw httpError(403, 'Only moderators with Manage Users permission can use the moderator panel.');
   }
@@ -510,11 +534,7 @@ app.post('/api/mod/deny', async (req, res) => {
         requestedBlockOutcome = { status: 'failed', reason: 'Denied user could not be resolved for blocking.' };
       } else {
         try {
-          const moderator = await appContext.reddit.getCurrentUsername();
-          const subredditName = await getCurrentSubredditNameCompat(appContext);
-          if (!moderator) {
-            throw new Error('You must be logged in as a moderator.');
-          }
+          const { moderator, subredditName } = await requireModeratorIdentity(appContext);
           const blockResult = await blockUserForModerator(
             appContext,
             sanitizeSubredditId(appContext.subredditId),
@@ -719,11 +739,7 @@ app.post('/api/mod/block', async (req, res) => {
       throw httpError(400, 'Missing username for block.');
     }
     const appContext = currentContext();
-    const moderator = await appContext.reddit.getCurrentUsername();
-    const subredditName = await getCurrentSubredditNameCompat(appContext);
-    if (!moderator) {
-      throw httpError(403, 'You must be logged in as a moderator.');
-    }
+    const { moderator, subredditName } = await requireModeratorIdentity(appContext);
     const result = await blockUserForModerator(
       appContext,
       sanitizeSubredditId(appContext.subredditId),
@@ -753,11 +769,7 @@ app.post('/api/mod/unblock', async (req, res) => {
       throw httpError(400, 'Missing username for unblock.');
     }
     const appContext = currentContext();
-    const moderator = await appContext.reddit.getCurrentUsername();
-    const subredditName = await getCurrentSubredditNameCompat(appContext);
-    if (!moderator) {
-      throw httpError(403, 'You must be logged in as a moderator.');
-    }
+    const { moderator, subredditName } = await requireModeratorIdentity(appContext);
     const unblocked = await unblockUserForModerator(
       appContext,
       sanitizeSubredditId(appContext.subredditId),

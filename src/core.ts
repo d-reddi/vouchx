@@ -158,6 +158,7 @@ type UserSnapshot = {
 type DashboardData = {
   viewerUsername: string | null;
   subredditName: string;
+  moderatorAccess: ModeratorAccessSnapshot;
   isModerator: boolean;
   canReview: boolean;
   canManageUsers: boolean;
@@ -202,7 +203,12 @@ type ViewerFlairSnapshot = {
   userId: string;
 };
 
+type ModeratorLookupState = 'confirmed' | 'cached' | 'denied' | 'unknown';
+type ModeratorPermissionState = 'confirmed' | 'cached' | 'unknown';
+
 type ModeratorAccessSnapshot = {
+  state: ModeratorLookupState;
+  permissionState: ModeratorPermissionState;
   isModerator: boolean;
   permissions: string[];
 };
@@ -3385,7 +3391,13 @@ async function sendUserModmailWithFallback(
         await archiveModmailConversationBestEffort(context, subredditName, username, existingConversationId);
         return { status: 'replied', conversationId: existingConversationId };
       } catch (error) {
-        void error;
+        const replyErrorMessage = errorText(error);
+        if (looksLikeTransientRedditTransportError(replyErrorMessage)) {
+          return {
+            status: 'failed',
+            reason: replyErrorMessage,
+          };
+        }
         if (userThreadKeys.length > 0) {
           await context.redis.del(...userThreadKeys);
         }
@@ -3460,7 +3472,12 @@ async function loadDashboardData(
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
   const moderatorAccess = viewerUsername
     ? await getModeratorAccessSnapshot(context, subredditName, viewerUsername)
-    : { isModerator: false, permissions: [] };
+    : ({
+        state: 'denied',
+        permissionState: 'unknown',
+        isModerator: false,
+        permissions: [],
+      } satisfies ModeratorAccessSnapshot);
   const isModeratorUser = moderatorAccess.isModerator;
   const moderatorPermissions = moderatorAccess.permissions;
   const canManageUsers = hasManageUsersPermissionInList(moderatorPermissions);
@@ -3611,6 +3628,7 @@ async function loadDashboardData(
   return {
     viewerUsername,
     subredditName,
+    moderatorAccess,
     isModerator: isModeratorUser,
     canReview: canReviewUser,
     canManageUsers,
@@ -4978,6 +4996,7 @@ async function unblockUserForModerator(
   username: string,
   moderator: string
 ): Promise<boolean> {
+  await assertCanReview(context, subredditName, moderator);
   const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     return false;
@@ -5016,6 +5035,7 @@ async function blockUserForModerator(
   username: string,
   moderator: string
 ): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
+  await assertCanReview(context, subredditName, moderator);
   const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     throw new Error('A valid username is required.');
@@ -5564,28 +5584,27 @@ async function getModeratorAccessSnapshot(
   username: string
 ): Promise<ModeratorAccessSnapshot> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const permissions = await getCurrentModeratorPermissionList(context, sanitizedSubreddit, username);
-  if (permissions.length > 0) {
+  const permissionSnapshot = await getCurrentModeratorPermissionSnapshot(context, sanitizedSubreddit, username);
+  if (permissionSnapshot.permissions.length > 0) {
     return {
+      state: permissionSnapshot.state,
+      permissionState: permissionSnapshot.state,
       isModerator: true,
-      permissions,
+      permissions: permissionSnapshot.permissions,
+    };
+  }
+
+  if (await getCachedModeratorRole(context, username)) {
+    return {
+      state: 'cached',
+      permissionState: permissionSnapshot.state,
+      isModerator: true,
+      permissions: permissionSnapshot.permissions,
     };
   }
 
   const errors: string[] = [];
-
-  try {
-    const mods = await context.reddit.getModerators({ subredditName: sanitizedSubreddit, limit: 100 }).all();
-    if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
-      await cacheModeratorRole(context, username);
-      return {
-        isModerator: true,
-        permissions,
-      };
-    }
-  } catch (error) {
-    errors.push(`broad moderators listing path: ${errorText(error)}`);
-  }
+  let membershipLookupUnknown = false;
 
   try {
     const mods = await context.reddit
@@ -5594,19 +5613,32 @@ async function getModeratorAccessSnapshot(
     if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
       await cacheModeratorRole(context, username);
       return {
+        state: 'confirmed',
+        permissionState: permissionSnapshot.state,
         isModerator: true,
-        permissions,
+        permissions: permissionSnapshot.permissions,
       };
     }
   } catch (error) {
+    membershipLookupUnknown = true;
     errors.push(`moderators listing path: ${errorText(error)}`);
   }
 
-  if (await getCachedModeratorRole(context, username)) {
-    return {
-      isModerator: true,
-      permissions,
-    };
+  if (membershipLookupUnknown) {
+    try {
+      const mods = await context.reddit.getModerators({ subredditName: sanitizedSubreddit, limit: 100 }).all();
+      if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
+        await cacheModeratorRole(context, username);
+        return {
+          state: 'confirmed',
+          permissionState: permissionSnapshot.state,
+          isModerator: true,
+          permissions: permissionSnapshot.permissions,
+        };
+      }
+    } catch (error) {
+      errors.push(`broad moderators listing path: ${errorText(error)}`);
+    }
   }
 
   if (errors.length > 0) {
@@ -5618,20 +5650,33 @@ async function getModeratorAccessSnapshot(
     );
   }
 
+  if (membershipLookupUnknown) {
+    return {
+      state: 'unknown',
+      permissionState: permissionSnapshot.state,
+      isModerator: false,
+      permissions: permissionSnapshot.permissions,
+    };
+  }
+
   return {
+    state: 'denied',
+    permissionState: permissionSnapshot.state,
     isModerator: false,
-    permissions,
+    permissions: permissionSnapshot.permissions,
   };
 }
 
 async function assertCanReview(
   context: Devvit.Context,
   subredditName: string,
-  username: string
+  username: string,
+  access?: ModeratorAccessSnapshot
 ): Promise<void> {
-  const canManageUsers = await hasManageUsersPermission(context, sanitizeSubredditName(subredditName), username);
-  if (!canManageUsers) {
-    throw new Error('Only moderators with Manage Users permission can review verifications.');
+  const snapshot = access ?? (await getModeratorAccessSnapshot(context, sanitizeSubredditName(subredditName), username));
+  const accessError = getModeratorReviewAccessError(snapshot);
+  if (accessError) {
+    throw accessError;
   }
 }
 
@@ -5647,26 +5692,47 @@ async function getCurrentModeratorPermissionList(
   subredditName: string,
   username: string
 ): Promise<string[]> {
+  return (await getCurrentModeratorPermissionSnapshot(context, subredditName, username)).permissions;
+}
+
+async function getCurrentModeratorPermissionSnapshot(
+  context: Devvit.Context,
+  subredditName: string,
+  username: string
+): Promise<{ permissions: string[]; state: ModeratorPermissionState }> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
   const currentUsername = await context.reddit.getCurrentUsername();
   if (!currentUsername || !usernamesEqual(currentUsername, username)) {
-    return [];
+    return {
+      permissions: [],
+      state: 'unknown',
+    };
   }
 
   try {
     const currentUser = await context.reddit.getCurrentUser();
     if (!currentUser) {
-      return await getCachedModeratorPermissions(context, username);
+      const cachedPermissions = await getCachedModeratorPermissions(context, username);
+      return {
+        permissions: cachedPermissions,
+        state: cachedPermissions.length > 0 ? 'cached' : 'unknown',
+      };
     }
     const permissions = normalizeModeratorPermissions(
       await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit)
     );
     await cacheModeratorPermissions(context, username, permissions);
-    return permissions;
+    return {
+      permissions,
+      state: 'confirmed',
+    };
   } catch (error) {
     const cachedPermissions = await getCachedModeratorPermissions(context, username);
     if (cachedPermissions.length > 0) {
-      return cachedPermissions;
+      return {
+        permissions: cachedPermissions,
+        state: 'cached',
+      };
     }
     await logModeratorLookupFailureWithCooldown(
       context,
@@ -5674,7 +5740,10 @@ async function getCurrentModeratorPermissionList(
       username,
       `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
-    return cachedPermissions;
+    return {
+      permissions: [],
+      state: 'unknown',
+    };
   }
 }
 
@@ -5684,42 +5753,65 @@ async function assertCanAccessModeratorSettingsTab(
   username: string
 ): Promise<void> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  await assertCanReview(context, sanitizedSubreddit, username);
+  const access = await getModeratorAccessSnapshot(context, sanitizedSubreddit, username);
+  const reviewAccessError = getModeratorReviewAccessError(access);
+  if (reviewAccessError) {
+    throw reviewAccessError;
+  }
   const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
   if (!settingsTabRequiresConfigAccess) {
     return;
   }
-  const hasSettingsAccess = await hasConfigAccessPermission(context, sanitizedSubreddit, username);
-  if (!hasSettingsAccess) {
-    throw new Error('Only moderators with config/settings access can use the Settings tab.');
+  if (moderatorPermissionLookupNeedsRetry(access)) {
+    throw createStatusError(503, 'Unable to verify moderator permissions right now. Please retry.');
+  }
+  if (!hasConfigAccessPermissionInList(access.permissions)) {
+    throw createStatusError(403, 'Only moderators with config/settings access can use the Settings tab.');
   }
 }
 
-async function hasManageUsersPermission(
-  context: Devvit.Context,
-  subredditName: string,
-  username: string
-): Promise<boolean> {
-  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
-  return hasManageUsersPermissionInList(permissions);
+function createStatusError(status: number, message: string): Error & { status: number } {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
 }
 
-async function hasConfigAccessPermission(
-  context: Devvit.Context,
-  subredditName: string,
-  username: string
-): Promise<boolean> {
-  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
-  return hasConfigAccessPermissionInList(permissions);
+function getModeratorMembershipError(
+  access: ModeratorAccessSnapshot,
+  deniedMessage: string
+): (Error & { status: number }) | null {
+  if (access.state === 'unknown') {
+    return createStatusError(503, 'Unable to verify moderator access right now. Please retry.');
+  }
+  if (!access.isModerator) {
+    return createStatusError(403, deniedMessage);
+  }
+  return null;
 }
 
-async function hasAllModeratorPermission(
-  context: Devvit.Context,
-  subredditName: string,
-  username: string
-): Promise<boolean> {
-  const permissions = await getCurrentModeratorPermissionList(context, subredditName, username);
-  return hasAllModeratorPermissionInList(permissions);
+function moderatorPermissionLookupNeedsRetry(access: ModeratorAccessSnapshot): boolean {
+  return access.isModerator && access.permissionState === 'unknown' && access.permissions.length === 0;
+}
+
+function getModeratorReviewAccessError(
+  access: ModeratorAccessSnapshot
+): (Error & { status: number }) | null {
+  const membershipError = getModeratorMembershipError(
+    access,
+    'Only moderators with Manage Users permission can review verifications.'
+  );
+  if (membershipError) {
+    return membershipError.status === 503
+      ? createStatusError(503, membershipError.message)
+      : createStatusError(403, 'Only moderators with Manage Users permission can review verifications.');
+  }
+  if (moderatorPermissionLookupNeedsRetry(access)) {
+    return createStatusError(503, 'Unable to verify moderator permissions right now. Please retry.');
+  }
+  if (!hasManageUsersPermissionInList(access.permissions)) {
+    return createStatusError(403, 'Only moderators with Manage Users permission can review verifications.');
+  }
+  return null;
 }
 
 function hasManageUsersPermissionInList(permissions: string[]): boolean {
@@ -7914,6 +8006,8 @@ export {
   checkVerificationFlair,
   refreshConfiguredFlairTemplateCache,
   loadApprovalFlairOptionsForSettings,
+  getModeratorMembershipError,
+  moderatorPermissionLookupNeedsRetry,
   looksLikeInternalModmailArchiveError,
   sendUserModmailWithFallback,
   normalizeModmailConversationId,
