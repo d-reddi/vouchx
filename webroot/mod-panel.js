@@ -1622,21 +1622,74 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
   showToast.timerId = 0;
 
-  function invalidateHistoryCaches() {
+  function getViewportScrollTop() {
+    if (typeof window.scrollY === 'number') {
+      return window.scrollY;
+    }
+    return document.documentElement ? document.documentElement.scrollTop || 0 : 0;
+  }
+
+  function restoreViewportScrollTop(top) {
+    if (!Number.isFinite(top)) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, Math.max(0, top));
+    });
+  }
+
+  function syncSeededApprovedResultsFromState() {
+    if (!state || approvedSearchRequestId !== 0 || !Array.isArray(state.approved)) {
+      return;
+    }
+    approvedSearchItems = state.approved.slice();
+    approvedSearchOffset = approvedSearchItems.length;
+    approvedSearchHasMore = Boolean(state.approvedHasMore);
+  }
+
+  function syncSeededAuditResultsFromState() {
+    if (!state || auditSearchRequestId !== 0 || !Array.isArray(state.auditLog)) {
+      return;
+    }
+    auditSearchItems = state.auditLog.slice();
+    auditSearchOffset = auditSearchItems.length;
+    auditSearchHasMore = Boolean(state.auditHasMore);
+  }
+
+  function invalidateHistoryCaches(options) {
+    const preserveData = Boolean(options && options.preserveData);
     historySearchRequestId += 1;
-    historySearchItems = [];
-    historySearchOffset = 0;
-    historySearchHasMore = false;
+    if (!preserveData) {
+      historySearchItems = [];
+      historySearchOffset = 0;
+      historySearchHasMore = false;
+    }
 
-    approvedSearchRequestId += 1;
-    approvedSearchItems = [];
-    approvedSearchOffset = 0;
-    approvedSearchHasMore = false;
+    if (approvedSearchRequestId > 0) {
+      approvedSearchRequestId += 1;
+      if (!preserveData) {
+        approvedSearchItems = [];
+        approvedSearchOffset = 0;
+        approvedSearchHasMore = false;
+      }
+    } else if (!preserveData) {
+      approvedSearchItems = [];
+      approvedSearchOffset = 0;
+      approvedSearchHasMore = false;
+    }
 
-    auditSearchRequestId += 1;
-    auditSearchItems = [];
-    auditSearchOffset = 0;
-    auditSearchHasMore = false;
+    if (auditSearchRequestId > 0) {
+      auditSearchRequestId += 1;
+      if (!preserveData) {
+        auditSearchItems = [];
+        auditSearchOffset = 0;
+        auditSearchHasMore = false;
+      }
+    } else if (!preserveData) {
+      auditSearchItems = [];
+      auditSearchOffset = 0;
+      auditSearchHasMore = false;
+    }
   }
 
   function handleMessage(message) {
@@ -1647,23 +1700,21 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (message.type === 'state' && message.payload) {
       const uiDrafts = captureUiDrafts();
       const hadPriorState = stateInitialized;
+      const previousSubredditName = state ? normalizeSubredditName(state.subredditName) : '';
+      const preserveSettingsScroll = activePrimaryTab === 'settings' && activeSettingsTab === 'general';
+      const viewportScrollTop = preserveSettingsScroll ? getViewportScrollTop() : 0;
       state = message.payload;
       flairTemplateValidationOverride = null;
-      resetApprovalFlairOptionsState();
+      if (!hadPriorState || normalizeSubredditName(state.subredditName) !== previousSubredditName) {
+        resetApprovalFlairOptionsState();
+      }
       lastStateUpdatedAt = Date.now();
       if (hadPriorState) {
-        invalidateHistoryCaches();
+        invalidateHistoryCaches({ preserveData: true });
         invalidateStatsCache({ preserveData: true });
-      } else if (Array.isArray(state.approved)) {
-        approvedSearchItems = state.approved.slice();
-        approvedSearchOffset = approvedSearchItems.length;
-        approvedSearchHasMore = Boolean(state.approvedHasMore);
       }
-      if (!hadPriorState && Array.isArray(state.auditLog)) {
-        auditSearchItems = state.auditLog.slice();
-        auditSearchOffset = auditSearchItems.length;
-        auditSearchHasMore = Boolean(state.auditHasMore);
-      }
+      syncSeededApprovedResultsFromState();
+      syncSeededAuditResultsFromState();
       stateInitialized = true;
       setBusy(false);
       if (mainContent) {
@@ -1675,6 +1726,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
       renderAll();
       restoreUiDrafts(uiDrafts);
+      if (preserveSettingsScroll) {
+        restoreViewportScrollTop(viewportScrollTop);
+      }
       renderFlairTemplateValidationFeedback();
       if (tabPanels.history && !tabPanels.history.classList.contains('hidden')) {
         if (activeHistoryView === 'records') {
@@ -1694,7 +1748,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         }
       }
       if (isStatsTabVisible()) {
-        queueStatsAutoRefresh();
+        void loadStats({ force: true });
       }
       return;
     }
@@ -3768,9 +3822,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (isShortNonEmptyPrefix(query)) {
       historySearchRequestId += 1;
       setHistorySearchHintVisible(true);
-      historySearchItems = [];
-      historySearchOffset = 0;
-      historySearchHasMore = false;
       renderHistorySearchResults();
       return;
     }
@@ -3806,9 +3857,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (query.length < 3) {
       approvedSearchRequestId += 1;
       setApprovedSearchHintVisible(true);
-      approvedSearchItems = [];
-      approvedSearchOffset = 0;
-      approvedSearchHasMore = false;
       renderApprovedSearchResults();
       return;
     }
@@ -3833,9 +3881,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (isShortNonEmptyPrefix(usernameQuery) || isShortNonEmptyPrefix(actorQuery)) {
       auditSearchRequestId += 1;
       setAuditSearchHintVisible(true);
-      auditSearchItems = [];
-      auditSearchOffset = 0;
-      auditSearchHasMore = false;
       renderAuditSearchResults();
       return;
     }
@@ -4262,7 +4307,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         setStatsRange(nextRange);
         renderStats();
         if (tabPanels.stats && !tabPanels.stats.classList.contains('hidden')) {
-          void loadStats();
+          void loadStats({ force: true });
         }
       });
     }
@@ -4467,7 +4512,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         } else if (activeTab === 'stats') {
           setStatsRange(activeStatsRange);
           renderStats();
-          void loadStats();
+          void loadStats({ force: true });
         } else if (activeTab === 'settings') {
           setSettingsTab(activeSettingsTab);
         }

@@ -1040,7 +1040,10 @@ export function mountHub(options = {}) {
       return;
     }
 
-    const isRestricted = Boolean(state.viewerBlocked && !state.viewerVerifiedByFlair);
+    const isVerified = Boolean(
+      state.viewerShouldDisplayVerified === undefined ? state.viewerVerifiedByFlair : state.viewerShouldDisplayVerified
+    );
+    const isRestricted = Boolean(state.viewerBlocked && !isVerified);
 
     applyTheme(state.resolvedTheme);
     refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
@@ -1049,7 +1052,7 @@ export function mountHub(options = {}) {
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
     let statusClass = 'status-neutral';
-    if (state.viewerVerifiedByFlair) {
+    if (isVerified) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       statusClass = 'status-verified';
     } else if (isRestricted) {
@@ -1077,18 +1080,18 @@ export function mountHub(options = {}) {
 
     let commandTitle = 'Review the instructions, then submit your verification.';
     let infoText = '';
-    if (!state.viewerVerifiedByFlair && !isRestricted && !state.config.verificationsEnabled) {
+    if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
-    } else if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
+    } else if (!isVerified && !isRestricted && state.userLatest?.status === 'pending') {
       commandTitle = state.userLatest.parentVerificationId ? 'Pending moderator re-review' : 'Pending moderator review';
       infoText = state.userLatest.parentVerificationId
         ? 'Your verification is being reviewed again by the moderators.'
         : 'Your verification is pending moderator review.';
-    } else if (!state.viewerVerifiedByFlair && isRestricted) {
+    } else if (!isVerified && isRestricted) {
       commandTitle = 'You are blocked from submitting verification on this subreddit.';
       infoText = 'This restriction is only for this subreddit and is based on your activity or verification history.';
-    } else if (state.viewerVerifiedByFlair) {
+    } else if (isVerified) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
       if (state.userLatest?.reviewedAt) {
         infoText = `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`;
@@ -1134,7 +1137,7 @@ export function mountHub(options = {}) {
     }
 
     if (
-      !state.viewerVerifiedByFlair &&
+      !isVerified &&
       !isRestricted &&
       !state.requiresInitialSetup &&
       state.config.verificationsEnabled &&
@@ -1152,7 +1155,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!state.viewerVerifiedByFlair && !isRestricted && state.userLatest?.status === 'pending') {
+    if (!isVerified && !isRestricted && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw', {}, {
@@ -1164,7 +1167,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (state.viewerVerifiedByFlair) {
+    if (isVerified) {
       refs.actionRow.appendChild(
         makeButton('Remove Verification', 'btn-danger', () => {
           void openDeleteForm();
