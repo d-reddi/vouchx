@@ -643,7 +643,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   function buildPendingFlairWarningText(validation) {
     const baseMessage = validation && validation.message ? validation.message : 'Flair template ID is invalid.';
     if (canAccessSettingsTab()) {
-      return `${baseMessage} Open Settings > General to update the flair template ID before approving requests.`;
+      return `${baseMessage} Open Settings > General to select a primary verification flair before approving requests.`;
     }
     return `${baseMessage} A moderator with settings access must update Settings > General before approvals can continue.`;
   }
