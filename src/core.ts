@@ -2,7 +2,15 @@ import type { Devvit, FormOnSubmitEvent } from '@devvit/public-api';
 
 type VerificationStatus = 'pending' | 'approved' | 'denied' | 'removed';
 type DenyReason = 'reason_1' | 'reason_2' | 'reason_3' | 'reason_4';
-type AuditAction = 'approved' | 'denied' | 'reopened' | 'removed_by_mod' | 'self_removed' | 'blocked' | 'unblocked';
+type AuditAction =
+  | 'approved'
+  | 'denied'
+  | 'reopened'
+  | 'removed_by_mod'
+  | 'self_removed'
+  | 'blocked'
+  | 'unblocked'
+  | 'audit_purged';
 
 type DenyReasonConfig = {
   id: DenyReason;
@@ -170,6 +178,7 @@ type DashboardData = {
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerShouldDisplayVerified: boolean;
+  viewerAwaitingFlairPropagation: boolean;
   viewerVerifiedByFlair: boolean;
   viewerFlairConfiguredTemplateId: string;
   viewerFlairDetectedTemplateId: string;
@@ -533,6 +542,7 @@ type HubStatePayload = {
   requiresInitialSetup: boolean;
   config: PublicHubConfig;
   viewerShouldDisplayVerified: boolean;
+  viewerAwaitingFlairPropagation: boolean;
   viewerVerifiedByFlair: boolean;
   viewerFlairCheckSource: string;
   viewerBlocked: BlockedUserEntry | null;
@@ -651,6 +661,7 @@ const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
 const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
 const USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS = 60 * 60 * 1000;
 const VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
+const VIEWER_FLAIR_PROPAGATION_WINDOW_MS = 90 * 1000;
 const STORAGE_METER_CAP_BYTES = 500 * 1024 * 1024;
 const BLOCKED_SUBMISSION_MESSAGE = "You cannot submit a verification request.";
 const VERIFICATIONS_DISABLED_MESSAGE = 'Verifications are temporarily disabled.  Please check back soon.';
@@ -1063,6 +1074,7 @@ function toHubState(dashboard: DashboardData): HubStatePayload {
     requiresInitialSetup: dashboard.requiresInitialSetup,
     config: toPublicHubConfig(dashboard.config),
     viewerShouldDisplayVerified: dashboard.viewerShouldDisplayVerified,
+    viewerAwaitingFlairPropagation: dashboard.viewerAwaitingFlairPropagation,
     viewerVerifiedByFlair: dashboard.viewerVerifiedByFlair,
     viewerFlairCheckSource: dashboard.viewerFlairCheckSource,
     viewerBlocked: dashboard.viewerBlocked,
@@ -1623,18 +1635,30 @@ async function onModeratorPurgeUserData(
     const purgeMinAgeDays = await getModMenuAuditPurgeMinAgeDays(context);
     const deletedAuditCount = await purgeAuditLogOlderThanDays(context, subredditId, purgeMinAgeDays);
 
-    const ageFilterDescription =
-      purgeMinAgeDays <= 0
-        ? 'all audit log entries'
-        : `audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} older than ${purgeMinAgeDays} days`;
     const emptyStateDescription =
       purgeMinAgeDays <= 0 ? 'No audit log entries found' : `No audit log entries older than ${purgeMinAgeDays} days found`;
+    const auditPurgeNotes =
+      deletedAuditCount > 0
+        ? purgeMinAgeDays <= 0
+          ? `Purged ${deletedAuditCount} audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} for r/${subredditName}.`
+          : `Purged ${deletedAuditCount} audit log entr${deletedAuditCount === 1 ? 'y' : 'ies'} older than ${purgeMinAgeDays} days for r/${subredditName}.`
+        : `${emptyStateDescription} for r/${subredditName}.`;
+
+    try {
+      await appendAuditLog(context, {
+        subredditId,
+        subredditName,
+        username: moderator,
+        actor: moderator,
+        action: 'audit_purged',
+        notes: auditPurgeNotes,
+      });
+    } catch (error) {
+      console.log(`Audit log write failed (audit_purged): ${errorText(error)}`);
+    }
 
     context.ui.showToast({
-      text:
-        deletedAuditCount > 0
-          ? `Purged ${deletedAuditCount} ${ageFilterDescription} for r/${subredditName}.`
-          : `${emptyStateDescription} for r/${subredditName}.`,
+      text: auditPurgeNotes,
       appearance: 'success',
     });
   } catch (error) {
@@ -3678,13 +3702,11 @@ async function loadDashboardData(
     }
   }
 
-  const viewerShouldDisplayVerified = Boolean(
-    flairCheck.verified &&
-      userLatest?.status !== 'pending' &&
-      userLatest?.status !== 'denied' &&
-      userLatest?.status !== 'removed' &&
-      !(viewerUsername && (await shouldSuppressViewerVerifiedState(context, subredditId, viewerUsername, userLatest)))
+  const viewerVerifiedSuppressed = Boolean(
+    viewerUsername && (await shouldSuppressViewerVerifiedState(context, subredditId, viewerUsername, userLatest))
   );
+  const viewerShouldDisplayVerified = shouldViewerDisplayVerifiedState(flairCheck, userLatest, viewerVerifiedSuppressed);
+  const viewerAwaitingFlairPropagation = isViewerAwaitingFlairPropagation(flairCheck, userLatest);
 
   return {
     viewerUsername,
@@ -3701,6 +3723,7 @@ async function loadDashboardData(
     config,
     viewerSnapshot,
     viewerShouldDisplayVerified,
+    viewerAwaitingFlairPropagation,
     viewerVerifiedByFlair: flairCheck.verified,
     viewerFlairConfiguredTemplateId: flairCheck.configuredTemplateId,
     viewerFlairDetectedTemplateId: flairCheck.detectedTemplateId,
@@ -4202,6 +4225,49 @@ function isManualFlairCheckSource(source: string): boolean {
   );
 }
 
+function normalizeUsernamePrefixFilter(
+  value: string | undefined | null,
+  normalizer: (input: string) => string
+): string {
+  const normalized = typeof value === 'string' ? normalizer(value) : '';
+  return normalized.length > 0 && normalized.length < 3 ? '' : normalized;
+}
+
+function shouldViewerDisplayVerifiedState(
+  flairCheck: Pick<FlairVerificationCheck, 'verified' | 'source'>,
+  userLatest: Pick<VerificationRecord, 'status'> | null | undefined,
+  isSuppressed: boolean
+): boolean {
+  if (!flairCheck.verified || isSuppressed) {
+    return false;
+  }
+  if (userLatest?.status === 'pending') {
+    return false;
+  }
+  if (
+    (userLatest?.status === 'denied' || userLatest?.status === 'removed') &&
+    !isManualFlairCheckSource(flairCheck.source)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isViewerAwaitingFlairPropagation(
+  flairCheck: Pick<FlairVerificationCheck, 'verified'>,
+  userLatest: Pick<VerificationRecord, 'status' | 'reviewedAt' | 'submittedAt'> | null | undefined,
+  nowMs = Date.now()
+): boolean {
+  if (flairCheck.verified || !userLatest || userLatest.status !== 'approved') {
+    return false;
+  }
+  const approvedAtMs = new Date(String(userLatest.reviewedAt || userLatest.submittedAt || '')).getTime();
+  if (!Number.isFinite(approvedAtMs) || approvedAtMs > nowMs) {
+    return false;
+  }
+  return nowMs - approvedAtMs <= VIEWER_FLAIR_PROPAGATION_WINDOW_MS;
+}
+
 function normalizeSubredditNameForApi(subredditName: string): string {
   return subredditName.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '');
 }
@@ -4391,10 +4457,7 @@ async function searchHistoryRecords(
 ): Promise<HistorySearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
-  const usernameFilter = query.username ? normalizeUsernameForLookup(query.username) : '';
-  if (usernameFilter.length > 0 && usernameFilter.length < 3) {
-    return { items: [], offset, hasMore: false, requestId: 0 };
-  }
+  const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsernameForLookup);
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
@@ -4540,7 +4603,7 @@ async function searchApprovedRecords(
 ): Promise<ApprovedSearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
-  const usernameFilter = query.username ? normalizeUsername(query.username) : '';
+  const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsername);
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
@@ -4603,10 +4666,6 @@ async function searchApprovedRecords(
       hasMore: scannedCount < candidates.length || candidates.length >= limit * 4,
       requestId: 0,
     };
-  }
-
-  if (usernameFilter.length < 3) {
-    return { items: [], offset, hasMore: false, requestId: 0 };
   }
 
   const prefix3 = usernameFilter.slice(0, 3);
@@ -4768,12 +4827,9 @@ async function searchAuditEntries(
 ): Promise<AuditSearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
-  const usernameFilter = query.username ? normalizeUsernameForLookup(query.username) : '';
-  const actorFilter = query.actor ? normalizeUsernameForLookup(query.actor) : '';
+  const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsernameForLookup);
+  const actorFilter = normalizeUsernamePrefixFilter(query.actor, normalizeUsernameForLookup);
   const actionFilter = asAuditAction(query.action);
-  if ((usernameFilter.length > 0 && usernameFilter.length < 3) || (actorFilter.length > 0 && actorFilter.length < 3)) {
-    return { items: [], offset, hasMore: false, requestId: 0 };
-  }
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
   const minScore = Number.isFinite(fromMs) ? fromMs : 0;
@@ -6512,7 +6568,8 @@ function parseAuditEntry(payload: string): AuditLogEntry | null {
         parsed.action !== 'removed_by_mod' &&
         parsed.action !== 'self_removed' &&
         parsed.action !== 'blocked' &&
-        parsed.action !== 'unblocked')
+        parsed.action !== 'unblocked' &&
+        parsed.action !== 'audit_purged')
     ) {
       return null;
     }
@@ -7385,7 +7442,8 @@ function asAuditAction(value: string | undefined): AuditAction | null {
     value === 'removed_by_mod' ||
     value === 'self_removed' ||
     value === 'blocked' ||
-    value === 'unblocked'
+    value === 'unblocked' ||
+    value === 'audit_purged'
     ? value
     : null;
 }
@@ -7591,6 +7649,8 @@ function formatAuditEntry(entry: AuditLogEntry): string {
       return `Blocked by ${actor}${entry.notes ? ` | ${entry.notes}` : ''}`;
     case 'unblocked':
       return `Unblocked by ${actor}${entry.notes ? ` | ${entry.notes}` : ''}`;
+    case 'audit_purged':
+      return `Audit log purged by ${actor}${entry.notes ? ` | ${entry.notes}` : ''}`;
     default:
       return entry.notes ?? entry.action;
   }
@@ -8127,6 +8187,8 @@ export {
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,
   checkVerificationFlair,
+  shouldViewerDisplayVerifiedState,
+  isViewerAwaitingFlairPropagation,
   refreshConfiguredFlairTemplateCache,
   loadApprovalFlairOptionsForSettings,
   getModeratorMembershipError,

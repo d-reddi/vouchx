@@ -13,6 +13,8 @@ import brandLogoUrl from './logo.png';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const FLAIR_PROPAGATION_REFRESH_INTERVAL_MS = 2500;
+const FLAIR_PROPAGATION_MAX_RETRIES = 6;
 const TERMS_AND_CONDITIONS_URL = 'https://www.reddit.com/r/vouchx/wiki/terms-and-conditions/';
 const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx/wiki/privacy-policy/';
 const PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY = 'vouchx-photo-instructions-launch-v1';
@@ -201,6 +203,10 @@ function applyTheme(resolvedTheme) {
 
 function isManualSource(source) {
   return typeof source === 'string' && MANUAL_SOURCE_MARKERS.some((marker) => source.includes(marker));
+}
+
+function isAwaitingFlairPropagation(state) {
+  return Boolean(state && state.viewerAwaitingFlairPropagation === true);
 }
 
 function formatTimestamp(value) {
@@ -502,6 +508,9 @@ export function mountHub(options = {}) {
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let flairPropagationRefreshTimerId = 0;
+  let flairPropagationRefreshAttempts = 0;
+  let flairPropagationRefreshKey = '';
   let photoInstructionsOnlyHandled = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
@@ -779,6 +788,60 @@ export function mountHub(options = {}) {
     connectToRealtimeChannel(normalized);
   }
 
+  function clearFlairPropagationRefresh(options = {}) {
+    if (flairPropagationRefreshTimerId) {
+      window.clearTimeout(flairPropagationRefreshTimerId);
+      flairPropagationRefreshTimerId = 0;
+    }
+    if (options.reset === true) {
+      flairPropagationRefreshAttempts = 0;
+      flairPropagationRefreshKey = '';
+    }
+  }
+
+  function syncFlairPropagationRefresh() {
+    if (!isAwaitingFlairPropagation(hubState)) {
+      clearFlairPropagationRefresh({ reset: true });
+      return;
+    }
+
+    const nextKey = [
+      String(hubState.viewerUsername || ''),
+      String(hubState.userLatest?.id || ''),
+      String(hubState.userLatest?.reviewedAt || hubState.userLatest?.submittedAt || ''),
+    ].join(':');
+
+    if (nextKey !== flairPropagationRefreshKey) {
+      flairPropagationRefreshKey = nextKey;
+      flairPropagationRefreshAttempts = 0;
+      clearFlairPropagationRefresh();
+    }
+
+    if (flairPropagationRefreshTimerId || flairPropagationRefreshAttempts >= FLAIR_PROPAGATION_MAX_RETRIES) {
+      return;
+    }
+
+    flairPropagationRefreshTimerId = window.setTimeout(async () => {
+      flairPropagationRefreshTimerId = 0;
+      if (!isAwaitingFlairPropagation(hubState)) {
+        return;
+      }
+      if (document.hidden || isBusy) {
+        syncFlairPropagationRefresh();
+        return;
+      }
+      flairPropagationRefreshAttempts += 1;
+      try {
+        applyPayload(await requestJson('/api/hub/state'));
+      } catch (error) {
+        console.log(`Approval propagation refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (isAwaitingFlairPropagation(hubState)) {
+          syncFlairPropagationRefresh();
+        }
+      }
+    }, FLAIR_PROPAGATION_REFRESH_INTERVAL_MS);
+  }
+
   async function refreshFromRealtimeSignal() {
     if (!realtimeChannel) {
       return;
@@ -1043,6 +1106,7 @@ export function mountHub(options = {}) {
     const isVerified = Boolean(
       state.viewerShouldDisplayVerified === undefined ? state.viewerVerifiedByFlair : state.viewerShouldDisplayVerified
     );
+    const awaitingFlairPropagation = isAwaitingFlairPropagation(state) && !isVerified;
     const isRestricted = Boolean(state.viewerBlocked && !isVerified);
 
     applyTheme(state.resolvedTheme);
@@ -1055,6 +1119,9 @@ export function mountHub(options = {}) {
     if (isVerified) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       statusClass = 'status-verified';
+    } else if (awaitingFlairPropagation) {
+      statusText = 'Approved (Syncing)';
+      statusClass = 'status-warning';
     } else if (isRestricted) {
       statusText = 'Blocked';
       statusClass = 'status-blocked';
@@ -1083,6 +1150,9 @@ export function mountHub(options = {}) {
     if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
+    } else if (awaitingFlairPropagation) {
+      commandTitle = 'Approval syncing';
+      infoText = 'Your approval was recorded. Verified flair is still syncing and should update shortly.';
     } else if (!isVerified && !isRestricted && state.userLatest?.status === 'pending') {
       commandTitle = state.userLatest.parentVerificationId ? 'Pending moderator re-review' : 'Pending moderator review';
       infoText = state.userLatest.parentVerificationId
@@ -1139,6 +1209,7 @@ export function mountHub(options = {}) {
     if (
       !isVerified &&
       !isRestricted &&
+      !awaitingFlairPropagation &&
       !state.requiresInitialSetup &&
       state.config.verificationsEnabled &&
       !(state.userLatest && state.userLatest.status === 'pending')
@@ -1195,6 +1266,7 @@ export function mountHub(options = {}) {
         refs.mainContent.classList.remove('hidden');
       }
       renderState(hubState);
+      syncFlairPropagationRefresh();
       if (photoInstructionsOnly && !photoInstructionsOnlyHandled) {
         photoInstructionsOnlyHandled = true;
         void requestPhotoInstructionsReview({
@@ -1250,6 +1322,7 @@ export function mountHub(options = {}) {
   });
 
   window.addEventListener('beforeunload', () => {
+    clearFlairPropagationRefresh({ reset: true });
     closeRealtimeSubscription();
   });
 

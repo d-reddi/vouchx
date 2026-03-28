@@ -15,21 +15,27 @@ import {
   getModeratorAccessSnapshot,
   getModeratorStats,
   getViewerFlairSnapshot,
+  isViewerAwaitingFlairPropagation,
   loadApprovalFlairOptionsForSettings,
   looksLikeInternalModmailArchiveError,
   onSaveFlairTemplateValues,
   removeApprovedVerificationByModerator,
   sendUserModmailWithFallback,
+  searchApprovedRecords,
+  searchAuditEntries,
+  searchHistoryRecords,
   normalizeModmailConversationId,
   normalizeMaxDenialsBeforeBlockSetting,
   normalizeSubmittedPhotoUrl,
   normalizeUsername,
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
+  onModeratorPurgeUserData,
   parseRecord,
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
   refreshConfiguredFlairTemplateCache,
+  shouldViewerDisplayVerifiedState,
   toModPanelState,
   toPublicHubConfig,
   toHubState,
@@ -158,6 +164,7 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
       totalKarma: 1000,
     },
     viewerShouldDisplayVerified: false,
+    viewerAwaitingFlairPropagation: false,
     viewerVerifiedByFlair: false,
     viewerFlairConfiguredTemplateId: '',
     viewerFlairDetectedTemplateId: '',
@@ -2312,6 +2319,135 @@ test('checkVerificationFlair matches additional approval flair text when templat
   });
 });
 
+test('searchHistoryRecords treats short username prefixes as unfiltered baseline queries', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const result = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'ex',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]?.id, reviewContext.record.id);
+    assert.equal(result.items[0]?.username, reviewContext.record.username);
+  });
+});
+
+test('searchApprovedRecords treats short username prefixes as unfiltered baseline queries', async () => {
+  const reviewContext = createReviewActionContext({
+    recordOverrides: {
+      status: 'approved',
+      reviewedAt: '2026-03-12T12:00:00.000Z',
+      moderator: 'Mod_One',
+    },
+  });
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    seedApprovedIndexMembers(reviewContext, [
+      {
+        id: reviewContext.record.id,
+        score: new Date(String(reviewContext.record.reviewedAt || reviewContext.record.submittedAt)).getTime(),
+      },
+    ]);
+
+    const result = await searchApprovedRecords(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'ex',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]?.id, reviewContext.record.id);
+    assert.equal(result.items[0]?.username, reviewContext.record.username);
+  });
+});
+
+test('searchAuditEntries treats short username and actor prefixes as unfiltered baseline queries', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    seedAuditEntries(reviewContext, [
+      {
+        id: 'audit_short_prefix',
+        action: 'approved',
+        actor: 'Mod_One',
+        at: '2026-03-25T12:00:00.000Z',
+      },
+    ]);
+
+    const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'ex',
+      actor: 'mo',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]?.id, 'audit_short_prefix');
+  });
+});
+
+test('shouldViewerDisplayVerifiedState lets manual CSS flair matches override denied and removed, but not pending', () => {
+  const manualFlairCheck = {
+    verified: true,
+    source: 'viewer-css-substring-match',
+  };
+
+  assert.equal(
+    shouldViewerDisplayVerifiedState(manualFlairCheck, { status: 'denied' } as never, false),
+    true
+  );
+  assert.equal(
+    shouldViewerDisplayVerifiedState(manualFlairCheck, { status: 'removed' } as never, false),
+    true
+  );
+  assert.equal(
+    shouldViewerDisplayVerifiedState(manualFlairCheck, { status: 'pending' } as never, false),
+    false
+  );
+  assert.equal(
+    shouldViewerDisplayVerifiedState(
+      { verified: true, source: 'viewer-snapshot:template-match' },
+      { status: 'denied' } as never,
+      false
+    ),
+    false
+  );
+});
+
+test('isViewerAwaitingFlairPropagation is only true for recent approved records that have not confirmed flair yet', async () => {
+  await withFixedNow('2026-03-28T12:00:00.000Z', async (nowMs) => {
+    const recentApproved = {
+      status: 'approved',
+      reviewedAt: new Date(nowMs - 30_000).toISOString(),
+      submittedAt: new Date(nowMs - 60_000).toISOString(),
+    };
+    const staleApproved = {
+      status: 'approved',
+      reviewedAt: new Date(nowMs - 5 * 60_000).toISOString(),
+      submittedAt: new Date(nowMs - 6 * 60_000).toISOString(),
+    };
+
+    assert.equal(isViewerAwaitingFlairPropagation({ verified: false }, recentApproved as never, nowMs), true);
+    assert.equal(isViewerAwaitingFlairPropagation({ verified: false }, staleApproved as never, nowMs), false);
+    assert.equal(isViewerAwaitingFlairPropagation({ verified: true }, recentApproved as never, nowMs), false);
+    assert.equal(
+      isViewerAwaitingFlairPropagation(
+        { verified: false },
+        {
+          status: 'pending',
+          reviewedAt: new Date(nowMs - 30_000).toISOString(),
+          submittedAt: new Date(nowMs - 60_000).toISOString(),
+        } as never,
+        nowMs
+      ),
+      false
+    );
+  });
+});
+
 test('getViewerFlairSnapshot retries transient reddit 5xx username lookups without logging them', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
@@ -3362,6 +3498,77 @@ test('toHubState does not mark initial setup required when flair template ID is 
   );
 
   assert.equal(hubState.requiresInitialSetup, false);
+});
+
+test('toHubState preserves viewerAwaitingFlairPropagation for hub rendering', () => {
+  const hubState = toHubState(
+    buildDashboardData({
+      viewerAwaitingFlairPropagation: true,
+    })
+  );
+
+  assert.equal(hubState.viewerAwaitingFlairPropagation, true);
+});
+
+test('onModeratorPurgeUserData writes an audit entry after manually purging the audit log', async () => {
+  const reviewContext = createReviewActionContext();
+  const toastCalls: unknown[] = [];
+  seedAuditEntries(reviewContext, [
+    {
+      id: 'audit_before_1',
+      action: 'approved',
+      actor: 'Mod_One',
+      at: '2026-03-25T12:00:00.000Z',
+    },
+    {
+      id: 'audit_before_2',
+      action: 'denied',
+      actor: 'Mod_Two',
+      at: '2026-03-24T12:00:00.000Z',
+    },
+  ]);
+
+  const purgeContext = {
+    ...reviewContext.context,
+    settings: {
+      async get(key: string) {
+        if (key === 'mod_menu_audit_purge_days') {
+          return 0;
+        }
+        return reviewContext.context.settings.get(key);
+      },
+    },
+    ui: {
+      showToast(payload: unknown) {
+        toastCalls.push(payload);
+      },
+    },
+  };
+
+  await onModeratorPurgeUserData(
+    {
+      values: {
+        username: '',
+        confirmationText: 'confirm',
+      },
+    } as never,
+    purgeContext as never
+  );
+
+  const auditEntries = await searchAuditEntries(purgeContext as never, reviewContext.subredditId, {
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.equal(auditEntries.items.length, 1);
+  assert.equal(auditEntries.items[0]?.action, 'audit_purged');
+  assert.match(auditEntries.items[0]?.line ?? '', /Audit log purged by u\/mod_one/i);
+  assert.match(auditEntries.items[0]?.line ?? '', /Purged 2 audit log entries/i);
+  assert.equal(toastCalls.length, 1);
+  assert.deepEqual(toastCalls[0], {
+    text: 'Purged 2 audit log entries for r/examplesub.',
+    appearance: 'success',
+  });
 });
 
 test('releaseRedisLockIfOwned deletes the cleanup lock when the token matches', async () => {

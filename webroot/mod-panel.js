@@ -40,6 +40,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const pendingLayout = document.getElementById('pending-layout');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
+  const pendingSearchHint = document.getElementById('pending-search-hint');
   const pendingSlaButtons = Array.from(document.querySelectorAll('.pending-sla-btn'));
   const historyViewButtons = Array.from(document.querySelectorAll('.history-view-btn'));
   const historyPanelRecords = document.getElementById('history-panel-records');
@@ -226,6 +227,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let ignoredRealtimeRefreshCount = 0;
+  let ignoreRealtimeRefreshUntil = 0;
   let flairTemplateValidationOverride = null;
   let approvalFlairOptions = [];
   let approvalFlairOptionsLoaded = false;
@@ -255,6 +258,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+  const LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS = 2500;
   const STATS_AUTO_REFRESH_INTERVAL_MS = 20 * 1000;
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
   const prefersDarkMedia =
@@ -335,6 +339,27 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return payload;
   }
 
+  function markNextRealtimeRefreshAsSelfOriginated() {
+    ignoredRealtimeRefreshCount += 1;
+    ignoreRealtimeRefreshUntil = Date.now() + LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS;
+  }
+
+  function shouldIgnoreSelfOriginatedRealtimeRefresh() {
+    if (ignoredRealtimeRefreshCount <= 0) {
+      return false;
+    }
+    if (Date.now() > ignoreRealtimeRefreshUntil) {
+      ignoredRealtimeRefreshCount = 0;
+      ignoreRealtimeRefreshUntil = 0;
+      return false;
+    }
+    ignoredRealtimeRefreshCount = Math.max(0, ignoredRealtimeRefreshCount - 1);
+    if (ignoredRealtimeRefreshCount === 0) {
+      ignoreRealtimeRefreshUntil = 0;
+    }
+    return true;
+  }
+
   function applyApiState(payload) {
     syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
     if (payload && payload.state) {
@@ -350,6 +375,22 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         void refreshFromRealtimeSignal();
       }, 0);
     }
+  }
+
+  function applyMutationApiState(payload, options) {
+    if (!options || options.suppressRealtimeBounce !== false) {
+      markNextRealtimeRefreshAsSelfOriginated();
+    }
+    applyApiState(payload);
+  }
+
+  function isValidationRetryToastPayload(payload) {
+    return Boolean(
+      payload &&
+        payload.toast &&
+        typeof payload.toast.text === 'string' &&
+        payload.toast.text === "Couldn't confirm the user account right now. Please retry."
+    );
   }
 
   function scheduleRealtimeReconnect(channel) {
@@ -397,6 +438,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         },
         onMessage(message) {
           if (!message || typeof message !== 'object' || message.type !== 'refresh') {
+            return;
+          }
+          if (shouldIgnoreSelfOriginatedRealtimeRefresh()) {
             return;
           }
           void refreshFromRealtimeSignal();
@@ -465,7 +509,30 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return Boolean(input && input.checked);
   }
 
+  function currentPrimaryApprovalTemplateId() {
+    return normalizeTemplateIdValue(flairTemplateInput ? flairTemplateInput.value : state && state.config ? state.config.flairTemplateId : '');
+  }
+
+  function normalizeAdditionalApprovalFlairDrafts() {
+    const primaryTemplateId = currentPrimaryApprovalTemplateId();
+    let firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
+    let secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
+    if (firstAdditional && firstAdditional === primaryTemplateId) {
+      firstAdditional = '';
+    }
+    if (secondAdditional && (secondAdditional === primaryTemplateId || secondAdditional === firstAdditional)) {
+      secondAdditional = '';
+    }
+    if (!firstAdditional && secondAdditional) {
+      firstAdditional = secondAdditional;
+      secondAdditional = '';
+    }
+    additionalApprovalFlairSecondDraft = firstAdditional;
+    additionalApprovalFlairThirdDraft = secondAdditional;
+  }
+
   function configuredAdditionalApprovalTemplateIds() {
+    normalizeAdditionalApprovalFlairDrafts();
     const primaryTemplateId = normalizeTemplateIdValue(flairTemplateInput ? flairTemplateInput.value : '');
     const selections = [
       normalizeTemplateIdValue(approvalFlairSecondSelect ? approvalFlairSecondSelect.value : ''),
@@ -936,17 +1003,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (approvalFlairThirdWrap) {
       approvalFlairThirdWrap.classList.toggle('hidden', !enabled);
     }
-    const primaryTemplateId = normalizeTemplateIdValue(state && state.config ? state.config.flairTemplateId : '');
-    let firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
-    let secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
-    if (firstAdditional && firstAdditional === primaryTemplateId) {
-      firstAdditional = '';
-      additionalApprovalFlairSecondDraft = '';
-    }
-    if (secondAdditional && (secondAdditional === primaryTemplateId || secondAdditional === firstAdditional)) {
-      secondAdditional = '';
-      additionalApprovalFlairThirdDraft = '';
-    }
+    normalizeAdditionalApprovalFlairDrafts();
+    const primaryTemplateId = currentPrimaryApprovalTemplateId();
+    const firstAdditional = normalizeTemplateIdValue(additionalApprovalFlairSecondDraft);
+    const secondAdditional = normalizeTemplateIdValue(additionalApprovalFlairThirdDraft);
     const usedTemplateIds = new Set([primaryTemplateId].filter(Boolean));
 
     applyAdditionalFlairSelectOptions(approvalFlairSecondSelect, firstAdditional, usedTemplateIds);
@@ -969,7 +1029,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       approvalFlairSecondSelect.disabled = !enabled || approvalFlairOptionsLoading;
     }
     if (approvalFlairThirdSelect) {
-      approvalFlairThirdSelect.disabled = !enabled || approvalFlairOptionsLoading;
+      approvalFlairThirdSelect.disabled = !enabled || approvalFlairOptionsLoading || !firstAdditional;
     }
   }
 
@@ -1098,7 +1158,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
           requestBody.verificationsEnabled = Boolean(verificationsEnabledInput.checked);
         }
-        applyApiState(
+        applyMutationApiState(
           await requestJson('/api/mod/settings/flair', requestBody)
         );
       } catch (error) {
@@ -1462,7 +1522,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           selectedFlairTemplateId: message.selectedFlairTemplateId,
           confirmBannedApproval: Boolean(message.confirmBannedApproval),
         });
-        applyApiState(payload);
+        applyMutationApiState(payload, {
+          suppressRealtimeBounce: !payload.approvalConfirm && !isValidationRetryToastPayload(payload),
+        });
         if (payload && payload.approvalConfirm && payload.approvalConfirm.kind === 'banned-unban') {
           openApproveBannedModal(payload.approvalConfirm);
         }
@@ -1470,39 +1532,40 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
 
       if (message.type === 'deny') {
-        applyApiState(
-          await requestJson('/api/mod/deny', {
-            verificationId: message.verificationId,
-            reason: message.reason,
-            moderatorNotes: message.moderatorNotes,
-            blockUser: Boolean(message.blockUser),
-          })
-        );
+        const payload = await requestJson('/api/mod/deny', {
+          verificationId: message.verificationId,
+          reason: message.reason,
+          moderatorNotes: message.moderatorNotes,
+          blockUser: Boolean(message.blockUser),
+        });
+        applyMutationApiState(payload, {
+          suppressRealtimeBounce: !isValidationRetryToastPayload(payload),
+        });
         return;
       }
 
       if (message.type === 'claimPending') {
-        applyApiState(await requestJson('/api/mod/claim', { verificationId: message.verificationId }));
+        applyMutationApiState(await requestJson('/api/mod/claim', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'unclaimPending') {
-        applyApiState(await requestJson('/api/mod/unclaim', { verificationId: message.verificationId }));
+        applyMutationApiState(await requestJson('/api/mod/unclaim', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'reopenDenied') {
-        applyApiState(await requestJson('/api/mod/reopen', { verificationId: message.verificationId }));
+        applyMutationApiState(await requestJson('/api/mod/reopen', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'cancelReopen') {
-        applyApiState(await requestJson('/api/mod/cancel-reopen', { verificationId: message.verificationId }));
+        applyMutationApiState(await requestJson('/api/mod/cancel-reopen', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'removeVerification') {
-        applyApiState(
+        applyMutationApiState(
           await requestJson('/api/mod/remove', {
             verificationId: message.verificationId,
             reason: message.reason,
@@ -1512,27 +1575,27 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
 
       if (message.type === 'blockUser') {
-        applyApiState(await requestJson('/api/mod/block', { username: message.username }));
+        applyMutationApiState(await requestJson('/api/mod/block', { username: message.username }));
         return;
       }
 
       if (message.type === 'unblockUser') {
-        applyApiState(await requestJson('/api/mod/unblock', { username: message.username }));
+        applyMutationApiState(await requestJson('/api/mod/unblock', { username: message.username }));
         return;
       }
 
       if (message.type === 'saveFlair') {
-        applyApiState(await requestJson('/api/mod/settings/flair', message));
+        applyMutationApiState(await requestJson('/api/mod/settings/flair', message));
         return;
       }
 
       if (message.type === 'saveTemplates') {
-        applyApiState(await requestJson('/api/mod/settings/templates', message));
+        applyMutationApiState(await requestJson('/api/mod/settings/templates', message));
         return;
       }
 
       if (message.type === 'saveTheme') {
-        applyApiState(await requestJson('/api/mod/settings/theme', message));
+        applyMutationApiState(await requestJson('/api/mod/settings/theme', message));
         return;
       }
 
@@ -1924,6 +1987,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   function isShortNonEmptyPrefix(value) {
     const normalized = normalizeUsernameForCompare(value);
     return normalized.length > 0 && normalized.length < 3;
+  }
+
+  function setPendingSearchHintVisible(visible) {
+    if (!pendingSearchHint) {
+      return;
+    }
+    pendingSearchHint.classList.toggle('hidden', !visible);
   }
 
   function getPendingSortScore(item) {
@@ -2348,6 +2418,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function renderPending() {
     updatePendingSlaButtonStyles();
+    setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
     const hasPendingItems = Boolean(state && Array.isArray(state.pending) && state.pending.length > 0);
     if (pendingLayout) {
@@ -3410,8 +3481,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (storageBreakdown) {
       storageBreakdown.textContent =
-        `Records: ${state.storage.recordCount || 0} | ` +
-        `Audit: ${state.storage.auditCount || 0} | ` +
+        `Verification records: ${state.storage.recordCount || 0} | ` +
+        `Moderator audit events: ${state.storage.auditCount || 0} | ` +
         `Blocked: ${state.storage.blockedCount || 0} | ` +
         `Denial counters: ${state.storage.deniedCountEntries || 0}`;
     }
@@ -3820,12 +3891,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   function runHistoryRecordsSearchWithInputGuard(reset) {
     const query = historySearchUserInput ? historySearchUserInput.value.trim() : '';
     if (isShortNonEmptyPrefix(query)) {
-      historySearchRequestId += 1;
       setHistorySearchHintVisible(true);
-      renderHistorySearchResults();
-      return;
+    } else {
+      setHistorySearchHintVisible(false);
     }
-    setHistorySearchHintVisible(false);
     runHistoryRecordsSearch(reset);
   }
 
@@ -3854,13 +3923,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       runApprovedSearch(reset);
       return;
     }
-    if (query.length < 3) {
-      approvedSearchRequestId += 1;
+    if (isShortNonEmptyPrefix(query)) {
       setApprovedSearchHintVisible(true);
-      renderApprovedSearchResults();
-      return;
+    } else {
+      setApprovedSearchHintVisible(false);
     }
-    setApprovedSearchHintVisible(false);
     runApprovedSearch(reset);
   }
 
@@ -3879,12 +3946,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const usernameQuery = auditSearchUserInput ? auditSearchUserInput.value.trim() : '';
     const actorQuery = auditSearchActorInput ? auditSearchActorInput.value.trim() : '';
     if (isShortNonEmptyPrefix(usernameQuery) || isShortNonEmptyPrefix(actorQuery)) {
-      auditSearchRequestId += 1;
       setAuditSearchHintVisible(true);
-      renderAuditSearchResults();
-      return;
+    } else {
+      setAuditSearchHintVisible(false);
     }
-    setAuditSearchHintVisible(false);
     runAuditSearch(reset);
   }
 
@@ -4079,7 +4144,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   if (pendingSearchUserInput) {
     pendingSearchUserInput.addEventListener('input', () => {
-      pendingUsernameFilter = normalizeUsernameForCompare(pendingSearchUserInput.value || '');
+      const normalizedQuery = normalizeUsernameForCompare(pendingSearchUserInput.value || '');
+      setPendingSearchHintVisible(normalizedQuery.length > 0 && normalizedQuery.length < 3);
+      pendingUsernameFilter = normalizedQuery.length >= 3 ? normalizedQuery : '';
       renderPending();
     });
   }
