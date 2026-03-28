@@ -157,6 +157,7 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
       accountAgeDays: 365,
       totalKarma: 1000,
     },
+    viewerShouldDisplayVerified: false,
     viewerVerifiedByFlair: false,
     viewerFlairConfiguredTemplateId: '',
     viewerFlairDetectedTemplateId: '',
@@ -197,9 +198,27 @@ async function withFixedNow<ValueType>(iso: string, callback: (nowMs: number) =>
   }
 }
 
+function scheduleLockKeyForTest(subredditId = 't5_example') {
+  return `photo-verification:subreddit:${subredditId}:validation:schedule-lock`;
+}
+
+function schedulePresentKeyForTest(subredditId = 't5_example') {
+  return `photo-verification:subreddit:${subredditId}:validation:schedule-present`;
+}
+
+function findRedisValueBySuffix(store: Map<string, string>, suffix: string): string | null {
+  for (const [key, value] of store.entries()) {
+    if (key.endsWith(suffix)) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function createSchedulerRegistrationContext(options?: {
   existingJobs?: Array<{ name: string; data?: Record<string, unknown> }>;
   initialLockValue?: string | null;
+  initialMarkerValue?: string | null;
   onRunJob?: (payload: Record<string, unknown>) => void | Promise<void>;
 }) {
   const runJobCalls: Array<Record<string, unknown>> = [];
@@ -207,7 +226,13 @@ function createSchedulerRegistrationContext(options?: {
   const setCalls: unknown[][] = [];
   const getCalls: unknown[][] = [];
   const delCalls: unknown[][] = [];
-  let currentLockValue = options?.initialLockValue ?? null;
+  const redisStore = new Map<string, string>();
+  if (options?.initialLockValue !== undefined && options.initialLockValue !== null) {
+    redisStore.set(scheduleLockKeyForTest(), options.initialLockValue);
+  }
+  if (options?.initialMarkerValue !== undefined && options.initialMarkerValue !== null) {
+    redisStore.set(schedulePresentKeyForTest(), options.initialMarkerValue);
+  }
   const existingJobs = options?.existingJobs ?? [];
 
   return {
@@ -225,21 +250,37 @@ function createSchedulerRegistrationContext(options?: {
       redis: {
         async set(...args: unknown[]) {
           setCalls.push(args);
+          const key = String(args[0] ?? '');
           const value = String(args[1] ?? '');
           const lockOptions = args[2] as { nx?: boolean } | undefined;
-          if (lockOptions?.nx && currentLockValue !== null) {
+          const existingSpecialValue =
+            key.endsWith(':validation:schedule-lock')
+              ? findRedisValueBySuffix(redisStore, ':validation:schedule-lock')
+              : key.endsWith(':validation:schedule-present')
+                ? findRedisValueBySuffix(redisStore, ':validation:schedule-present')
+                : null;
+          if (lockOptions?.nx && (redisStore.has(key) || existingSpecialValue !== null)) {
             return null;
           }
-          currentLockValue = value;
+          redisStore.set(key, value);
           return 'OK';
         },
         async get(...args: unknown[]) {
           getCalls.push(args);
-          return currentLockValue;
+          const key = String(args[0] ?? '');
+          return redisStore.get(key) ?? (
+            key.endsWith(':validation:schedule-lock')
+              ? findRedisValueBySuffix(redisStore, ':validation:schedule-lock')
+              : key.endsWith(':validation:schedule-present')
+                ? findRedisValueBySuffix(redisStore, ':validation:schedule-present')
+                : null
+          );
         },
         async del(...args: unknown[]) {
           delCalls.push(args);
-          currentLockValue = null;
+          for (const key of args.map((value) => String(value ?? ''))) {
+            redisStore.delete(key);
+          }
         },
       },
     },
@@ -249,10 +290,19 @@ function createSchedulerRegistrationContext(options?: {
     getCalls,
     delCalls,
     get currentLockValue() {
-      return currentLockValue;
+      return findRedisValueBySuffix(redisStore, ':validation:schedule-lock');
     },
     setCurrentLockValue(value: string | null) {
-      currentLockValue = value;
+      const existingKey =
+        Array.from(redisStore.keys()).find((key) => key.endsWith(':validation:schedule-lock')) || scheduleLockKeyForTest();
+      if (value === null) {
+        redisStore.delete(existingKey);
+        return;
+      }
+      redisStore.set(existingKey, value);
+    },
+    get markerValue() {
+      return findRedisValueBySuffix(redisStore, ':validation:schedule-present');
     },
   };
 }
@@ -324,11 +374,12 @@ function createUpdateNoticeContext(options?: {
 function createModeratorLookupContext(options?: {
   subredditId?: string;
   currentUsername?: string | null;
+  redisStore?: Map<string, string>;
   permissionResponses?: Array<string[] | Error>;
   broadModeratorResponses?: Array<Array<{ username: string }> | Error>;
   filteredModeratorResponses?: Array<Array<{ username: string }> | Error>;
 }) {
-  const redisStore = new Map<string, string>();
+  const redisStore = options?.redisStore ?? new Map<string, string>();
   const permissionResponses = options?.permissionResponses ?? [];
   const broadModeratorResponses = options?.broadModeratorResponses ?? [];
   const filteredModeratorResponses = options?.filteredModeratorResponses ?? [];
@@ -413,6 +464,7 @@ function createModeratorLookupContext(options?: {
     get filteredCallCount() {
       return filteredCallCount;
     },
+    redisStore,
   };
 }
 
@@ -1864,17 +1916,25 @@ test('getCurrentModeratorPermissionList reuses cached permissions after a transi
 });
 
 test('getModeratorAccessSnapshot falls back to cached moderator role when moderator listings fail', async () => {
-  const lookupContext = createModeratorLookupContext({
+  const redisStore = new Map<string, string>();
+  const firstLookupContext = createModeratorLookupContext({
+    redisStore,
+    permissionResponses: [new Error('reddit 500')],
+    broadModeratorResponses: [[{ username: 'mod_one' }]],
+    filteredModeratorResponses: [new Error('reddit 500')],
+  });
+  const secondLookupContext = createModeratorLookupContext({
+    redisStore,
     permissionResponses: [new Error('reddit 500'), new Error('reddit 500')],
-    broadModeratorResponses: [[{ username: 'mod_one' }], new Error('reddit 500')],
+    broadModeratorResponses: [new Error('reddit 500')],
     filteredModeratorResponses: [new Error('reddit 500')],
   });
   const originalConsoleLog = console.log;
   console.log = () => {};
 
   try {
-    const first = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
-    const second = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+    const first = await getModeratorAccessSnapshot(firstLookupContext.context as never, 'ExampleSub', 'mod_one');
+    const second = await getModeratorAccessSnapshot(secondLookupContext.context as never, 'ExampleSub', 'mod_one');
 
     assert.equal(first.isModerator, true);
     assert.deepEqual(first.permissions, []);
@@ -1882,9 +1942,12 @@ test('getModeratorAccessSnapshot falls back to cached moderator role when modera
     assert.deepEqual(second.permissions, []);
     assert.equal(first.state, 'confirmed');
     assert.equal(second.state, 'cached');
-    assert.equal(lookupContext.permissionCallCount, 2);
-    assert.equal(lookupContext.broadCallCount, 1);
-    assert.equal(lookupContext.filteredCallCount, 1);
+    assert.equal(firstLookupContext.permissionCallCount, 1);
+    assert.equal(firstLookupContext.broadCallCount, 1);
+    assert.equal(firstLookupContext.filteredCallCount, 1);
+    assert.equal(secondLookupContext.permissionCallCount, 1);
+    assert.equal(secondLookupContext.broadCallCount, 0);
+    assert.equal(secondLookupContext.filteredCallCount, 0);
   } finally {
     console.log = originalConsoleLog;
   }
@@ -1916,6 +1979,22 @@ test('getModeratorAccessSnapshot does not fall back to broad listing when the fi
 
   assert.equal(access.isModerator, false);
   assert.equal(access.state, 'denied');
+  assert.equal(lookupContext.filteredCallCount, 1);
+  assert.equal(lookupContext.broadCallCount, 0);
+});
+
+test('getModeratorAccessSnapshot memoizes repeated lookups within the same request context', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
+    filteredModeratorResponses: [[{ username: 'mod_one' }]],
+  });
+
+  const first = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+  const second = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
+
+  assert.equal(first.isModerator, true);
+  assert.equal(second.isModerator, true);
+  assert.equal(lookupContext.permissionCallCount, 1);
   assert.equal(lookupContext.filteredCallCount, 1);
   assert.equal(lookupContext.broadCallCount, 0);
 });
@@ -2372,6 +2451,37 @@ test('sendUserModmailWithFallback clears stale thread keys and falls back to cre
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('sendUserModmailWithFallback falls back to a new conversation for proto int64 reply failures', async () => {
+  const threadKeys = Array.from(
+    new Set(usernameLookupFields('Example_User').map((field) => modmailThreadKey('t5_example', field)))
+  );
+  const modmailContext = createModmailContext({
+    initialRedis: {
+      [threadKeys[0]!]: '3aja2d',
+    },
+    replyError: new Error(
+      '2 UNKNOWN: proto: (line 1:192): invalid value for int64 field value: ""'
+    ),
+    createConversationResponses: [{ conversation: { id: '39t18m' } }],
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'Example_User',
+  });
+
+  assert.deepEqual(result, {
+    status: 'created',
+    conversationId: '39t18m',
+  });
+  assert.equal(modmailContext.replyCalls.length, 1);
+  assert.equal(modmailContext.createConversationCalls.length, 1);
+  assert.deepEqual(modmailContext.delCalls[0], threadKeys);
 });
 
 test('sendUserModmailWithFallback preserves cached thread aliases when reply fails transiently', async () => {
@@ -3392,10 +3502,28 @@ test('ensureUserValidationSchedule registers the user-validation scheduled job w
       subredditName: 'examplesub',
     },
   });
-  assert.equal(schedulerContext.setCalls.length, 1);
-  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.setCalls.length, 2);
+  assert.equal(schedulerContext.getCalls.length, 2);
   assert.equal(schedulerContext.delCalls.length, 1);
   assert.equal(schedulerContext.currentLockValue, null);
+  assert.equal(schedulerContext.markerValue, '1');
+});
+
+test('ensureUserValidationSchedule skips scheduler work when the presence marker is warm', async () => {
+  const schedulerContext = createSchedulerRegistrationContext({
+    initialMarkerValue: '1',
+  });
+
+  await ensureUserValidationSchedule(
+    schedulerContext.context as never,
+    'T5_Example',
+    '/r/ExampleSub/'
+  );
+
+  assert.equal(schedulerContext.listJobsCalls.length, 0);
+  assert.equal(schedulerContext.runJobCalls.length, 0);
+  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.delCalls.length, 0);
 });
 
 test('ensureUserValidationSchedule does not register a duplicate when a matching job already exists', async () => {
@@ -3419,9 +3547,10 @@ test('ensureUserValidationSchedule does not register a duplicate when a matching
 
   assert.equal(schedulerContext.listJobsCalls.length, 1);
   assert.equal(schedulerContext.runJobCalls.length, 0);
-  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.getCalls.length, 2);
   assert.equal(schedulerContext.delCalls.length, 1);
   assert.equal(schedulerContext.currentLockValue, null);
+  assert.equal(schedulerContext.markerValue, '1');
 });
 
 test('ensureUserValidationSchedule skips registration when another caller holds the schedule lock', async () => {
@@ -3437,7 +3566,7 @@ test('ensureUserValidationSchedule skips registration when another caller holds 
 
   assert.equal(schedulerContext.listJobsCalls.length, 0);
   assert.equal(schedulerContext.runJobCalls.length, 0);
-  assert.equal(schedulerContext.getCalls.length, 0);
+  assert.equal(schedulerContext.getCalls.length, 1);
   assert.equal(schedulerContext.delCalls.length, 0);
   assert.equal(schedulerContext.currentLockValue, 'other-caller-lock-token');
 });
@@ -3457,7 +3586,7 @@ test('ensureUserValidationSchedule does not delete a newer schedule lock it does
 
   assert.equal(schedulerContext.listJobsCalls.length, 1);
   assert.equal(schedulerContext.runJobCalls.length, 1);
-  assert.equal(schedulerContext.getCalls.length, 1);
+  assert.equal(schedulerContext.getCalls.length, 2);
   assert.equal(schedulerContext.delCalls.length, 0);
   assert.equal(schedulerContext.currentLockValue, 'newer-schedule-lock-token');
 });

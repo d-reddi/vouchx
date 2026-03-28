@@ -12,6 +12,7 @@ import {
   deleteVerificationDataFormDefinition,
   dismissModeratorUpdateNotice,
   denyVerification,
+  ensureUserValidationSchedule,
   errorText,
   getModeratorAccessSnapshot,
   getModeratorMembershipError,
@@ -200,6 +201,15 @@ async function requireReviewAccess(appContext: Devvit.Context): Promise<{ modera
   return { moderator, subredditName };
 }
 
+async function ensureValidationScheduleForStateLoad(appContext: Devvit.Context): Promise<void> {
+  const subredditName = String(appContext.subredditName ?? '').trim() || (await getCurrentSubredditNameCompat(appContext));
+  await ensureUserValidationSchedule(
+    appContext,
+    sanitizeSubredditId(appContext.subredditId),
+    subredditName
+  );
+}
+
 async function buildHubPayload(appContext: Devvit.Context) {
   const dashboard = await loadHubDashboard(appContext);
   return {
@@ -314,7 +324,9 @@ function submitToast(result: Awaited<ReturnType<typeof submitVerification>>): To
 
 app.get('/api/hub/state', async (_req, res) => {
   try {
-    res.json(await buildHubPayload(currentContext()));
+    const appContext = currentContext();
+    await ensureValidationScheduleForStateLoad(appContext);
+    res.json(await buildHubPayload(appContext));
   } catch (error) {
     sendError(res, error);
   }
@@ -440,7 +452,9 @@ app.post('/api/admin/create-post', async (req, res) => {
 
 app.get('/api/mod/state', async (_req, res) => {
   try {
-    res.json(await buildModPayload(currentContext()));
+    const appContext = currentContext();
+    await ensureValidationScheduleForStateLoad(appContext);
+    res.json(await buildModPayload(appContext));
   } catch (error) {
     sendError(res, error);
   }
