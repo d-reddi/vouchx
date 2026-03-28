@@ -219,6 +219,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let historySearchRequestId = 0;
   let approvedSearchRequestId = 0;
   let auditSearchRequestId = 0;
+  let historySearchSignature = '';
+  let approvedSearchSignature = '';
+  let auditSearchSignature = '';
   let statsRequestId = 0;
   let selectedAuditActionFilter = 'all';
   let realtimeChannel = '';
@@ -1795,18 +1798,18 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       renderFlairTemplateValidationFeedback();
       if (tabPanels.history && !tabPanels.history.classList.contains('hidden')) {
         if (activeHistoryView === 'records') {
-          runHistoryRecordsSearchWithInputGuard(true);
+          runHistoryRecordsSearchWithInputGuard(true, { force: true, renderPlaceholder: false });
         } else if (activeHistoryView === 'approved') {
           if (shouldUseSeededApprovedResults()) {
             renderApprovedSearchResults();
           } else {
-            runApprovedSearchWithInputGuard(true);
+            runApprovedSearchWithInputGuard(true, { force: true, renderPlaceholder: false });
           }
         } else if (activeHistoryView === 'audit') {
           if (shouldUseSeededAuditResults()) {
             renderAuditSearchResults();
           } else {
-            runAuditSearchWithInputGuard(true);
+            runAuditSearchWithInputGuard(true, { force: true, renderPlaceholder: false });
           }
         }
       }
@@ -1823,7 +1826,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
 
     if (message.type === 'historySearchResults' && message.payload) {
-      setBusy(false);
       if (Number(message.payload.requestId || 0) !== historySearchRequestId) {
         return;
       }
@@ -1836,7 +1838,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
 
     if (message.type === 'approvedSearchResults' && message.payload) {
-      setBusy(false);
       if (Number(message.payload.requestId || 0) !== approvedSearchRequestId) {
         return;
       }
@@ -1849,7 +1850,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
 
     if (message.type === 'auditSearchResults' && message.payload) {
-      setBusy(false);
       if (Number(message.payload.requestId || 0) !== auditSearchRequestId) {
         return;
       }
@@ -1987,6 +1987,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   function isShortNonEmptyPrefix(value) {
     const normalized = normalizeUsernameForCompare(value);
     return normalized.length > 0 && normalized.length < 3;
+  }
+
+  function effectivePrefixSearchValue(value) {
+    const normalized = normalizeUsernameForCompare(value);
+    return normalized.length >= 3 ? normalized : '';
   }
 
   function setPendingSearchHintVisible(visible) {
@@ -3877,36 +3882,73 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return targetUrl.toString();
   }
 
-  function runHistoryRecordsSearch(reset) {
+  function currentHistorySearchSignature() {
+    return JSON.stringify({
+      username: effectivePrefixSearchValue(historySearchUserInput ? historySearchUserInput.value : ''),
+      fromDate: historySearchFromInput ? serializeDateInputBoundary(historySearchFromInput.value, false) : '',
+      toDate: historySearchToInput ? serializeDateInputBoundary(historySearchToInput.value, true) : '',
+    });
+  }
+
+  function currentApprovedSearchSignature() {
+    return JSON.stringify({
+      username: effectivePrefixSearchValue(approvedSearchUserInput ? approvedSearchUserInput.value : ''),
+      fromDate: approvedSearchFromInput ? serializeDateInputBoundary(approvedSearchFromInput.value, false) : '',
+      toDate: approvedSearchToInput ? serializeDateInputBoundary(approvedSearchToInput.value, true) : '',
+    });
+  }
+
+  function currentAuditSearchSignature() {
+    return JSON.stringify({
+      username: effectivePrefixSearchValue(auditSearchUserInput ? auditSearchUserInput.value : ''),
+      actor: effectivePrefixSearchValue(auditSearchActorInput ? auditSearchActorInput.value : ''),
+      action: selectedAuditActionFilter === 'all' ? '' : selectedAuditActionFilter,
+      fromDate: auditSearchFromInput ? serializeDateInputBoundary(auditSearchFromInput.value, false) : '',
+      toDate: auditSearchToInput ? serializeDateInputBoundary(auditSearchToInput.value, true) : '',
+    });
+  }
+
+  function runHistoryRecordsSearch(reset, options) {
     if (reset) {
       historySearchItems = [];
       historySearchOffset = 0;
       historySearchHasMore = false;
-      renderHistorySearchResults();
+      if (!options || options.renderPlaceholder !== false) {
+        renderHistorySearchResults();
+      }
     }
     historySearchRequestId += 1;
-    postWithBusy(buildHistorySearchMessage(reset ? 0 : historySearchOffset, historySearchRequestId));
+    void post(buildHistorySearchMessage(reset ? 0 : historySearchOffset, historySearchRequestId));
   }
 
-  function runHistoryRecordsSearchWithInputGuard(reset) {
+  function runHistoryRecordsSearchWithInputGuard(reset, options) {
     const query = historySearchUserInput ? historySearchUserInput.value.trim() : '';
     if (isShortNonEmptyPrefix(query)) {
       setHistorySearchHintVisible(true);
     } else {
       setHistorySearchHintVisible(false);
     }
-    runHistoryRecordsSearch(reset);
+    if (reset) {
+      const nextSignature = currentHistorySearchSignature();
+      if ((!options || options.force !== true) && historySearchRequestId > 0 && nextSignature === historySearchSignature) {
+        return;
+      }
+      historySearchSignature = nextSignature;
+    }
+    runHistoryRecordsSearch(reset, options);
   }
 
-  function runApprovedSearch(reset) {
+  function runApprovedSearch(reset, options) {
     if (reset) {
       approvedSearchItems = [];
       approvedSearchOffset = 0;
       approvedSearchHasMore = false;
-      renderApprovedSearchResults();
+      if (!options || options.renderPlaceholder !== false) {
+        renderApprovedSearchResults();
+      }
     }
     approvedSearchRequestId += 1;
-    postWithBusy(buildApprovedSearchMessage(reset ? 0 : approvedSearchOffset, approvedSearchRequestId));
+    void post(buildApprovedSearchMessage(reset ? 0 : approvedSearchOffset, approvedSearchRequestId));
   }
 
   function setApprovedSearchHintVisible(visible) {
@@ -3916,11 +3958,18 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     approvedSearchHint.classList.toggle('hidden', !visible);
   }
 
-  function runApprovedSearchWithInputGuard(reset) {
+  function runApprovedSearchWithInputGuard(reset, options) {
     const query = approvedSearchUserInput ? approvedSearchUserInput.value.trim() : '';
     if (!query) {
       setApprovedSearchHintVisible(false);
-      runApprovedSearch(reset);
+      if (reset) {
+        const nextSignature = currentApprovedSearchSignature();
+        if ((!options || options.force !== true) && approvedSearchRequestId > 0 && nextSignature === approvedSearchSignature) {
+          return;
+        }
+        approvedSearchSignature = nextSignature;
+      }
+      runApprovedSearch(reset, options);
       return;
     }
     if (isShortNonEmptyPrefix(query)) {
@@ -3928,21 +3977,30 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     } else {
       setApprovedSearchHintVisible(false);
     }
-    runApprovedSearch(reset);
+    if (reset) {
+      const nextSignature = currentApprovedSearchSignature();
+      if ((!options || options.force !== true) && approvedSearchRequestId > 0 && nextSignature === approvedSearchSignature) {
+        return;
+      }
+      approvedSearchSignature = nextSignature;
+    }
+    runApprovedSearch(reset, options);
   }
 
-  function runAuditSearch(reset) {
+  function runAuditSearch(reset, options) {
     if (reset) {
       auditSearchItems = [];
       auditSearchOffset = 0;
       auditSearchHasMore = false;
-      renderAuditSearchResults();
+      if (!options || options.renderPlaceholder !== false) {
+        renderAuditSearchResults();
+      }
     }
     auditSearchRequestId += 1;
-    postWithBusy(buildAuditSearchMessage(reset ? 0 : auditSearchOffset, auditSearchRequestId));
+    void post(buildAuditSearchMessage(reset ? 0 : auditSearchOffset, auditSearchRequestId));
   }
 
-  function runAuditSearchWithInputGuard(reset) {
+  function runAuditSearchWithInputGuard(reset, options) {
     const usernameQuery = auditSearchUserInput ? auditSearchUserInput.value.trim() : '';
     const actorQuery = auditSearchActorInput ? auditSearchActorInput.value.trim() : '';
     if (isShortNonEmptyPrefix(usernameQuery) || isShortNonEmptyPrefix(actorQuery)) {
@@ -3950,7 +4008,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     } else {
       setAuditSearchHintVisible(false);
     }
-    runAuditSearch(reset);
+    if (reset) {
+      const nextSignature = currentAuditSearchSignature();
+      if ((!options || options.force !== true) && auditSearchRequestId > 0 && nextSignature === auditSearchSignature) {
+        return;
+      }
+      auditSearchSignature = nextSignature;
+    }
+    runAuditSearch(reset, options);
   }
 
   function shouldUseSeededApprovedResults() {
@@ -4146,7 +4211,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     pendingSearchUserInput.addEventListener('input', () => {
       const normalizedQuery = normalizeUsernameForCompare(pendingSearchUserInput.value || '');
       setPendingSearchHintVisible(normalizedQuery.length > 0 && normalizedQuery.length < 3);
-      pendingUsernameFilter = normalizedQuery.length >= 3 ? normalizedQuery : '';
+      const nextFilter = normalizedQuery.length >= 3 ? normalizedQuery : '';
+      if (nextFilter === pendingUsernameFilter) {
+        return;
+      }
+      pendingUsernameFilter = nextFilter;
       renderPending();
     });
   }
