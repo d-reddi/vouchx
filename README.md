@@ -164,6 +164,10 @@ If automatic flair repair is enabled:
 - if the verification flair is missing or changed, VouchX tries to restore it
 - if the user's current flair still matches your saved CSS substring rule, VouchX does not replace it
 
+## Stats
+
+View app stats like total approved, denied, etc. 
+
 ## Permissions
 
 ### Who can change VouchX settings
@@ -205,7 +209,7 @@ When a newer VouchX release is configured, moderators using the panel can see an
 
 Non-approved verification records are retained for **45 days**.
 
-Approved records use a **sliding 45-day retention window**.
+Approved records use a **sliding 90-day retention window**.
 
 Approved records store a `lastTtlBumpAt` timestamp, and retention may be refreshed when verified users interact with the app.
 
@@ -246,37 +250,21 @@ These actions delete the user’s verification records and associated audit entr
 
 Full Changelog available at: [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
-## v 1.3.2
+## v 1.3.3
 
 New Features
 - Multiple approval flairs (optional — enable in install settings)
 - Banned member indicator in pending queue
+- Automatically unban users on approval (useful for banned pending verifications)
 - Block user option on denial
 - Total karma added to "Stats" popup
-- Automatically unban users on approval (useful for banned pending verifications)
+- Stats page shows totals for each status, and total current verified users.
 
 Fixes & Improvements
+- Bumped user retention to 90 days to allow time-away from sub before removing from "verified records".
 - Improved Modmail handling reliability
+- Improved flair handling
+- Improved Mod UI refresh rules
 - Fixed error when approving deleted users
 - Improved contrast for young account badge
 - Backend console: more graceful failure handling
-
----
-
-## v1.2.1
-- Account age now shown on pending queue cards
-- New Stats button showing subreddit karma, previous denials, and ban status
-- Clearer color-coded status badges and improved action instructions
-- Install setting to restrict Settings tab to mods with config/everything permissions
-- Install setting to require viewing photo instructions before submission
-- Optional submission limits (block after X submissions or disable resubmits)
-- Main verification hub now updates live when status changes
-- Improved mod note handling
-- Simpler first-time setup flow
-- Flair Template ID verification before save
-- Android fix for photo instructions scrolling
-- Performance improvements for moderators and users
-- Report a Bug / Request a Feature link added to the mod panel
-- How to Use This App link added to the hub
-- Clearer status instructions for users
-- Notifications for updates, and critical update messages

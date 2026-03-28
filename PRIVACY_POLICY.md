@@ -48,7 +48,7 @@ The Developer does not sell, rent, or monetize user information.
 
 V. Retention
 
-Verification records are retained for up to 45 days of inactivity on a sliding basis.
+Verification records are retained for up to 90 days of inactivity on a sliding basis.
 
 Audit and moderation history records are retained for up to 45 days.
 
