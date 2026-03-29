@@ -588,6 +588,17 @@ textarea {
   text-transform: none;
 }
 
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.field-label-row .field-label {
+  margin-bottom: 0;
+}
+
 .field-help {
   margin-top: 8px;
 }
