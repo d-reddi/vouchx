@@ -251,9 +251,9 @@
               <details class="team-stats-help">
                 <summary class="team-stats-help-button" aria-label="Explain currently verified and approvals">?</summary>
                 <div class="team-stats-help-tooltip" role="note">
-                  <p><strong>Currently Verified</strong> shows the live total after removals or expirations.</p>
-                  <p><strong>Approvals</strong> counts actions during the selected time range.</p>
-                  <p><strong>Status counts</strong> are cleared if a mod purges the audit logs.</p>
+                  <p><strong>Currently Verified</strong> shows the live total of users who are still approved. This number can go down if users are removed, expire, delete their account, or are automatically cleaned up.</p>
+                  <p><strong>Approvals</strong> shows how many approval actions occurred within the selected time range. These users may no longer be currently verified.</p>
+                  <p><strong>Important:</strong> Counts may fluctuate if users self-remove, moderators purge records, or accounts are deleted/suspended. Stats are based only on data that still exists.</p>
                 </div>
               </details>
             </div>
@@ -411,13 +411,21 @@
                 </div>
                 <div class="form-section">
                 <div id="flair-css-class-wrap" class="field-stack">
-                  <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
+                  <div class="field-label-row">
+                    <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
+                    <details class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain Flair CSS match">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p>Most subs will leave this blank.</p>
+                        <p><strong>This is for historical or external verification only.</strong></p>
+                        <p>Users with a matching flair CSS ID will be treated as verified automatically, without submitting through this app.</p>
+                        <p><strong>Example:</strong> "verified" matches "verified_user" or "vip_verified".</p>
+                        <p><strong>Note:</strong> This checks the flair’s CSS ID (not flair text) and does not change how new approvals work.</p>
+                      </div>
+                    </details>
+                  </div>
                   <input id="flair-css-class" class="field-input" type="text" />
                 </div>
-                <p class="muted small field-help">
-                  Most subs will leave this field blank. Treat users as “verified” automatically if their set flair’s CSS class contains this value.
-                  See documentation for details and examples.
-                </p>
               </div>
               </div>
 
@@ -436,7 +444,25 @@
                 <p class="muted small field-help">Controls how many upload fields users see in the submit form.</p>
 
                 <label class="minor-heading field-subsection-heading" for="photo-instructions">Photo instructions</label>
-                <label class="field-label" for="photo-instructions">Instructions shown when user presses Photo Requirements</label>
+                <div class="field-label-row">
+                  <label class="field-label" for="photo-instructions">Instructions shown when user presses Photo Requirements</label>
+                  <details class="team-stats-help">
+                    <summary class="team-stats-help-button" aria-label="Explain Markdown formatting">?</summary>
+                    <div class="team-stats-help-tooltip" role="note">
+                      <p><strong>Markdown tips</strong></p>
+                      <p><strong>Bold:</strong> <code>**text**</code></p>
+                      <p><em>Italic:</em> <code>*text*</code></p>
+                      <p><s>Strikethrough</s>: <code>~~text~~</code></p>
+                      <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
+                      <p><strong>Line break:</strong> press Enter twice</p>
+                      <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
+                      <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
+                      <p><strong>Quote:</strong> <code>&gt; text</code></p>
+                      <p><strong>Code:</strong> <code>`text`</code></p>
+                      <p>Keep it simple. What you type is what users will see.</p>
+                    </div>
+                  </details>
+                </div>
                 <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
                 <p class="muted small field-help">
                   <a

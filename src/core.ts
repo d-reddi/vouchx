@@ -3143,7 +3143,17 @@ async function removeApprovedVerificationByModerator(
     await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
     await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
-    const modmail = await sendModeratorRemovalModmail(context, subredditId, updatedRecord, normalizedReason);
+    const [modmail, modNote] = await Promise.all([
+      sendModeratorRemovalModmail(context, subredditId, updatedRecord, normalizedReason),
+      (async (): Promise<ModNoteStepResult> => {
+        try {
+          await addModeratorRemovalModNote(context, updatedRecord, moderator, normalizedReason);
+          return { status: 'success' };
+        } catch (error) {
+          return { status: 'failed', reason: errorText(error) };
+        }
+      })(),
+    ]);
 
     try {
       await appendAuditLog(context, {
@@ -3172,7 +3182,7 @@ async function removeApprovedVerificationByModerator(
       applied: true,
       flair,
       modmail,
-      modNote: { status: 'skipped', reason: 'not applicable' },
+      modNote,
     };
   });
 }
@@ -3258,6 +3268,20 @@ async function addSelfRemovalModNote(
     subreddit: sanitizeSubredditName(subredditName),
     user: username,
     note: 'User self-removed verification',
+  });
+}
+
+async function addModeratorRemovalModNote(
+  context: Devvit.Context,
+  record: VerificationRecord,
+  moderatorName: string,
+  removalReason: string
+): Promise<void> {
+  const subredditName = sanitizeSubredditName(record.subredditName);
+  await context.reddit.addModNote({
+    subreddit: subredditName,
+    user: record.username,
+    note: `Verification removed by mod: ${moderatorName}. Reason: ${removalReason}`,
   });
 }
 
@@ -4897,7 +4921,7 @@ async function getModeratorStats(
   const maxScore = nowMs;
 
   const [currentlyVerified, auditCandidates] = await Promise.all([
-    context.redis.zCard(approvedIndexKey(subredditId)),
+    countCurrentlyVerifiedRecords(context, subredditId),
     loadAuditWindowCandidates(context, subredditId, {
       minScore,
       maxScore,
@@ -4986,6 +5010,92 @@ async function getModeratorStats(
     },
     moderators,
   };
+}
+
+async function countCurrentlyVerifiedRecords(
+  context: RedisContext,
+  subredditId: string
+): Promise<number> {
+  const [approvedEntries, historyEntries] = await Promise.all([
+    context.redis.zRange(approvedIndexKey(subredditId), 0, -1, { by: 'rank' }),
+    context.redis.zRange(historyDateIndexKey(subredditId), 0, -1, { by: 'rank' }),
+  ]);
+
+  if (approvedEntries.length === 0 && historyEntries.length === 0) {
+    return 0;
+  }
+
+  const approvedIds = new Set(approvedEntries.map((entry) => entry.member));
+  const candidateIds = Array.from(
+    new Set([
+      ...approvedEntries.map((entry) => entry.member),
+      ...historyEntries.map((entry) => entry.member),
+    ])
+  );
+  const payloads = await mGetStringValuesInChunks(
+    context,
+    candidateIds.map((recordId) => verificationRecordKey(subredditId, recordId))
+  );
+
+  let count = 0;
+  const approvedIdsToRemove: string[] = [];
+  const approvedPrefixEntriesToRemove: Array<{ recordId: string; username: string }> = [];
+  const approvedEntriesToAdd: Array<{ member: string; score: number }> = [];
+  const approvedPrefixEntriesToAdd: Array<{ recordId: string; username: string; approvedAtMs: number }> = [];
+
+  for (let index = 0; index < candidateIds.length; index++) {
+    const recordId = candidateIds[index];
+    const payload = payloads[index];
+    const parsed = payload ? parseRecord(payload) : null;
+    const isIndexedApproved = approvedIds.has(recordId);
+
+    if (!parsed) {
+      if (isIndexedApproved) {
+        approvedIdsToRemove.push(recordId);
+      }
+      continue;
+    }
+
+    if (parsed.status === 'approved') {
+      count += 1;
+      if (!isIndexedApproved) {
+        const approvedAtMs = getFiniteTimestampMs(parsed.reviewedAt, getFiniteTimestampMs(parsed.submittedAt, Date.now()));
+        approvedEntriesToAdd.push({ member: recordId, score: approvedAtMs });
+        approvedPrefixEntriesToAdd.push({
+          recordId,
+          username: parsed.username,
+          approvedAtMs,
+        });
+      }
+      continue;
+    }
+
+    if (isIndexedApproved) {
+      approvedIdsToRemove.push(recordId);
+      approvedPrefixEntriesToRemove.push({ recordId, username: parsed.username });
+    }
+  }
+
+  if (approvedIdsToRemove.length > 0) {
+    const uniqueApprovedIdsToRemove = Array.from(new Set(approvedIdsToRemove));
+    await context.redis.zRem(approvedIndexKey(subredditId), uniqueApprovedIdsToRemove);
+    await removeValidationTrackingForRecordIds(context, subredditId, uniqueApprovedIdsToRemove);
+  }
+
+  if (approvedPrefixEntriesToRemove.length > 0) {
+    await removeApprovedPrefixIndexEntries(context, subredditId, approvedPrefixEntriesToRemove);
+  }
+
+  if (approvedEntriesToAdd.length > 0) {
+    for (const entry of approvedEntriesToAdd) {
+      await context.redis.zAdd(approvedIndexKey(subredditId), entry);
+    }
+    for (const entry of approvedPrefixEntriesToAdd) {
+      await addApprovedPrefixIndexEntry(context, subredditId, entry.recordId, entry.username, entry.approvedAtMs);
+    }
+  }
+
+  return count;
 }
 
 async function listBlockedUsers(context: Devvit.Context, subredditId: string): Promise<BlockedUserEntry[]> {

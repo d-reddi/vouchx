@@ -1030,6 +1030,52 @@ function seedApprovedIndexMembers(
   }
 }
 
+function seedApprovedRecords(
+  reviewContext: ReturnType<typeof createReviewActionContext>,
+  records: Array<{
+    id: string;
+    approvedAt: string;
+    username?: string;
+    moderator?: string;
+    includeApprovedIndex?: boolean;
+  }>
+) {
+  for (const record of records) {
+    const approvedAtMs = new Date(record.approvedAt).getTime();
+    const submittedAt = new Date(approvedAtMs - 60_000).toISOString();
+    const username = record.username ?? `${record.id}_user`;
+    const approvedRecord = buildRecord({
+      id: record.id,
+      username,
+      subredditId: reviewContext.subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'approved',
+      moderator: record.moderator ?? 'Mod_One',
+      submittedAt,
+      ageAcknowledgedAt: submittedAt,
+      reviewedAt: record.approvedAt,
+    });
+
+    reviewContext.redisStore.set(
+      verificationRecordTestKey(reviewContext.subredditId, record.id),
+      JSON.stringify(approvedRecord)
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).set(record.id, approvedAtMs);
+    ensureTestZSet(reviewContext.zsetStore, historyByUserIndexTestKey(reviewContext.subredditId, username)).set(record.id, approvedAtMs);
+
+    if (approvedRecord.moderator) {
+      ensureTestZSet(
+        reviewContext.zsetStore,
+        historyByModeratorIndexTestKey(reviewContext.subredditId, approvedRecord.moderator)
+      ).set(record.id, approvedAtMs);
+    }
+
+    if (record.includeApprovedIndex !== false) {
+      ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).set(record.id, approvedAtMs);
+    }
+  }
+}
+
 function seedAuditEntries(
   reviewContext: ReturnType<typeof createReviewActionContext>,
   entries: Array<{
@@ -2710,9 +2756,9 @@ test('getModeratorStats returns empty recent activity while preserving current v
   const reviewContext = createReviewActionContext();
 
   await withFixedNow('2026-03-26T12:00:00.000Z', async (nowMs) => {
-    seedApprovedIndexMembers(reviewContext, [
-      { id: 'approved_1', score: nowMs - 2_000 },
-      { id: 'approved_2', score: nowMs - 1_000 },
+    seedApprovedRecords(reviewContext, [
+      { id: 'approved_1', approvedAt: new Date(nowMs - 2_000).toISOString(), username: 'approved_one' },
+      { id: 'approved_2', approvedAt: new Date(nowMs - 1_000).toISOString(), username: 'approved_two' },
     ]);
 
     const stats = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
@@ -2740,10 +2786,10 @@ test('getModeratorStats aggregates weekly and monthly moderator activity from th
   const reviewContext = createReviewActionContext();
 
   await withFixedNow('2026-03-26T12:00:00.000Z', async (nowMs) => {
-    seedApprovedIndexMembers(reviewContext, [
-      { id: 'approved_1', score: nowMs - 1_000 },
-      { id: 'approved_2', score: nowMs - 2_000 },
-      { id: 'approved_3', score: nowMs - 3_000 },
+    seedApprovedRecords(reviewContext, [
+      { id: 'approved_1', approvedAt: new Date(nowMs - 1_000).toISOString(), username: 'approved_one' },
+      { id: 'approved_2', approvedAt: new Date(nowMs - 2_000).toISOString(), username: 'approved_two' },
+      { id: 'approved_3', approvedAt: new Date(nowMs - 3_000).toISOString(), username: 'approved_three' },
     ]);
     seedAuditEntries(reviewContext, [
       { id: 'audit_approved_1', action: 'approved', actor: 'Mod_One', at: '2026-03-25T12:00:00.000Z' },
@@ -2866,7 +2912,37 @@ test('getModeratorStats reflects cleanup-style approved index removals after app
 
     await reviewContext.context.redis.zRem(approvedIndexTestKey(reviewContext.subredditId), [reviewContext.record.id]);
     const afterCleanup = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
-    assert.equal(afterCleanup.summary.currentlyVerified, 0);
+    assert.equal(afterCleanup.summary.currentlyVerified, 1);
+    assert.equal(
+      ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).has(reviewContext.record.id),
+      true
+    );
+  });
+});
+
+test('removeApprovedVerificationByModerator adds a moderator removal mod note', async () => {
+  const reviewContext = createReviewActionContext();
+
+  await approveVerification(reviewContext.context as never, reviewContext.record.id);
+  const result = await removeApprovedVerificationByModerator(
+    reviewContext.context as never,
+    reviewContext.record.id,
+    'Verification revoked for testing.'
+  );
+  const storedRecord = reviewContext.getParsedRecord();
+  const latestModNote = reviewContext.addModNoteCalls.at(-1) as
+    | { subreddit?: string; user?: string; note?: string }
+    | undefined;
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(result.modNote.status, 'success');
+  assert.equal(storedRecord?.status, 'removed');
+  assert.equal(reviewContext.addModNoteCalls.length, 2);
+  assert.deepEqual(latestModNote, {
+    subreddit: 'examplesub',
+    user: 'example_user',
+    note: 'Verification removed by mod: Mod_One. Reason: Verification revoked for testing.',
   });
 });
 
