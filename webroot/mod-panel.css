@@ -590,13 +590,27 @@ textarea {
 
 .field-label-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: 6px;
+  position: relative;
 }
 
 .field-label-row .field-label {
   margin-bottom: 0;
+}
+
+.field-label-row .team-stats-help {
+  position: static;
+}
+
+.field-label-row .team-stats-help-tooltip {
+  left: 0;
+  right: auto;
+}
+
+.field-label-row-spaced {
+  margin-top: 12px;
 }
 
 .field-help {

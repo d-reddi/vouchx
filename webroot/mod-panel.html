@@ -449,30 +449,22 @@
                   <details class="team-stats-help">
                     <summary class="team-stats-help-button" aria-label="Explain Markdown formatting">?</summary>
                     <div class="team-stats-help-tooltip" role="note">
-                      <p><strong>Markdown tips</strong></p>
+                      <p><strong>Markdown and placeholders</strong></p>
                       <p><strong>Bold:</strong> <code>**text**</code></p>
                       <p><em>Italic:</em> <code>*text*</code></p>
-                      <p><s>Strikethrough</s>: <code>~~text~~</code></p>
                       <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
+                      <p><strong>Inline code:</strong> <code>`text`</code></p>
+                      <p><strong>Heading:</strong> <code>## Heading</code></p>
                       <p><strong>Line break:</strong> press Enter twice</p>
                       <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
                       <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
-                      <p><strong>Quote:</strong> <code>&gt; text</code></p>
-                      <p><strong>Code:</strong> <code>`text`</code></p>
-                      <p>Keep it simple. What you type is what users will see.</p>
+                      <p><strong>Placeholders:</strong> <code>{{subreddit}}</code>, <code>{{days}}</code></p>
+                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      <p>What you type is what users will see in the Photo Requirements popup.</p>
                     </div>
                   </details>
                 </div>
                 <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
-                <p class="muted small field-help">
-                  <a
-                    id="markdown-guide-link"
-                    href="https://support.reddithelp.com/hc/en-us/articles/360043033952-Formatting-Guide#h_01HEK5SNJM44XVSJFH0BT5QS9X"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >Markdown</a>
-                  is supported. Placeholders: {{subreddit}}, {{days}}.
-                </p>
               </div>
 
               <div class="row section-actions">
@@ -496,7 +488,18 @@
                 </div>
                 <div class="field-grid">
                   <div class="field-stack">
-                    <label class="field-label" for="modmail-subject">Modmail subject</label>
+                    <div class="field-label-row">
+                      <label class="field-label" for="modmail-subject">Modmail subject</label>
+                      <details class="team-stats-help">
+                        <summary class="team-stats-help-button" aria-label="Explain modmail subject placeholders">?</summary>
+                        <div class="team-stats-help-tooltip" role="note">
+                          <p>Used for pending, approval, denial, and revocation modmail.</p>
+                          <p><strong>Common placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                          <p><strong>Also available:</strong> <code>{{mod}}</code> for approval, denial, and revocation; <code>{{denial_notes}}</code> for denial; <code>{{reason}}</code> for revocation.</p>
+                          <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                        </div>
+                      </details>
+                    </div>
                     <input id="modmail-subject" class="field-input" type="text" />
                   </div>
                   <div class="field-stack">
@@ -504,7 +507,17 @@
                     <input id="pending-turnaround-days" class="field-input" type="number" min="1" step="1" />
                   </div>
                 </div>
-                <label class="field-label" for="pending-body">Pending body</label>
+                <div class="field-label-row">
+                  <label class="field-label" for="pending-body">Pending body</label>
+                  <details class="team-stats-help">
+                    <summary class="team-stats-help-button" aria-label="Explain pending body placeholders">?</summary>
+                    <div class="team-stats-help-tooltip" role="note">
+                      <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      <p>The app automatically appends the 18+ and terms confirmation timestamp below this message.</p>
+                    </div>
+                  </details>
+                </div>
                 <textarea id="pending-body" class="field-textarea" rows="5"></textarea>
               </div>
 
@@ -516,10 +529,29 @@
                   </div>
                 </div>
                 <div class="field-stack">
-                  <label class="field-label" for="approve-header">Approval header</label>
+                  <div class="field-label-row">
+                    <label class="field-label" for="approve-header">Approval header</label>
+                    <details class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain approval header placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p>Rendered in bold with a separator at the top of the modmail message.</p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                        <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      </div>
+                    </details>
+                  </div>
                   <input id="approve-header" class="field-input" type="text" />
                 </div>
-                <label class="field-label" for="approve-body">Approval body</label>
+                <div class="field-label-row">
+                  <label class="field-label" for="approve-body">Approval body</label>
+                  <details class="team-stats-help">
+                    <summary class="team-stats-help-button" aria-label="Explain approval body placeholders">?</summary>
+                    <div class="team-stats-help-tooltip" role="note">
+                      <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                    </div>
+                  </details>
+                </div>
                 <textarea id="approve-body" class="field-textarea" rows="5"></textarea>
               </div>
 
@@ -533,35 +565,87 @@
                   </div>
                 </div>
                 <div class="field-stack">
-                  <label class="field-label" for="deny-header">Denial header</label>
+                  <div class="field-label-row">
+                    <label class="field-label" for="deny-header">Denial header</label>
+                    <details class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain denial header placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p>Rendered in bold with a separator at the top of the modmail message.</p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p>Use <code>{{denial_notes}}</code> only if you want moderator-entered notes inserted exactly here.</p>
+                      </div>
+                    </details>
+                  </div>
                   <input id="deny-header" class="field-input" type="text" />
+                </div>
+                <div class="field-label-row field-label-row-spaced">
+                  <label class="field-label" for="always-include-denial-notes-in-modmail">Denial notes behavior</label>
+                  <details class="team-stats-help">
+                    <summary class="team-stats-help-button" aria-label="Explain denial notes behavior">?</summary>
+                    <div class="team-stats-help-tooltip" role="note">
+                      <p><strong>Enabled:</strong> moderator denial notes are appended automatically unless your denial header or body already uses <code>{{denial_notes}}</code>.</p>
+                      <p><strong>Disabled:</strong> moderator notes appear only where you place <code>{{denial_notes}}</code> in the denial templates.</p>
+                    </div>
+                  </details>
                 </div>
                 <label class="toggle-row">
                   <input id="always-include-denial-notes-in-modmail" type="checkbox" />
                   <span>Always include moderator denial notes in denial modmail</span>
                 </label>
-                <p class="muted small field-help">
-                  Enabled: denial notes are always included.
-                  Disabled: notes appear only if the template uses {{denial_notes}}.
-                </p>
 
                 <div id="deny-template-reason-1-wrap" class="template-reason-block hidden">
-                  <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
+                  <div class="field-label-row">
+                    <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
+                    <details id="deny-body-reason-1-help" class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain denial body placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                      </div>
+                    </details>
+                  </div>
                   <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
                 </div>
 
                 <div id="deny-template-reason-2-wrap" class="template-reason-block hidden">
-                  <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
+                  <div class="field-label-row">
+                    <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
+                    <details id="deny-body-reason-2-help" class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain denial body placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                      </div>
+                    </details>
+                  </div>
                   <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
                 </div>
 
                 <div id="deny-template-reason-3-wrap" class="template-reason-block hidden">
-                  <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
+                  <div class="field-label-row">
+                    <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
+                    <details id="deny-body-reason-3-help" class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain denial body placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                      </div>
+                    </details>
+                  </div>
                   <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
                 </div>
 
                 <div id="deny-template-reason-4-wrap" class="template-reason-block hidden">
-                  <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
+                  <div class="field-label-row">
+                    <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
+                    <details id="deny-body-reason-4-help" class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain denial body placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                      </div>
+                    </details>
+                  </div>
                   <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
                 </div>
               </div>
@@ -574,7 +658,17 @@
                   </div>
                 </div>
                 <div class="field-stack">
-                  <label class="field-label" for="remove-header">Revoked verification header</label>
+                  <div class="field-label-row">
+                    <label class="field-label" for="remove-header">Revoked verification header</label>
+                    <details class="team-stats-help">
+                      <summary class="team-stats-help-button" aria-label="Explain revoked verification header placeholders">?</summary>
+                      <div class="team-stats-help-tooltip" role="note">
+                        <p>Rendered in bold with a separator at the top of the modmail message.</p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{reason}}</code></p>
+                        <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      </div>
+                    </details>
+                  </div>
                   <input id="remove-header" class="field-input" type="text" />
                 </div>
                 <label class="field-label" for="remove-body">Revoked verification body</label>
@@ -583,12 +677,6 @@
             </div>
 
             <div class="panel-footer">
-              <p class="muted small">
-                Supported placeholders: {{username}}, {{mod}}, {{subreddit}}, {{date submitted}}, {{days}}.
-                Denial bodies also support {{denial_notes}} for moderator-entered denial notes.
-                The `{{days}}` token already includes the unit, for example `3 days`.
-                Approval, denial, and revocation headers are rendered in bold with an underline separator at the top of modmail replies.
-              </p>
               <div class="row section-actions section-actions-inline">
                 <button id="save-templates-btn" class="btn btn-primary">Save templates</button>
               </div>

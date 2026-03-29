@@ -123,7 +123,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
   const installSettingsRow = document.getElementById('install-settings-row');
   const installSettingsLink = document.getElementById('install-settings-link');
-  const markdownGuideLink = document.getElementById('markdown-guide-link');
   const requiredPhotoCountInput = document.getElementById('required-photo-count');
   const photoInstructionsInput = document.getElementById('photo-instructions');
 
@@ -150,24 +149,28 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       id: 'reason_1',
       wrapper: document.getElementById('deny-template-reason-1-wrap'),
       label: document.getElementById('deny-body-reason-1-label'),
+      help: document.getElementById('deny-body-reason-1-help'),
       input: document.getElementById('deny-body-reason-1'),
     },
     {
       id: 'reason_2',
       wrapper: document.getElementById('deny-template-reason-2-wrap'),
       label: document.getElementById('deny-body-reason-2-label'),
+      help: document.getElementById('deny-body-reason-2-help'),
       input: document.getElementById('deny-body-reason-2'),
     },
     {
       id: 'reason_3',
       wrapper: document.getElementById('deny-template-reason-3-wrap'),
       label: document.getElementById('deny-body-reason-3-label'),
+      help: document.getElementById('deny-body-reason-3-help'),
       input: document.getElementById('deny-body-reason-3'),
     },
     {
       id: 'reason_4',
       wrapper: document.getElementById('deny-template-reason-4-wrap'),
       label: document.getElementById('deny-body-reason-4-label'),
+      help: document.getElementById('deny-body-reason-4-help'),
       input: document.getElementById('deny-body-reason-4'),
     },
   ];
@@ -3074,6 +3077,20 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         control.input.value = getDenyReasonTemplate(control.id) || '';
       }
     }
+    let hasShownDenialBodyHelp = false;
+    for (const control of denyReasonTemplateControls) {
+      if (!control.help) {
+        continue;
+      }
+      const isVisible = Boolean(control.wrapper && !control.wrapper.classList.contains('hidden'));
+      const shouldShowHelp = isVisible && !hasShownDenialBodyHelp;
+      control.help.classList.toggle('hidden', !shouldShowHelp);
+      if (!shouldShowHelp) {
+        control.help.open = false;
+        continue;
+      }
+      hasShownDenialBodyHelp = true;
+    }
     removeHeaderInput.value = state.config.removeHeader || '';
     removeBodyInput.value = state.config.removeBody || '';
   }
@@ -4180,13 +4197,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     approvalFlairThirdSelect.addEventListener('change', () => {
       additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(approvalFlairThirdSelect.value);
       renderAdditionalApprovalFlairPickers();
-    });
-  }
-
-  if (markdownGuideLink) {
-    markdownGuideLink.addEventListener('click', (event) => {
-      event.preventDefault();
-      post({ type: 'openExternalUrl', url: markdownGuideLink.href });
     });
   }
 
