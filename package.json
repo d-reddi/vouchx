@@ -7,14 +7,13 @@
   "scripts": {
     "dev": "npx devvit playtest",
     "build": "vite build",
-    "deploy": "npx devvit upload",
+    "deploy": "npm run build && npx devvit upload --no-build",
     "check": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/core.test.ts"
   },
   "devDependencies": {
     "@devvit/public-api": "0.12.17",
     "@types/node": "^22.10.5",
-    "devvit": "0.12.17",
     "typescript": "5.8.3"
   },
   "engines": {
