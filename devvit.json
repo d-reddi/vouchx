@@ -27,10 +27,6 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
-  "scripts": {
-    "dev": "vite build --watch",
-    "build": "vite build"
-  },
   "blocks": {
     "entry": "src/main.tsx",
     "settings": {
