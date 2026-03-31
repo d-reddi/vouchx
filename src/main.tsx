@@ -44,7 +44,7 @@ async function onCreateVerificationPost(
     }
 
     context.ui.showToast({
-      text: payload.toast?.text ?? 'Created NSFW verification post.',
+      text: payload.toast?.text ?? 'Created and pinned NSFW verification post.',
       appearance: 'success',
     });
     if (payload.postUrl) {
@@ -84,7 +84,7 @@ async function onRemoveVerificationPost(
 const createVerificationPostForm = Devvit.createForm(
   {
     title: 'Create verification hub post',
-    description: 'Creates the verification hub post and marks it NSFW.',
+    description: 'Creates the verification hub post, marks it NSFW, and pins it to the subreddit.',
     fields: [
       {
         type: 'string',
@@ -94,7 +94,7 @@ const createVerificationPostForm = Devvit.createForm(
         defaultValue: 'Photo Verification Hub',
       },
     ],
-    acceptLabel: 'Create NSFW verification post',
+    acceptLabel: 'Create and pin NSFW verification post',
     cancelLabel: 'Cancel',
   },
   onCreateVerificationPost
