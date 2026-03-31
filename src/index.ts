@@ -441,9 +441,18 @@ app.post('/api/admin/create-post', async (req, res) => {
         text: 'Photo Verification Hub: users submit verification photos for moderator review.',
       },
     });
+    let toastText = 'Created and pinned NSFW verification post.';
+    try {
+      await post.sticky(1);
+    } catch (stickyError) {
+      console.log(
+        `[create-post] Created verification post ${post.id} in r/${subredditName}, but failed to pin it: ${errorText(stickyError)}`
+      );
+      toastText = "Created NSFW verification post, but couldn't pin it. Please pin it manually.";
+    }
     res.json({
       postUrl: post.url,
-      toast: { text: 'Created NSFW verification post.' },
+      toast: { text: toastText },
     });
   } catch (error) {
     sendError(res, error);
