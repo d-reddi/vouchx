@@ -7,12 +7,12 @@
   "scripts": {
     "dev": "npx devvit playtest",
     "build": "vite build",
-    "deploy": "npm run build && npx devvit upload --no-build",
+    "deploy": "npx devvit upload",
     "check": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/core.test.ts"
   },
   "devDependencies": {
-    "@devvit/public-api": "0.12.16",
+    "@devvit/public-api": "0.12.17",
     "@types/node": "^22.10.5",
     "typescript": "5.8.3"
   },
@@ -20,8 +20,8 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@devvit/start": "0.12.16",
-    "@devvit/web": "0.12.16",
+    "@devvit/start": "0.12.17",
+    "@devvit/web": "0.12.17",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "vite": "^7.3.1"
