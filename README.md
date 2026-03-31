@@ -1,6 +1,7 @@
 # VouchX
 
 VouchX is a photo verification app for Reddit communities.  
+
 It gives your subreddit a **Verification Hub for submissions** and a **moderator panel to review and manage approvals**.
 
 ---
@@ -14,6 +15,16 @@ It gives your subreddit a **Verification Hub for submissions** and a **moderator
 - Audit history and retention controls  
 - Customizable messaging and themes  
 - Automatic cleanup and validation  
+
+---
+
+## Documentation & Help
+
+Full setup guides and advanced configuration:  
+[https://www.reddit.com/r/vouchx/wiki/guide/](https://www.reddit.com/r/vouchx/wiki/guide/)
+
+Workflow demos:  
+[https://www.reddit.com/r/vouchx/wiki/demo/](https://www.reddit.com/r/vouchx/wiki/demo/)
 
 ---
 
@@ -92,24 +103,13 @@ These background processes help ensure data is kept up to date and not retained 
 
 ---
 
-## Documentation & Help
-
-Full setup guides and advanced configuration:  
-[https://www.reddit.com/r/vouchx/wiki/guide/](https://www.reddit.com/r/vouchx/wiki/guide/)
-
-Workflow demos:  
-[https://www.reddit.com/r/vouchx/wiki/demo/](https://www.reddit.com/r/vouchx/wiki/demo/)
-
----
-
 ## Changelog
 
 Full changelog:  
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
-## v1.3.4
+### v1.3.7
 
-### New Features
 - Multiple approval flairs (optional — enable in Install Settings)
 - Banned member indicator in the pending queue
 - Automatically unban users on approval (useful for previously banned applicants)
@@ -117,8 +117,7 @@ Full changelog:
 - Total subreddit karma added to the "Stats" popup
 - New Stats page with status totals and current verified user count
 - Tooltips added across settings and templates for better guidance
-
-### Fixes & Improvements
+- Initial Hub Create now pins app.
 - Fixed error when approving deleted or suspended users
 - Fixed potential moderator lookup issue affecting permissions
 - Improved Modmail handling reliability
@@ -127,3 +126,41 @@ Full changelog:
 - Improved contrast for the young account badge
 - Increased user retention to 90 days to allow time away before removal from verified records (privacy policy updated)
 - Backend: improved error handling and logging
+
+---
+
+### v1.2.1
+
+- Account age now shown on pending queue cards
+- New Stats button showing subreddit karma, previous denials, and ban status
+- Clearer color-coded status badges and improved action instructions
+- Install setting to restrict Settings tab to mods with config/everything permissions
+- Install setting to require viewing photo instructions before submission
+- Optional submission limits (block after X submissions or disable resubmits)
+- Main verification hub now updates live when status changes
+- Improved mod note handling
+- Simpler first-time setup flow
+- Flair Template ID verification before save
+- Android fix for photo instructions scrolling
+- Performance improvements for moderators and users
+- Report a Bug / Request a Feature link added to the mod panel
+- How to Use This App link added to the hub
+- Clearer status instructions for users
+- Notifications for updates, and critical update messages
+
+---
+
+### v1.1.2
+
+- critical fix: initialize the daily retention / validation scheduler from live dashboard loads so subreddit installs do not miss scheduled cleanup
+- refine the moderator panel into a cleaner dark dashboard layout with better mobile workflow and queue prioritization
+- fix stale moderator history / approved / audit views after moderation actions
+- fix history, approved, and audit search consistency after approve, deny, remove, and reopen flows
+- fix history search date-window and pagination behavior so records do not disappear or duplicate after search
+- refresh the verification hub after stale withdraw attempts when the pending request has already been resolved
+- update the optional flair CSS matcher to use substring matching
+
+---
+
+### v1.0.10
+- initial public Reddit release
