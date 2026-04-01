@@ -69,7 +69,13 @@ function createShell(root, inline) {
               <p data-el="meta-username" class="meta"></p>
               <p data-el="meta-subreddit" class="meta"></p>
               <div class="hub-brand-status">
-                <p class="hub-status-kicker">Current status</p>
+                <div class="hub-status-head">
+                  <p class="hub-status-kicker">Current status</p>
+                  <details class="hub-status-help">
+                    <summary class="hub-status-help-button" aria-label="Explain current verification status">?</summary>
+                    <div data-el="status-tooltip" class="hub-status-tooltip" role="note"></div>
+                  </details>
+                </div>
                 <p data-el="meta-status" class="status-line"></p>
               </div>
             </div>
@@ -133,6 +139,7 @@ function createShell(root, inline) {
     metaUsername: root.querySelector('[data-el="meta-username"]'),
     metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
     metaStatus: root.querySelector('[data-el="meta-status"]'),
+    statusTooltip: root.querySelector('[data-el="status-tooltip"]'),
     commandTitle: root.querySelector('[data-el="command-title"]'),
     pendingBadge: root.querySelector('[data-el="pending-badge"]'),
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
@@ -406,6 +413,32 @@ function renderInstructionTemplate(value, state) {
       .replace(/\s+/g, '_');
     return replacements[normalizedKey] ?? '';
   });
+}
+
+function buildStatusTooltipHtml(content) {
+  return content.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join('');
+}
+
+function getStatusTooltipHtml(state, options) {
+  if (state?.userLatest?.status === 'pending') {
+    return buildStatusTooltipHtml([
+      "You're in the verification queue.",
+      `Most requests are reviewed within ${formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays)}. No further action is needed - we'll update you soon.`,
+      'Need to cancel? Use the Withdraw Verification button.',
+    ]);
+  }
+
+  if (options.isVerified || options.awaitingFlairPropagation) {
+    return buildStatusTooltipHtml([
+      "You're verified and recognized as a trusted member.",
+      'You stand out with a verified flair and may have additional access where enabled.',
+    ]);
+  }
+
+  return buildStatusTooltipHtml([
+    "Get verified to show you're approved and trusted in this community.",
+    'Verified users stand out with a unique flair, build credibility, and may unlock full participation depending on subreddit rules.',
+  ]);
 }
 
 function isAndroidWebViewClient() {
@@ -1140,6 +1173,12 @@ export function mountHub(options = {}) {
     }
     refs.metaStatus.classList.add(statusClass);
     refs.metaStatus.textContent = statusText;
+    if (refs.statusTooltip) {
+      refs.statusTooltip.innerHTML = getStatusTooltipHtml(state, {
+        isVerified,
+        awaitingFlairPropagation,
+      });
+    }
 
     refs.pendingBadge.textContent = state.pendingCount > 99 ? '99+' : String(state.pendingCount || 0);
     refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
