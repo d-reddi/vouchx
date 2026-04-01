@@ -108,7 +108,14 @@ These background processes help ensure data is kept up to date and not retained 
 Full changelog:  
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
-### v1.3.7
+### v1.3.8
+
+- Adding the Verification hub now auto pins the post
+- Updated to devvit 0.12.17
+
+---
+
+### v1.3.4
 
 - Multiple approval flairs (optional — enable in Install Settings)
 - Banned member indicator in the pending queue
