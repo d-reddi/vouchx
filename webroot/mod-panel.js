@@ -369,6 +369,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function applyApiState(payload) {
     syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
+    if (payload && payload.state == null && payload.mutation) {
+      applyLocalMutation(payload.mutation);
+    }
     if (payload && payload.state) {
       handleMessage({ type: 'state', payload: payload.state });
     } else {
@@ -381,6 +384,32 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       window.setTimeout(() => {
         void refreshFromRealtimeSignal();
       }, 0);
+    }
+  }
+
+  function applyLocalMutation(mutation) {
+    if (!state || !mutation || typeof mutation !== 'object') {
+      return;
+    }
+
+    if (mutation.type === 'removePending') {
+      const verificationId = String(mutation.verificationId || '').trim();
+      if (!verificationId || !Array.isArray(state.pending)) {
+        return;
+      }
+      const nextPending = state.pending.filter((item) => String(item && item.id || '') !== verificationId);
+      const removedCount = state.pending.length - nextPending.length;
+      if (removedCount <= 0) {
+        return;
+      }
+      const currentPendingCount = Number.isFinite(Number(state.pendingCount)) ? Number(state.pendingCount) : state.pending.length;
+      state = {
+        ...state,
+        pending: nextPending,
+        pendingCount: Math.max(0, currentPendingCount - removedCount),
+      };
+      lastStateUpdatedAt = Date.now();
+      renderAll();
     }
   }
 
