@@ -167,6 +167,23 @@ function showToast(text, tone = 'info') {
   });
 }
 
+function sanitizeUserFacingErrorText(message, fallback = 'Request failed. Please retry.') {
+  const normalized = typeof message === 'string' ? message.replace(/\s+/g, ' ').trim() : '';
+  if (!normalized) {
+    return fallback;
+  }
+  const lower = normalized.toLowerCase();
+  if (
+    lower.includes('<body') ||
+    lower.includes('<style') ||
+    lower.includes('oauth.reddit.com') ||
+    (lower.includes('http status 403') && lower.includes('forbidden'))
+  ) {
+    return fallback;
+  }
+  return normalized;
+}
+
 async function requestJson(path, body) {
   const response = await fetch(
     path,
@@ -182,7 +199,11 @@ async function requestJson(path, body) {
   );
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(typeof payload.error === 'string' && payload.error ? payload.error : `Request failed: ${response.status}`);
+    const errorMessage =
+      typeof payload.error === 'string' && payload.error
+        ? sanitizeUserFacingErrorText(payload.error)
+        : `Request failed: ${response.status}`;
+    throw new Error(errorMessage);
   }
   return payload;
 }
@@ -420,6 +441,7 @@ function buildStatusTooltipHtml(content) {
 }
 
 function getStatusTooltipHtml(state, options) {
+  const isRestricted = Boolean(state?.viewerBlocked && !options.isVerified);
   if (state?.userLatest?.status === 'pending') {
     return buildStatusTooltipHtml([
       "You're in the verification queue.",
@@ -432,6 +454,13 @@ function getStatusTooltipHtml(state, options) {
     return buildStatusTooltipHtml([
       "You're verified and recognized as a trusted member.",
       'You stand out with a verified flair and may have additional access where enabled.',
+    ]);
+  }
+
+  if (isRestricted) {
+    return buildStatusTooltipHtml([
+      "You're blocked from submitting verification in this subreddit right now.",
+      'This is a subreddit-specific restriction based on your verification history or moderator actions.',
     ]);
   }
 
@@ -534,6 +563,7 @@ export function mountHub(options = {}) {
   let hubForms = null;
   let modPanelPath = './mod-panel.html';
   let isBusy = false;
+  let moderatorUiRequestInFlight = false;
   let autoRefreshTimerId = 0;
   let realtimeChannel = '';
   let realtimeConnectedChannel = '';
@@ -1288,6 +1318,19 @@ export function mountHub(options = {}) {
     refs.actionRow.classList.toggle('hidden', refs.actionRow.childElementCount === 0);
   }
 
+  function applyModeratorUiPayload(payload) {
+    if (!payload || !hubState) {
+      return;
+    }
+    hubState = {
+      ...hubState,
+      isModerator: payload.isModerator === true,
+      canReview: payload.canReview === true,
+      pendingCount: Number.isFinite(payload.pendingCount) ? payload.pendingCount : hubState.pendingCount,
+    };
+    renderState(hubState);
+  }
+
   function applyPayload(payload) {
     if (!payload) {
       return;
@@ -1305,6 +1348,7 @@ export function mountHub(options = {}) {
         refs.mainContent.classList.remove('hidden');
       }
       renderState(hubState);
+      void refreshModeratorUiState();
       syncFlairPropagationRefresh();
       if (photoInstructionsOnly && !photoInstructionsOnlyHandled) {
         photoInstructionsOnlyHandled = true;
@@ -1313,6 +1357,20 @@ export function mountHub(options = {}) {
           requireContinue: photoInstructionsLaunchMode === 'submit',
         });
       }
+    }
+  }
+
+  async function refreshModeratorUiState() {
+    if (!hubState || moderatorUiRequestInFlight) {
+      return;
+    }
+    moderatorUiRequestInFlight = true;
+    try {
+      applyModeratorUiPayload(await requestJson('/api/hub/moderator-ui'));
+    } catch {
+      // The hub should stay usable even when moderator UI enrichment is unavailable.
+    } finally {
+      moderatorUiRequestInFlight = false;
     }
   }
 

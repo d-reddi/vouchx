@@ -12,11 +12,13 @@ import {
   dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
+  getHubModeratorUiState,
   getModeratorAccessSnapshot,
   getModeratorStats,
   getViewerFlairSnapshot,
   isViewerAwaitingFlairPropagation,
   loadApprovalFlairOptionsForSettings,
+  loadHubDashboard,
   looksLikeInternalModmailArchiveError,
   onSaveFlairTemplateValues,
   removeApprovedVerificationByModerator,
@@ -380,19 +382,16 @@ function createUpdateNoticeContext(options?: {
 
 function createModeratorLookupContext(options?: {
   subredditId?: string;
+  subredditName?: string;
+  userId?: string;
   currentUsername?: string | null;
+  pendingCount?: number;
   redisStore?: Map<string, string>;
   permissionResponses?: Array<string[] | Error>;
-  broadModeratorResponses?: Array<Array<{ username: string }> | Error>;
-  filteredModeratorResponses?: Array<Array<{ username: string }> | Error>;
 }) {
   const redisStore = options?.redisStore ?? new Map<string, string>();
   const permissionResponses = options?.permissionResponses ?? [];
-  const broadModeratorResponses = options?.broadModeratorResponses ?? [];
-  const filteredModeratorResponses = options?.filteredModeratorResponses ?? [];
   let permissionCallCount = 0;
-  let broadCallCount = 0;
-  let filteredCallCount = 0;
 
   const nextPermissionResponse = (): string[] => {
     const response = permissionResponses[Math.min(permissionCallCount, permissionResponses.length - 1)];
@@ -403,45 +402,26 @@ function createModeratorLookupContext(options?: {
     return Array.isArray(response) ? response : [];
   };
 
-  const nextModeratorsResponse = (
-    responses: Array<Array<{ username: string }> | Error>,
-    kind: 'broad' | 'filtered'
-  ): Array<{ username: string }> => {
-    if (kind === 'broad') {
-      broadCallCount += 1;
-    } else {
-      filteredCallCount += 1;
-    }
-    const index = kind === 'broad' ? broadCallCount - 1 : filteredCallCount - 1;
-    const response = responses[Math.min(index, responses.length - 1)];
-    if (response instanceof Error) {
-      throw response;
-    }
-    return Array.isArray(response) ? response : [];
-  };
-
   return {
     context: {
       subredditId: options?.subredditId ?? 't5_example',
+      subredditName: options?.subredditName ?? 'example',
+      userId: options?.userId ?? 't2_mod',
       reddit: {
         async getCurrentUsername() {
           return options?.currentUsername ?? 'mod_one';
         },
         async getCurrentUser() {
           return {
+            username: options?.currentUsername ?? 'mod_one',
+            id: options?.userId ?? 't2_mod',
             async getModPermissionsForSubreddit() {
               return nextPermissionResponse();
             },
           };
         },
-        getModerators(args: { username?: string }) {
-          return {
-            async all() {
-              return args.username
-                ? nextModeratorsResponse(filteredModeratorResponses, 'filtered')
-                : nextModeratorsResponse(broadModeratorResponses, 'broad');
-            },
-          };
+        async getCurrentSubreddit() {
+          return { name: options?.subredditName ?? 'example' };
         },
       },
       redis: {
@@ -460,16 +440,13 @@ function createModeratorLookupContext(options?: {
             redisStore.delete(key);
           }
         },
+        async zCard() {
+          return options?.pendingCount ?? 0;
+        },
       },
     },
     get permissionCallCount() {
       return permissionCallCount;
-    },
-    get broadCallCount() {
-      return broadCallCount;
-    },
-    get filteredCallCount() {
-      return filteredCallCount;
     },
     redisStore,
   };
@@ -724,6 +701,7 @@ function createFlairSettingsSaveContext(options?: {
 }
 
 function createViewerFlairSnapshotContext(options?: {
+  currentUsername?: string | null;
   currentUserResponses?: Array<
     | {
         username?: string;
@@ -757,9 +735,11 @@ function createViewerFlairSnapshotContext(options?: {
     | Error
   >;
 }) {
+  const currentUsername = options?.currentUsername ?? null;
   const currentUserResponses = options?.currentUserResponses ?? [];
   const usernameUserResponses = options?.usernameUserResponses ?? [];
   let currentUserCallCount = 0;
+  let currentUsernameCallCount = 0;
   let usernameLookupCallCount = 0;
   let flairLookupCallCount = 0;
 
@@ -809,6 +789,7 @@ function createViewerFlairSnapshotContext(options?: {
 
   return {
     context: {
+      subredditId: 't5_example',
       reddit: {
         async getCurrentUser() {
           const response = currentUserResponses[Math.min(currentUserCallCount, currentUserResponses.length - 1)];
@@ -816,6 +797,10 @@ function createViewerFlairSnapshotContext(options?: {
           return toMockUser(response, () => {
             flairLookupCallCount += 1;
           });
+        },
+        async getCurrentUsername() {
+          currentUsernameCallCount += 1;
+          return currentUsername;
         },
         async getUserByUsername() {
           const response = usernameUserResponses[Math.min(usernameLookupCallCount, usernameUserResponses.length - 1)];
@@ -829,11 +814,205 @@ function createViewerFlairSnapshotContext(options?: {
     get currentUserCallCount() {
       return currentUserCallCount;
     },
+    get currentUsernameCallCount() {
+      return currentUsernameCallCount;
+    },
     get usernameLookupCallCount() {
       return usernameLookupCallCount;
     },
     get flairLookupCallCount() {
       return flairLookupCallCount;
+    },
+  };
+}
+
+function createHubDashboardContext(options?: {
+  subredditId?: string;
+  subredditName?: string;
+  userId?: string;
+  currentUsername?: string | null;
+  currentUserResponses?: Array<
+    | {
+        username?: string;
+        id?: string;
+        createdAt?: Date;
+        commentKarma?: number | null;
+        linkKarma?: number | null;
+        flair?:
+          | {
+              flairText?: string;
+              flairCssClass?: string;
+              flairTemplateId?: string;
+            }
+          | null
+          | Error;
+      }
+    | null
+    | Error
+  >;
+  record?: Record<string, unknown> | null;
+  hashValues?: Record<string, string>;
+}) {
+  const subredditId = options?.subredditId ?? 't5_example';
+  const subredditName = options?.subredditName ?? 'example';
+  const userId = options?.userId ?? 't2_viewer';
+  const record = options?.record ? buildRecord(options.record) : null;
+  const redisStore = new Map<string, string>();
+  const hashStore = new Map<string, Map<string, string>>();
+  const zsetStore = new Map<string, Map<string, number>>();
+  let currentUserCallCount = 0;
+  let currentUsernameCallCount = 0;
+
+  if (record) {
+    redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
+    ensureTestZSet(zsetStore, historyDateIndexTestKey(subredditId)).set(
+      record.id,
+      new Date(record.submittedAt).getTime()
+    );
+    ensureTestZSet(zsetStore, historyByUserIndexTestKey(subredditId, record.username)).set(
+      record.id,
+      new Date(record.submittedAt).getTime()
+    );
+  }
+  if (options?.hashValues) {
+    hashStore.set(subredditConfigTestKey(subredditId), new Map(Object.entries(options.hashValues)));
+  }
+
+  return {
+    context: {
+      subredditId,
+      subredditName,
+      userId,
+      reddit: {
+        async getCurrentUser() {
+          const responses = options?.currentUserResponses ?? [];
+          const response = responses[Math.min(currentUserCallCount, responses.length - 1)];
+          currentUserCallCount += 1;
+          if (response instanceof Error) {
+            throw response;
+          }
+          if (!response) {
+            return null;
+          }
+          return {
+            username: response.username ?? '',
+            id: response.id ?? userId,
+            createdAt: response.createdAt ?? new Date('2026-03-01T12:00:00.000Z'),
+            commentKarma: response.commentKarma ?? 0,
+            linkKarma: response.linkKarma ?? 0,
+            async getUserFlairBySubreddit() {
+              if (response.flair instanceof Error) {
+                throw response.flair;
+              }
+              if (!response.flair) {
+                return undefined;
+              }
+              return {
+                flairText: response.flair.flairText ?? '',
+                flairCssClass: response.flair.flairCssClass ?? '',
+                flairTemplateId: response.flair.flairTemplateId ?? '',
+              };
+            },
+          };
+        },
+        async getCurrentUsername() {
+          currentUsernameCallCount += 1;
+          return options?.currentUsername ?? null;
+        },
+      },
+      settings: {
+        async get() {
+          return undefined;
+        },
+      },
+      redis: {
+        async get(key: string) {
+          return redisStore.get(key) ?? null;
+        },
+        async mGet(keys: string[]) {
+          return keys.map((key) => redisStore.get(key) ?? null);
+        },
+        async set(key: string, value: string) {
+          redisStore.set(key, value);
+          return 'OK';
+        },
+        async del(...keys: string[]) {
+          for (const key of keys) {
+            redisStore.delete(key);
+            hashStore.delete(key);
+            zsetStore.delete(key);
+          }
+          return keys.length;
+        },
+        async hGetAll(key: string) {
+          return Object.fromEntries((hashStore.get(key) ?? new Map()).entries());
+        },
+        async hGet(key: string, field: string) {
+          return hashStore.get(key)?.get(field) ?? null;
+        },
+        async hSet(key: string, entries: Record<string, string>) {
+          const hash = ensureTestHash(hashStore, key);
+          for (const [field, value] of Object.entries(entries)) {
+            hash.set(field, value);
+          }
+          return Object.keys(entries).length;
+        },
+        async hDel(key: string, fields: string[]) {
+          const hash = ensureTestHash(hashStore, key);
+          let removed = 0;
+          for (const field of fields) {
+            if (hash.delete(field)) {
+              removed += 1;
+            }
+          }
+          return removed;
+        },
+        async zAdd(key: string, entry: { member: string; score: number }) {
+          ensureTestZSet(zsetStore, key).set(entry.member, entry.score);
+          return 1;
+        },
+        async zRange(
+          key: string,
+          start: number,
+          stop: number,
+          options?: { by?: 'score' | 'rank'; reverse?: boolean }
+        ) {
+          const zset = ensureTestZSet(zsetStore, key);
+          let entries = Array.from(zset.entries()).map(([member, score]) => ({ member, score }));
+          if (options?.by === 'score') {
+            entries = entries
+              .filter((entry) => entry.score >= start && entry.score <= stop)
+              .sort((left, right) => left.score - right.score);
+          } else {
+            entries = entries.sort((left, right) => (options?.reverse ? right.score - left.score : left.score - right.score));
+            const endIndex = stop < 0 ? entries.length : stop + 1;
+            entries = entries.slice(Math.max(0, start), Math.max(0, endIndex));
+          }
+          return entries;
+        },
+        async zRem(key: string, members: string[]) {
+          const zset = ensureTestZSet(zsetStore, key);
+          let removed = 0;
+          for (const member of members) {
+            if (zset.delete(member)) {
+              removed += 1;
+            }
+          }
+          return removed;
+        },
+        async zCard(key: string) {
+          return ensureTestZSet(zsetStore, key).size;
+        },
+      },
+    },
+    redisStore,
+    hashStore,
+    zsetStore,
+    get currentUserCallCount() {
+      return currentUserCallCount;
+    },
+    get currentUsernameCallCount() {
+      return currentUsernameCallCount;
     },
   };
 }
@@ -971,6 +1150,14 @@ function userLatestTestKey(subredditId: string, username: string): string {
   return `${subredditPrefixKey(subredditId)}:user:${normalizeUsername(username)}:latest`;
 }
 
+function userPendingByIdTestKey(subredditId: string, userId: string): string {
+  return `${subredditPrefixKey(subredditId)}:user-id:${String(userId ?? '').trim()}:pending`;
+}
+
+function userLatestByIdTestKey(subredditId: string, userId: string): string {
+  return `${subredditPrefixKey(subredditId)}:user-id:${String(userId ?? '').trim()}:latest`;
+}
+
 function subredditConfigTestKey(subredditId: string): string {
   return `${subredditPrefixKey(subredditId)}:config`;
 }
@@ -1018,6 +1205,15 @@ function ensureTestZSet(store: Map<string, Map<string, number>>, key: string) {
     store.set(key, zset);
   }
   return zset;
+}
+
+function ensureTestHash(store: Map<string, Map<string, string>>, key: string) {
+  let hash = store.get(key);
+  if (!hash) {
+    hash = new Map<string, string>();
+    store.set(key, hash);
+  }
+  return hash;
 }
 
 function seedApprovedIndexMembers(
@@ -1647,7 +1843,6 @@ test('refreshConfiguredFlairTemplateCache refreshes additional approval flair me
     saveContext.context as never,
     't5_example',
     'example',
-    'mod_one',
     {
       ...buildRuntimeConfig(),
       flairTemplateId: 'ABC-123',
@@ -1964,82 +2159,59 @@ test('getCurrentModeratorPermissionList reuses cached permissions after a transi
   assert.deepEqual(first, ['access', 'config']);
   assert.deepEqual(second, ['access', 'config']);
   assert.equal(lookupContext.permissionCallCount, 2);
-  assert.equal(lookupContext.broadCallCount, 0);
-  assert.equal(lookupContext.filteredCallCount, 0);
 });
 
-test('getModeratorAccessSnapshot falls back to cached moderator role when moderator listings fail', async () => {
+test('getModeratorAccessSnapshot falls back to cached moderator permissions when live permission lookup fails', async () => {
   const redisStore = new Map<string, string>();
   const firstLookupContext = createModeratorLookupContext({
     redisStore,
-    permissionResponses: [new Error('reddit 500')],
-    broadModeratorResponses: [[{ username: 'mod_one' }]],
-    filteredModeratorResponses: [new Error('reddit 500')],
+    permissionResponses: [['access', 'config']],
   });
   const secondLookupContext = createModeratorLookupContext({
     redisStore,
-    permissionResponses: [new Error('reddit 500'), new Error('reddit 500')],
-    broadModeratorResponses: [new Error('reddit 500')],
-    filteredModeratorResponses: [new Error('reddit 500')],
+    permissionResponses: [new Error('reddit 500')],
   });
-  const originalConsoleLog = console.log;
-  console.log = () => {};
 
-  try {
-    const first = await getModeratorAccessSnapshot(firstLookupContext.context as never, 'ExampleSub', 'mod_one');
-    const second = await getModeratorAccessSnapshot(secondLookupContext.context as never, 'ExampleSub', 'mod_one');
+  const first = await getModeratorAccessSnapshot(firstLookupContext.context as never, 'ExampleSub', 'mod_one');
+  const second = await getModeratorAccessSnapshot(secondLookupContext.context as never, 'ExampleSub', 'mod_one');
 
-    assert.equal(first.isModerator, true);
-    assert.deepEqual(first.permissions, []);
-    assert.equal(second.isModerator, true);
-    assert.deepEqual(second.permissions, []);
-    assert.equal(first.state, 'confirmed');
-    assert.equal(second.state, 'cached');
-    assert.equal(firstLookupContext.permissionCallCount, 1);
-    assert.equal(firstLookupContext.broadCallCount, 1);
-    assert.equal(firstLookupContext.filteredCallCount, 1);
-    assert.equal(secondLookupContext.permissionCallCount, 1);
-    assert.equal(secondLookupContext.broadCallCount, 0);
-    assert.equal(secondLookupContext.filteredCallCount, 0);
-  } finally {
-    console.log = originalConsoleLog;
-  }
+  assert.equal(first.isModerator, true);
+  assert.deepEqual(first.permissions, ['access', 'config']);
+  assert.equal(second.isModerator, true);
+  assert.deepEqual(second.permissions, ['access', 'config']);
+  assert.equal(first.state, 'confirmed');
+  assert.equal(second.state, 'cached');
+  assert.equal(firstLookupContext.permissionCallCount, 1);
+  assert.equal(secondLookupContext.permissionCallCount, 1);
 });
 
-test('getModeratorAccessSnapshot prefers the filtered moderator lookup and skips broad listing on success', async () => {
+test('getModeratorAccessSnapshot returns unknown when permission lookup is unavailable', async () => {
   const lookupContext = createModeratorLookupContext({
     permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
-    filteredModeratorResponses: [[{ username: 'mod_one' }]],
-    broadModeratorResponses: [[{ username: 'mod_one' }]],
   });
 
   const access = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
 
-  assert.equal(access.isModerator, true);
-  assert.equal(access.state, 'confirmed');
-  assert.equal(lookupContext.filteredCallCount, 1);
-  assert.equal(lookupContext.broadCallCount, 0);
+  assert.equal(access.isModerator, false);
+  assert.equal(access.state, 'unknown');
+  assert.equal(access.permissionState, 'unknown');
 });
 
-test('getModeratorAccessSnapshot does not fall back to broad listing when the filtered lookup confirms absence', async () => {
+test('getModeratorAccessSnapshot returns denied when permission lookup confirms no moderator permissions', async () => {
   const lookupContext = createModeratorLookupContext({
-    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
-    filteredModeratorResponses: [[]],
-    broadModeratorResponses: [[{ username: 'mod_one' }]],
+    currentUsername: 'mod_two',
+    permissionResponses: [[]],
   });
 
   const access = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_two');
 
   assert.equal(access.isModerator, false);
   assert.equal(access.state, 'denied');
-  assert.equal(lookupContext.filteredCallCount, 1);
-  assert.equal(lookupContext.broadCallCount, 0);
 });
 
 test('getModeratorAccessSnapshot memoizes repeated lookups within the same request context', async () => {
   const lookupContext = createModeratorLookupContext({
-    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 500')],
-    filteredModeratorResponses: [[{ username: 'mod_one' }]],
+    permissionResponses: [['access']],
   });
 
   const first = await getModeratorAccessSnapshot(lookupContext.context as never, 'ExampleSub', 'mod_one');
@@ -2048,15 +2220,11 @@ test('getModeratorAccessSnapshot memoizes repeated lookups within the same reque
   assert.equal(first.isModerator, true);
   assert.equal(second.isModerator, true);
   assert.equal(lookupContext.permissionCallCount, 1);
-  assert.equal(lookupContext.filteredCallCount, 1);
-  assert.equal(lookupContext.broadCallCount, 0);
 });
 
 test('assertCanReview returns a temporary error when moderator lookup is transiently unavailable', async () => {
   const lookupContext = createModeratorLookupContext({
     permissionResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
-    filteredModeratorResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
-    broadModeratorResponses: [new Error('2 UNKNOWN: http request failed with http status 500')],
   });
   const originalConsoleLog = console.log;
   let loggedMessages = 0;
@@ -2078,6 +2246,125 @@ test('assertCanReview returns a temporary error when moderator lookup is transie
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('getHubModeratorUiState returns a visible button for confirmed review moderators', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [['access']],
+    pendingCount: 7,
+  });
+
+  const state = await getHubModeratorUiState(lookupContext.context as never);
+
+  assert.deepEqual(state, {
+    buttonVisible: true,
+    isModerator: true,
+    canReview: true,
+    pendingCount: 7,
+  });
+  assert.equal(lookupContext.permissionCallCount, 1);
+});
+
+test('getHubModeratorUiState keeps the button hidden during moderator lookup backoff', async () => {
+  const redisStore = new Map<string, string>([
+    ['subreddit:t5_example:moderator-ui:unavailable:t2_mod', '1'],
+  ]);
+  const lookupContext = createModeratorLookupContext({
+    redisStore,
+    permissionResponses: [['access']],
+    pendingCount: 5,
+  });
+
+  const state = await getHubModeratorUiState(lookupContext.context as never);
+
+  assert.deepEqual(state, {
+    buttonVisible: false,
+    isModerator: false,
+    canReview: false,
+    pendingCount: 0,
+  });
+  assert.equal(lookupContext.permissionCallCount, 0);
+});
+
+test('getHubModeratorUiState keeps the button hidden when permission lookup is unavailable', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: HTTP request failed with http status 403')],
+    pendingCount: 5,
+  });
+
+  const state = await getHubModeratorUiState(lookupContext.context as never);
+
+  assert.deepEqual(state, {
+    buttonVisible: false,
+    isModerator: false,
+    canReview: false,
+    pendingCount: 0,
+  });
+  assert.equal(lookupContext.permissionCallCount, 1);
+});
+
+test('loadHubDashboard uses the userId latest pointer when viewer identity is unavailable', async () => {
+  const record = buildRecord({
+    id: 'verification_approved',
+    username: 'dcltw',
+    userId: 't2_viewer',
+    status: 'approved',
+    reviewedAt: '2026-03-11T12:00:00.000Z',
+    submittedAt: '2026-03-11T12:00:00.000Z',
+  });
+  const hubContext = createHubDashboardContext({
+    userId: 't2_viewer',
+    currentUserResponses: [
+      new Error(
+        '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/user/dcltw/about?raw_json=1 failed with error: Get "https://oauth.reddit.com/user/dcltw/about?raw_json=1": httpbp.ClientError: http status 403 Forbidden'
+      ),
+    ],
+    record,
+  });
+  hubContext.redisStore.set(userLatestByIdTestKey('t5_example', 't2_viewer'), record.id);
+
+  const dashboard = await loadHubDashboard(hubContext.context as never);
+
+  assert.equal(dashboard.viewerUsername, 'dcltw');
+  assert.equal(dashboard.userLatest?.id, record.id);
+  assert.equal(dashboard.viewerShouldDisplayVerified, true);
+  assert.equal(dashboard.viewerFlairCheckSource, 'viewer-snapshot:unavailable');
+  assert.equal(hubContext.currentUserCallCount, 1);
+  assert.equal(hubContext.currentUsernameCallCount, 0);
+});
+
+test('loadHubDashboard backfills userId pointers from legacy username pointers', async () => {
+  const record = buildRecord({
+    id: 'verification_pending',
+    username: 'legacy_user',
+    userId: 't2_legacy',
+    status: 'pending',
+  });
+  const hubContext = createHubDashboardContext({
+    userId: 't2_legacy',
+    currentUsername: 'legacy_user',
+    currentUserResponses: [
+      {
+        username: 'legacy_user',
+        id: 't2_legacy',
+      },
+    ],
+    record,
+  });
+  hubContext.redisStore.set(userLatestTestKey('t5_example', 'legacy_user'), record.id);
+  hubContext.redisStore.set(userPendingTestKey('t5_example', 'legacy_user'), record.id);
+
+  const dashboard = await loadHubDashboard(hubContext.context as never);
+
+  assert.equal(dashboard.userLatest?.id, record.id);
+  assert.equal(
+    hubContext.redisStore.get(userLatestByIdTestKey('t5_example', 't2_legacy')),
+    record.id
+  );
+  assert.equal(
+    hubContext.redisStore.get(userPendingByIdTestKey('t5_example', 't2_legacy')),
+    record.id
+  );
 });
 
 test('clearExpiredPendingClaim clears stale claims', () => {
@@ -2261,7 +2548,7 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
   }
 });
 
-test('getViewerFlairSnapshot prefers the current viewer over a username lookup', async () => {
+test('getViewerFlairSnapshot uses the current viewer identity only', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
       {
@@ -2278,8 +2565,7 @@ test('getViewerFlairSnapshot prefers the current viewer over a username lookup',
 
   const snapshot = await getViewerFlairSnapshot(
     snapshotContext.context as never,
-    'Bulges',
-    'Ornery_Locksmith_176'
+    'Bulges'
   );
 
   assert.deepEqual(snapshot, {
@@ -2287,6 +2573,8 @@ test('getViewerFlairSnapshot prefers the current viewer over a username lookup',
     flairCssClass: 'verified',
     flairTemplateId: 'abc123',
     userId: 't2_viewer',
+    lookupState: 'confirmed_present',
+    error: null,
   });
   assert.equal(snapshotContext.currentUserCallCount, 1);
   assert.equal(snapshotContext.usernameLookupCallCount, 0);
@@ -2317,8 +2605,7 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
   try {
     const snapshot = await getViewerFlairSnapshot(
       snapshotContext.context as never,
-      'Bulges',
-      'Ornery_Locksmith_176'
+      'Bulges'
     );
 
     assert.deepEqual(snapshot, {
@@ -2326,9 +2613,50 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
       flairCssClass: 'verified',
       flairTemplateId: 'abc123',
       userId: 't2_viewer',
+      lookupState: 'confirmed_present',
+      error: null,
     });
     assert.equal(snapshotContext.currentUserCallCount, 2);
     assert.equal(snapshotContext.usernameLookupCallCount, 0);
+    assert.equal(consoleLogCallCount, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('getViewerFlairSnapshot returns unavailable when the current viewer flair lookup is forbidden', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      {
+        username: 'HLmikemcd',
+        id: 't2_viewer',
+        flair: new Error(
+          '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1 failed with error: Get "https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1": httpbp.ClientError: http status 403 Forbidden'
+        ),
+      },
+    ],
+  });
+  const originalConsoleLog = console.log;
+  let consoleLogCallCount = 0;
+  console.log = () => {
+    consoleLogCallCount += 1;
+  };
+
+  try {
+    const snapshot = await getViewerFlairSnapshot(snapshotContext.context as never, 'penis');
+
+    assert.deepEqual(snapshot, {
+      flairText: '',
+      flairCssClass: '',
+      flairTemplateId: '',
+      userId: 't2_viewer',
+      lookupState: 'unavailable',
+      error:
+        '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1 failed with error: Get "https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1": httpbp.ClientError: http status 403 Forbidden',
+    });
+    assert.equal(snapshotContext.currentUserCallCount, 1);
+    assert.equal(snapshotContext.usernameLookupCallCount, 0);
+    assert.equal(snapshotContext.flairLookupCallCount, 1);
     assert.equal(consoleLogCallCount, 0);
   } finally {
     console.log = originalConsoleLog;
@@ -2339,7 +2667,6 @@ test('checkVerificationFlair matches additional approval flair text when templat
   const result = await checkVerificationFlair(
     {} as never,
     'example',
-    'example_user',
     {
       ...buildRuntimeConfig(),
       flairTemplateId: 'abc-123',
@@ -2353,6 +2680,8 @@ test('checkVerificationFlair matches additional approval flair text when templat
       flairCssClass: '',
       flairTemplateId: '',
       userId: 't2_example',
+      lookupState: 'confirmed_present',
+      error: null,
     }
   );
 
@@ -2362,6 +2691,30 @@ test('checkVerificationFlair matches additional approval flair text when templat
     detectedTemplateId: 'def-456',
     source: 'viewer-snapshot:additional-text-match',
     error: null,
+  });
+});
+
+test('checkVerificationFlair preserves unavailable viewer snapshot lookups', async () => {
+  const result = await checkVerificationFlair(
+    {} as never,
+    'example',
+    buildRuntimeConfig(),
+    {
+      flairText: '',
+      flairCssClass: '',
+      flairTemplateId: '',
+      userId: 't2_example',
+      lookupState: 'unavailable',
+      error: '403 Forbidden',
+    }
+  );
+
+  assert.deepEqual(result, {
+    verified: false,
+    configuredTemplateId: 'abc123',
+    detectedTemplateId: '',
+    source: 'viewer-snapshot:unavailable',
+    error: '403 Forbidden',
   });
 });
 
@@ -2463,6 +2816,17 @@ test('shouldViewerDisplayVerifiedState lets manual CSS flair matches override de
   );
 });
 
+test('shouldViewerDisplayVerifiedState keeps approved users verified when flair lookup is unavailable', () => {
+  assert.equal(
+    shouldViewerDisplayVerifiedState(
+      { verified: false, source: 'viewer-snapshot:unavailable' },
+      { status: 'approved' } as never,
+      false
+    ),
+    true
+  );
+});
+
 test('isViewerAwaitingFlairPropagation is only true for recent approved records that have not confirmed flair yet', async () => {
   await withFixedNow('2026-03-28T12:00:00.000Z', async (nowMs) => {
     const recentApproved = {
@@ -2476,12 +2840,21 @@ test('isViewerAwaitingFlairPropagation is only true for recent approved records 
       submittedAt: new Date(nowMs - 6 * 60_000).toISOString(),
     };
 
-    assert.equal(isViewerAwaitingFlairPropagation({ verified: false }, recentApproved as never, nowMs), true);
-    assert.equal(isViewerAwaitingFlairPropagation({ verified: false }, staleApproved as never, nowMs), false);
-    assert.equal(isViewerAwaitingFlairPropagation({ verified: true }, recentApproved as never, nowMs), false);
+    assert.equal(
+      isViewerAwaitingFlairPropagation({ verified: false, source: 'viewer-snapshot:no-match' }, recentApproved as never, nowMs),
+      true
+    );
+    assert.equal(
+      isViewerAwaitingFlairPropagation({ verified: false, source: 'viewer-snapshot:no-match' }, staleApproved as never, nowMs),
+      false
+    );
+    assert.equal(
+      isViewerAwaitingFlairPropagation({ verified: true, source: 'viewer-snapshot:template-match' }, recentApproved as never, nowMs),
+      false
+    );
     assert.equal(
       isViewerAwaitingFlairPropagation(
-        { verified: false },
+        { verified: false, source: 'viewer-snapshot:no-match' },
         {
           status: 'pending',
           reviewedAt: new Date(nowMs - 30_000).toISOString(),
@@ -2492,57 +2865,6 @@ test('isViewerAwaitingFlairPropagation is only true for recent approved records 
       false
     );
   });
-});
-
-test('getViewerFlairSnapshot retries transient reddit 5xx username lookups without logging them', async () => {
-  const snapshotContext = createViewerFlairSnapshotContext({
-    currentUserResponses: [
-      {
-        username: 'DifferentViewer',
-        id: 't2_other',
-      },
-    ],
-    usernameUserResponses: [
-      new Error(
-        '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/user/HLmikemcd/about?raw_json=1 failed with error: Get "https://oauth.reddit.com/user/HLmikemcd/about?raw_json=1": httpbp.ClientError: http status 500 Internal Server Error: {"message":"Internal Server Error","error":500}'
-      ),
-      {
-        username: 'HLmikemcd',
-        id: 't2_viewer',
-        flair: {
-          flairText: 'Verified',
-          flairCssClass: 'verified',
-          flairTemplateId: 'abc123',
-        },
-      },
-    ],
-  });
-  const originalConsoleLog = console.log;
-  let consoleLogCallCount = 0;
-  console.log = () => {
-    consoleLogCallCount += 1;
-  };
-
-  try {
-    const snapshot = await getViewerFlairSnapshot(
-      snapshotContext.context as never,
-      'penis',
-      'HLmikemcd'
-    );
-
-    assert.deepEqual(snapshot, {
-      flairText: 'Verified',
-      flairCssClass: 'verified',
-      flairTemplateId: 'abc123',
-      userId: 't2_viewer',
-    });
-    assert.equal(snapshotContext.currentUserCallCount, 2);
-    assert.equal(snapshotContext.usernameLookupCallCount, 2);
-    assert.equal(snapshotContext.flairLookupCallCount, 1);
-    assert.equal(consoleLogCallCount, 0);
-  } finally {
-    console.log = originalConsoleLog;
-  }
 });
 
 test('sendUserModmailWithFallback rejects invalid recipients before calling modmail APIs', async () => {
