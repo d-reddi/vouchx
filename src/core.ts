@@ -314,16 +314,24 @@ type ModNoteStepResult = {
   reason?: string;
 };
 
+type ManualBlockOutcome = {
+  status: 'blocked' | 'already_blocked' | 'failed';
+  username?: string;
+  reason?: string;
+};
+
 type ActionResult = {
   outcome: ActionOutcome;
   applied: boolean;
   outcomeReason?: string;
   username?: string;
+  denyReasonLabel?: string;
   flair: FlairStepResult;
   modmail: ModmailStepResult;
   modNote: ModNoteStepResult;
   userBlocked?: boolean;
   denialCount?: number;
+  manualBlockOutcome?: ManualBlockOutcome;
 };
 
 type DeleteDataResult = {
@@ -2761,7 +2769,8 @@ async function denyVerification(
   context: Devvit.Context,
   verificationId: string,
   reason: DenyReason,
-  moderatorNotes?: string
+  moderatorNotes?: string,
+  options?: { blockUser?: boolean }
 ): Promise<ActionResult> {
   const moderator = await context.reddit.getCurrentUsername();
   if (!moderator) {
@@ -2868,8 +2877,10 @@ async function denyVerification(
       })(),
     ]);
 
+    const denyReasonLabel = getDenyReasonDisplayLabel(config, reason);
     const denialCount = await incrementDenialCount(context, subredditId, record.username);
     let userBlocked = false;
+    let manualBlockOutcome: ManualBlockOutcome | undefined;
     if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
       const blockedEntry: BlockedUserEntry = {
         username: record.username,
@@ -2896,6 +2907,28 @@ async function denyVerification(
         }
       }
     }
+    if (options?.blockUser && !userBlocked) {
+      try {
+        const blockResult = await setManualBlockedUserEntry(
+          context,
+          subredditId,
+          subredditName,
+          normalizeUsernameStrict(record.username),
+          moderator,
+          denialCount,
+          false
+        );
+        manualBlockOutcome = {
+          status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
+          username: blockResult.entry.username,
+        };
+      } catch (error) {
+        manualBlockOutcome = {
+          status: 'failed',
+          reason: errorText(error),
+        };
+      }
+    }
 
     try {
       await appendAuditLog(context, {
@@ -2905,8 +2938,16 @@ async function denyVerification(
         actor: moderator,
         action: 'denied',
         verificationId: reviewedRecord.id,
-        notes: `${getDenyReasonDisplayLabel(config, reason)}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
+        notes: `${denyReasonLabel}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
           userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
+        }${
+          manualBlockOutcome?.status === 'blocked'
+            ? ' | Blocked by moderator during denial.'
+            : manualBlockOutcome?.status === 'already_blocked'
+              ? ' | User was already blocked.'
+              : manualBlockOutcome?.status === 'failed'
+                ? ` | Block request failed: ${manualBlockOutcome.reason ?? 'unknown error'}`
+                : ''
         }`,
       });
     } catch (error) {
@@ -2917,11 +2958,13 @@ async function denyVerification(
       outcome: 'completed',
       applied: true,
       username: reviewedRecord.username,
+      denyReasonLabel,
       flair: { status: 'skipped', reason: 'not applicable' },
       modmail,
       modNote,
       userBlocked,
       denialCount,
+      manualBlockOutcome,
     };
   });
 }
@@ -5361,24 +5404,51 @@ async function blockUserForModerator(
     throw new Error(`Unable to validate u/${normalizedUsername}. ${errorText(error)}`);
   }
 
-  const existing = await getBlockedUser(context, subredditId, normalizedUsername);
+  const deniedCount = await getStoredDenialCount(context, subredditId, normalizedUsername);
+
+  return await setManualBlockedUserEntry(
+    context,
+    subredditId,
+    subredditName,
+    normalizedUsername,
+    moderator,
+    deniedCount,
+    true
+  );
+}
+
+async function setManualBlockedUserEntry(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  normalizedUsername: string,
+  moderator: string,
+  deniedCount: number,
+  syncDenialCountHash: boolean
+): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
+  const canonicalUsername = normalizeUsernameStrict(normalizedUsername);
+  if (!canonicalUsername) {
+    throw new Error('A valid username is required.');
+  }
+
+  const existing = await getBlockedUser(context, subredditId, canonicalUsername);
   if (existing) {
     return { alreadyBlocked: true, entry: existing };
   }
 
-  const deniedCount = await getStoredDenialCount(context, subredditId, normalizedUsername);
-
   const entry: BlockedUserEntry = {
-    username: normalizedUsername,
+    username: canonicalUsername,
     blockedAt: new Date().toISOString(),
     deniedCount,
     reason: 'Blocked by moderator',
   };
 
-  if (deniedCount > 0) {
-    await context.redis.hSet(denialCountKey(subredditId), { [normalizedUsername]: `${deniedCount}` });
-  } else {
-    await context.redis.hDel(denialCountKey(subredditId), [normalizedUsername, `u/${normalizedUsername}`]);
+  if (syncDenialCountHash) {
+    if (deniedCount > 0) {
+      await context.redis.hSet(denialCountKey(subredditId), { [canonicalUsername]: `${deniedCount}` });
+    } else {
+      await context.redis.hDel(denialCountKey(subredditId), [canonicalUsername, `u/${canonicalUsername}`]);
+    }
   }
   await setBlockedUser(context, subredditId, entry);
 

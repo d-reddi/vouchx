@@ -3435,6 +3435,25 @@ test('denyVerification keeps valid denials working and exposes the denied userna
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
 });
 
+test('denyVerification can manually block during denial without re-validating the user', async () => {
+  const reviewContext = createReviewActionContext();
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied', {
+    blockUser: true,
+  });
+  const blockedEntryRaw = reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.get('example_user');
+  const blockedEntry = blockedEntryRaw ? JSON.parse(blockedEntryRaw) : null;
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.applied, true);
+  assert.equal(result.manualBlockOutcome?.status, 'blocked');
+  assert.equal(result.manualBlockOutcome?.username, reviewContext.record.username);
+  assert.equal(blockedEntry?.username, reviewContext.record.username);
+  assert.equal(blockedEntry?.reason, 'Blocked by moderator');
+  assert.equal(reviewContext.getUserByUsernameCalls.length, 1);
+  assert.equal(reviewContext.getUserByUsernameCalls[0], reviewContext.record.username);
+});
+
 test('denyVerification auto-blocks once the configured denial threshold is reached', async () => {
   const reviewContext = createReviewActionContext({
     maxDenialsBeforeBlock: 2,

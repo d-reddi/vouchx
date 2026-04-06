@@ -323,12 +323,14 @@ async function sendRefreshSignals(appContext: Devvit.Context): Promise<void> {
 function sendFastModRefreshResponse(
   res: express.Response,
   appContext: Devvit.Context,
-  toast: ToastPayload
+  toast: ToastPayload,
+  extras?: Record<string, unknown>
 ): void {
   void sendRefreshSignals(appContext);
   res.json({
     realtimeChannel: modRealtimeChannel(appContext),
     refreshRequested: true,
+    ...(extras ?? {}),
     toast,
   });
 }
@@ -588,40 +590,12 @@ app.post('/api/mod/deny', async (req, res) => {
       throw httpError(400, 'Select a valid denial reason.');
     }
     const appContext = currentContext();
-    const result = await denyVerification(appContext, verificationId, reason, moderatorNotes);
-    let requestedBlockOutcome:
-      | { status: 'blocked' | 'already_blocked'; username: string }
-      | { status: 'failed'; reason: string }
-      | null = null;
-    if (blockUser && result.applied && !result.userBlocked) {
-      if (!result.username) {
-        requestedBlockOutcome = { status: 'failed', reason: 'Denied user could not be resolved for blocking.' };
-      } else {
-        try {
-          const { moderator, subredditName } = await requireModeratorIdentity(appContext);
-          const blockResult = await blockUserForModerator(
-            appContext,
-            sanitizeSubredditId(appContext.subredditId),
-            subredditName,
-            result.username,
-            moderator
-          );
-          requestedBlockOutcome = {
-            status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
-            username: blockResult.entry.username,
-          };
-        } catch (error) {
-          requestedBlockOutcome = { status: 'failed', reason: errorText(error) };
-        }
-      }
-    }
-    if (result.outcome !== 'validation_retry') {
-      await sendRefreshSignals(appContext);
-    }
-    const payload = await buildModPayload(appContext);
+    const result = await denyVerification(appContext, verificationId, reason, moderatorNotes, {
+      blockUser,
+    });
     if (result.outcome === 'validation_retry') {
       res.json({
-        ...payload,
+        realtimeChannel: modRealtimeChannel(appContext),
         toast: {
           text: "Couldn't confirm the user account right now. Please retry.",
           tone: 'error',
@@ -630,29 +604,31 @@ app.post('/api/mod/deny', async (req, res) => {
       return;
     }
     if (result.outcome === 'invalid_account_removed') {
-      res.json({
-        ...payload,
-        toast: {
-          text: 'User no longer exists or is suspended. Verification removed from review.',
-          tone: 'info',
+      sendFastModRefreshResponse(res, appContext, {
+        text: 'User no longer exists or is suspended. Verification removed from review.',
+        tone: 'info',
+      }, {
+        mutation: {
+          type: 'removePending',
+          verificationId,
         },
       });
       return;
     }
     let blockText = result.userBlocked ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.` : '';
     let blockFailed = false;
-    if (requestedBlockOutcome) {
-      if (requestedBlockOutcome.status === 'failed') {
+    if (result.manualBlockOutcome) {
+      if (result.manualBlockOutcome.status === 'failed') {
         if (result.userBlocked) {
           blockText = ` User reached ${result.denialCount ?? 3} denials and is now blocked.`;
         } else {
-          blockText = ` Block failed (${requestedBlockOutcome.reason}).`;
+          blockText = ` Block failed (${result.manualBlockOutcome.reason}).`;
           blockFailed = true;
         }
-      } else if (requestedBlockOutcome.status === 'blocked' || result.userBlocked) {
-        blockText = ` Blocked u/${requestedBlockOutcome.username} from submitting verification.`;
+      } else if (result.manualBlockOutcome.status === 'blocked' || result.userBlocked) {
+        blockText = ` Blocked u/${result.manualBlockOutcome.username} from submitting verification.`;
       } else {
-        blockText = ` u/${requestedBlockOutcome.username} is already blocked.`;
+        blockText = ` u/${result.manualBlockOutcome.username} is already blocked.`;
       }
     }
     const success = result.modmail.status !== 'failed' && result.modNote.status !== 'failed' && !blockFailed;
@@ -660,14 +636,13 @@ app.post('/api/mod/deny', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
-    const denyReasonLabel =
-      payload.state.config.denyReasons.find((item) => item.id === reason)?.label?.trim() ||
-      reason.replace(/_/g, ' ');
-    res.json({
-      ...payload,
-      toast: {
-        text: `${success ? 'Denied' : 'Denied with issues'} (${denyReasonLabel}): ${details.join('; ')}.${blockText}`,
-        tone: success ? 'success' : 'error',
+    sendFastModRefreshResponse(res, appContext, {
+      text: `${success ? 'Denied' : 'Denied with issues'} (${result.denyReasonLabel || reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
+      tone: success ? 'success' : 'error',
+    }, {
+      mutation: {
+        type: 'removePending',
+        verificationId,
       },
     });
   } catch (error) {

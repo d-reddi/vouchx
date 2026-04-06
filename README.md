@@ -108,9 +108,14 @@ These background processes help ensure data is kept up to date and not retained 
 Full changelog:  
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
-### v1.3.8
+### v1.3.9
 
+Critical Fix: resolves occasional mod lookup breaking behavior
+
+Updates/Performance Improvements:
+- Block on denial faster repsponse time
 - Adding the Verification hub now auto pins the post
+- Additional Tooltips added for user guidence
 - Updated to devvit 0.12.17
 
 ---
@@ -154,20 +159,3 @@ Full changelog:
 - How to Use This App link added to the hub
 - Clearer status instructions for users
 - Notifications for updates, and critical update messages
-
----
-
-### v1.1.2
-
-- critical fix: initialize the daily retention / validation scheduler from live dashboard loads so subreddit installs do not miss scheduled cleanup
-- refine the moderator panel into a cleaner dark dashboard layout with better mobile workflow and queue prioritization
-- fix stale moderator history / approved / audit views after moderation actions
-- fix history, approved, and audit search consistency after approve, deny, remove, and reopen flows
-- fix history search date-window and pagination behavior so records do not disappear or duplicate after search
-- refresh the verification hub after stale withdraw attempts when the pending request has already been resolved
-- update the optional flair CSS matcher to use substring matching
-
----
-
-### v1.0.10
-- initial public Reddit release
