@@ -24,10 +24,12 @@ import {
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
   approveVerification,
+  cachePositiveModeratorUiState,
   removeApprovedVerificationByModerator,
   reopenDeniedVerification,
   sanitizeSubredditId,
   getModeratorStats,
+  getHubModeratorUiState,
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
@@ -123,8 +125,32 @@ function getStatus(error: unknown): number {
 }
 
 function sendError(res: express.Response, error: unknown): void {
-  const message = errorText(error);
+  const message = sanitizeClientErrorMessage(error);
   res.status(getStatus(error)).json({ error: message });
+}
+
+function looksLikeRawRedditHtmlErrorMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('<body') ||
+    normalized.includes('<style') ||
+    normalized.includes('oauth.reddit.com') ||
+    (normalized.includes('http status 403') && normalized.includes('forbidden'))
+  );
+}
+
+function sanitizeClientErrorMessage(error: unknown, fallbackMessage = 'Request failed. Please retry.'): string {
+  const message = errorText(error).replace(/\s+/g, ' ').trim();
+  if (!message) {
+    return fallbackMessage;
+  }
+  if (looksLikeRawRedditHtmlErrorMessage(message) || shouldIgnoreDevvitLogStreamAuthRejection(error)) {
+    return fallbackMessage;
+  }
+  return message;
 }
 
 function toSettingsValidationResponse(error?: string): SettingsValidationResponse {
@@ -198,6 +224,7 @@ async function requireModerator(appContext: Devvit.Context): Promise<{ moderator
 async function requireReviewAccess(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
   const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
   await assertCanReview(appContext, subredditName, moderator, access);
+  await cachePositiveModeratorUiState(appContext);
   return { moderator, subredditName };
 }
 
@@ -241,6 +268,7 @@ async function buildModPayload(appContext: Devvit.Context) {
   if (!dashboard.canReview) {
     throw httpError(403, 'Only moderators with Manage Users permission can use the moderator panel.');
   }
+  await cachePositiveModeratorUiState(appContext);
   const updateNotice = dashboard.viewerUsername ? await buildModeratorUpdateNotice(appContext, dashboard.viewerUsername) : null;
   return {
     state: {
@@ -328,7 +356,20 @@ app.get('/api/hub/state', async (_req, res) => {
     await ensureValidationScheduleForStateLoad(appContext);
     res.json(await buildHubPayload(appContext));
   } catch (error) {
-    sendError(res, error);
+    res.status(getStatus(error)).json({
+      error: sanitizeClientErrorMessage(error, 'Unable to load verification state right now. Please retry.'),
+    });
+  }
+});
+
+app.get('/api/hub/moderator-ui', async (_req, res) => {
+  try {
+    const appContext = currentContext();
+    res.json(await getHubModeratorUiState(appContext));
+  } catch (error) {
+    res.status(getStatus(error)).json({
+      error: sanitizeClientErrorMessage(error, 'Unable to verify moderator access right now. Please retry.'),
+    });
   }
 });
 

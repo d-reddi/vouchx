@@ -163,6 +163,16 @@ type UserSnapshot = {
   totalKarma: number | null;
 };
 
+type ViewerIdentityState = 'confirmed' | 'anonymous' | 'unavailable';
+
+type ViewerIdentitySnapshot = {
+  state: ViewerIdentityState;
+  userId: string;
+  username: string | null;
+  user: Awaited<ReturnType<Devvit.Context['reddit']['getCurrentUser']>> | null;
+  error: string | null;
+};
+
 type DashboardData = {
   viewerUsername: string | null;
   subredditName: string;
@@ -206,11 +216,15 @@ type FlairVerificationCheck = {
   error: string | null;
 };
 
+type ViewerFlairLookupState = 'confirmed_present' | 'confirmed_absent' | 'unavailable';
+
 type ViewerFlairSnapshot = {
   flairText: string;
   flairCssClass: string;
   flairTemplateId: string;
   userId: string;
+  lookupState: ViewerFlairLookupState;
+  error: string | null;
 };
 
 type ModeratorLookupState = 'confirmed' | 'cached' | 'denied' | 'unknown';
@@ -223,7 +237,15 @@ type ModeratorAccessSnapshot = {
   permissions: string[];
 };
 
+type HubModeratorUiState = {
+  buttonVisible: boolean;
+  isModerator: boolean;
+  canReview: boolean;
+  pendingCount: number;
+};
+
 const moderatorAccessRequestMemoSymbol = Symbol('vouchx.moderatorAccessRequestMemo');
+const viewerIdentityRequestMemoSymbol = Symbol('vouchx.viewerIdentityRequestMemo');
 
 type SubmitVerificationValues = {
   is18Confirmed: boolean;
@@ -654,8 +676,9 @@ const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
 ] as const;
 const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MODERATOR_PERMISSION_CACHE_TTL_MS = 15 * 60 * 1000;
-const MODERATOR_ROLE_CACHE_TTL_MS = 15 * 60 * 1000;
 const MODERATOR_LOOKUP_LOG_COOLDOWN_MS = 15 * 60 * 1000;
+const MODERATOR_UI_POSITIVE_CACHE_TTL_MS = 30 * 60 * 1000;
+const MODERATOR_UI_UNAVAILABLE_BACKOFF_MS = 60 * 1000;
 const USER_VALIDATION_CRON = '30 3 * * *';
 const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
 const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
@@ -1597,8 +1620,8 @@ async function submitVerification(
     member: verificationId,
     score: now.getTime(),
   });
-  await context.redis.set(userPendingKey(subredditId, normalizedUsername), verificationId);
-  await context.redis.set(userLatestKey(subredditId, normalizedUsername), verificationId);
+  await setUserPendingPointer(context, subredditId, normalizedUsername, userId, verificationId);
+  await setUserLatestPointer(context, subredditId, normalizedUsername, userId, verificationId);
 
   await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
   const pendingModmail = await sendPendingSubmissionModmail(context, record, config);
@@ -1681,7 +1704,7 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
 
   const record = await getRecord(context, subredditId, pendingId);
   if (!record || !usernamesEqual(record.username, normalizedUsername) || record.status !== 'pending') {
-    await context.redis.del(userPendingKey(subredditId, normalizedUsername));
+    await deleteUserPendingPointers(context, subredditId, normalizedUsername, context.userId);
     throw new Error('No pending verification request found.');
   }
 
@@ -1822,6 +1845,7 @@ async function purgeUserVerificationData(
   );
   const recordsToDelete: string[] = [];
   const recordsById = new Map<string, VerificationRecord>();
+  const userIdsToClear = new Set<string>();
   for (let index = 0; index < payloads.length; index++) {
     const payload = payloads[index];
     const recordId = candidateIds[index];
@@ -1834,6 +1858,9 @@ async function purgeUserVerificationData(
     }
     recordsToDelete.push(recordId);
     recordsById.set(recordId, parsed);
+    if (getRecordUserId(parsed)) {
+      userIdsToClear.add(getRecordUserId(parsed));
+    }
   }
 
   if (recordsToDelete.length > 0) {
@@ -1880,8 +1907,11 @@ async function purgeUserVerificationData(
     await context.redis.del(...Array.from(reopenMetaKeysToDelete));
   }
 
-  await context.redis.del(userPendingKey(subredditId, normalizedUsername));
-  await context.redis.del(userLatestKey(subredditId, normalizedUsername));
+  await deleteUserPendingPointers(context, subredditId, normalizedUsername, '');
+  await deleteUserLatestPointers(context, subredditId, normalizedUsername, '');
+  for (const userId of userIdsToClear) {
+    await context.redis.del(userPendingKeyById(subredditId, userId), userLatestKeyById(subredditId, userId));
+  }
   await context.redis.del(modmailThreadByUserEntryKey(subredditId, normalizedUsername));
 
   const legacyUserKeys = Array.from(new Set([normalizedUsername, `u/${normalizedUsername}`]));
@@ -2371,12 +2401,8 @@ async function removeReviewTargetForInvalidAccount(
   });
   await removeValidationTrackingForRecordIds(context, subredditId, [record.id]);
 
-  const pendingKey = userPendingKey(subredditId, normalizedUsername);
-  const pendingId = await context.redis.get(pendingKey);
-  if (pendingId === record.id) {
-    await context.redis.del(pendingKey);
-  }
-  await context.redis.set(userLatestKey(subredditId, normalizedUsername), record.id);
+  await clearUserPendingPointersIfMatch(context, subredditId, normalizedUsername, record.userId, record.id);
+  await setUserLatestPointer(context, subredditId, normalizedUsername, record.userId, record.id);
 
   const cleanupKeys = new Set<string>([reopenedAuditByReopenedKey(subredditId, record.id)]);
   const parentVerificationId = record.parentVerificationId?.trim() ?? '';
@@ -2574,8 +2600,8 @@ async function approveVerification(
       member: verificationId,
       score: historyAnchorMs,
     });
-    await context.redis.del(userPendingKey(subredditId, normalizeUsername(record.username)));
-    await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
+    await deleteUserPendingPointers(context, subredditId, record.username, record.userId);
+    await setUserLatestPointer(context, subredditId, record.username, record.userId, verificationId);
     await upsertValidationTracking(context, subredditId, validationScheduledRecord);
     if (parentDeniedId) {
       await removeSupersededDeniedRecord(context, subredditId, parentDeniedId, record.username);
@@ -2824,8 +2850,8 @@ async function denyVerification(
       member: verificationId,
       score: historyAnchorMs,
     });
-    await context.redis.del(userPendingKey(subredditId, normalizeUsername(record.username)));
-    await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
+    await deleteUserPendingPointers(context, subredditId, record.username, record.userId);
+    await setUserLatestPointer(context, subredditId, record.username, record.userId, verificationId);
     await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
     await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
@@ -2933,7 +2959,7 @@ async function reopenDeniedVerification(
       if (existingPendingRecord?.status === 'pending') {
         throw new Error(`u/${deniedRecord.username} already has a pending verification.`);
       }
-      await context.redis.del(userPendingKey(subredditId, normalizedUsername));
+      await deleteUserPendingPointers(context, subredditId, normalizedUsername, deniedRecord.userId);
     }
 
     const now = new Date();
@@ -2973,8 +2999,8 @@ async function reopenDeniedVerification(
     await context.redis.zAdd(pendingIndexKey(subredditId), { member: reopenedId, score: now.getTime() });
     await context.redis.zAdd(historyDateIndexKey(subredditId), { member: reopenedId, score: now.getTime() });
     await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizedUsername), { member: reopenedId, score: now.getTime() });
-    await context.redis.set(userPendingKey(subredditId, normalizedUsername), reopenedId);
-    await context.redis.set(userLatestKey(subredditId, normalizedUsername), reopenedId);
+    await setUserPendingPointer(context, subredditId, normalizedUsername, reopenedRecord.userId, reopenedId);
+    await setUserLatestPointer(context, subredditId, normalizedUsername, reopenedRecord.userId, reopenedId);
     await context.redis.set(reopenedChildByDeniedKey(subredditId, deniedRecord.id), reopenedId);
     await context.redis.set(reopenedStateByDeniedKey(subredditId, deniedRecord.id), 'open');
 
@@ -3034,10 +3060,7 @@ async function cancelReopenedVerification(
     await context.redis.zRem(historyByUserIndexKey(subredditId, normalizedUsername), [verificationId]);
     await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
-    const pendingId = await context.redis.get(userPendingKey(subredditId, normalizedUsername));
-    if (pendingId === verificationId) {
-      await context.redis.del(userPendingKey(subredditId, normalizedUsername));
-    }
+    await clearUserPendingPointersIfMatch(context, subredditId, normalizedUsername, reopenedRecord.userId, verificationId);
 
     const latestId = await context.redis.get(userLatestKey(subredditId, normalizedUsername));
     if (latestId === verificationId) {
@@ -3046,13 +3069,24 @@ async function cancelReopenedVerification(
         usernamesEqual(parentRecord.username, reopenedRecord.username) &&
         parentRecord.id === parentVerificationId
       ) {
-        await context.redis.set(userLatestKey(subredditId, normalizedUsername), parentVerificationId);
+        await setUserLatestPointer(context, subredditId, normalizedUsername, parentRecord.userId, parentVerificationId);
       } else {
         const fallbackLatestId = await findLatestExistingRecordIdForUser(context, subredditId, normalizedUsername);
         if (fallbackLatestId) {
-          await context.redis.set(userLatestKey(subredditId, normalizedUsername), fallbackLatestId);
+          const fallbackLatestRecord = await getRecord(context, subredditId, fallbackLatestId);
+          if (fallbackLatestRecord) {
+            await setUserLatestPointer(
+              context,
+              subredditId,
+              normalizedUsername,
+              fallbackLatestRecord.userId,
+              fallbackLatestId
+            );
+          } else {
+            await deleteUserLatestPointers(context, subredditId, normalizedUsername, reopenedRecord.userId);
+          }
         } else {
-          await context.redis.del(userLatestKey(subredditId, normalizedUsername));
+          await deleteUserLatestPointers(context, subredditId, normalizedUsername, reopenedRecord.userId);
         }
       }
     }
@@ -3140,7 +3174,7 @@ async function removeApprovedVerificationByModerator(
       member: verificationId,
       score: historyAnchorMs,
     });
-    await context.redis.set(userLatestKey(subredditId, normalizeUsername(record.username)), verificationId);
+    await setUserLatestPointer(context, subredditId, record.username, record.userId, verificationId);
     await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
     const [modmail, modNote] = await Promise.all([
@@ -3570,38 +3604,43 @@ async function loadDashboardData(
 ): Promise<DashboardData> {
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
-  const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
-  const moderatorAccess = viewerUsername
-    ? await getModeratorAccessSnapshot(context, subredditName, viewerUsername)
-    : ({
-        state: 'denied',
-        permissionState: 'unknown',
-        isModerator: false,
-        permissions: [],
-      } satisfies ModeratorAccessSnapshot);
-  const isModeratorUser = moderatorAccess.isModerator;
-  const moderatorPermissions = moderatorAccess.permissions;
-  const canManageUsers = hasManageUsersPermissionInList(moderatorPermissions);
+  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  let moderatorAccess: ModeratorAccessSnapshot = {
+    state: 'denied',
+    permissionState: 'unknown',
+    isModerator: false,
+    permissions: [],
+  };
+  if (options.includeModData && viewerIdentity.state === 'confirmed' && viewerIdentity.username) {
+    moderatorAccess = await getModeratorAccessSnapshot(context, subredditName, viewerIdentity.username);
+  }
+
+  const isModeratorUser = options.includeModData ? moderatorAccess.isModerator : false;
+  const moderatorPermissions = options.includeModData ? moderatorAccess.permissions : [];
+  const canManageUsers = options.includeModData ? hasManageUsersPermissionInList(moderatorPermissions) : false;
   const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
-  const canOpenInstallSettings = hasAllModeratorPermissionInList(moderatorPermissions);
-  const hasConfigAccess = hasConfigAccessPermissionInList(moderatorPermissions);
-  const canReviewUser = isModeratorUser && canManageUsers;
+  const canOpenInstallSettings = options.includeModData ? hasAllModeratorPermissionInList(moderatorPermissions) : false;
+  const hasConfigAccess = options.includeModData ? hasConfigAccessPermissionInList(moderatorPermissions) : false;
+  const canReviewUser = options.includeModData ? isModeratorUser && canManageUsers : false;
   const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
   let flairTemplateValidation = validateFlairTemplateId(config.flairTemplateId);
-  if (viewerUsername && config.flairTemplateId.trim()) {
-    config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, viewerUsername, config);
+  if (options.includeModData && viewerIdentity.state === 'confirmed' && config.flairTemplateId.trim()) {
+    config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, config);
   }
   if (canReviewUser && options.includeModData) {
     flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
   const requiresInitialSetup = !config.flairTemplateId.trim();
 
-  let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
-  if (viewerUsername && userLatest) {
-    userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
+  let userLatest = await getLatestRecordForCurrentViewer(context, subredditId, viewerIdentity);
+  const viewerLookupUsername = viewerIdentity.username ?? userLatest?.username ?? null;
+  if (viewerLookupUsername && userLatest) {
+    userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerLookupUsername, userLatest);
   }
-  const viewerBlocked = viewerUsername ? await repairMissingAutoBlockForUser(context, subredditId, viewerUsername, config) : null;
+  const viewerBlocked = viewerLookupUsername
+    ? await repairMissingAutoBlockForUser(context, subredditId, viewerLookupUsername, config)
+    : null;
   const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
   const pendingCount = canReviewUser
     ? options.includeModData
@@ -3630,23 +3669,38 @@ async function loadDashboardData(
     : { items: [], hasMore: false };
   const auditLog = auditSearch.items;
   const storage = canReviewUser && options.includeModData ? await estimateSubredditStorageUsage(context, subredditId) : emptyStorageUsage();
-  const viewerSnapshot = viewerUsername ? await getViewerSnapshot(context) : { accountAgeDays: null, totalKarma: null };
-  let viewerFlairSnapshot = viewerUsername
-    ? await getViewerFlairSnapshot(context, subredditName, viewerUsername)
-    : { flairText: '', flairCssClass: '', flairTemplateId: '', userId: '' };
-  let flairCheck = viewerUsername
-    ? await checkVerificationFlair(context, subredditName, viewerUsername, config, viewerFlairSnapshot)
-    : {
-        verified: false,
-        configuredTemplateId: '',
-        detectedTemplateId: '',
-        source: 'no-viewer',
-        error: null,
-      };
+  const viewerSnapshot =
+    viewerIdentity.state === 'confirmed' ? await getViewerSnapshot(context) : { accountAgeDays: null, totalKarma: null };
+  let viewerFlairSnapshot =
+    viewerIdentity.state === 'confirmed'
+      ? await getViewerFlairSnapshot(context, subredditName)
+      : emptyViewerFlairSnapshot(
+          viewerIdentity.userId || context.userId,
+          viewerIdentity.state === 'unavailable' ? 'unavailable' : 'confirmed_absent',
+          viewerIdentity.state === 'unavailable' ? viewerIdentity.error : null
+        );
+  let flairCheck =
+    viewerIdentity.state === 'confirmed'
+      ? await checkVerificationFlair(context, subredditName, config, viewerFlairSnapshot)
+      : viewerIdentity.state === 'unavailable'
+        ? {
+            verified: false,
+            configuredTemplateId: normalizeTemplateId(config.flairTemplateId),
+            detectedTemplateId: '',
+            source: 'viewer-snapshot:unavailable',
+            error: viewerIdentity.error ?? 'Viewer identity unavailable.',
+          }
+        : {
+            verified: false,
+            configuredTemplateId: '',
+            detectedTemplateId: '',
+            source: 'no-viewer',
+            error: null,
+          };
 
   if (
     config.autoFlairReconcileEnabled &&
-    viewerUsername &&
+    viewerLookupUsername &&
     userLatest &&
     isViewerFlairReconcileDue(userLatest, Date.now()) &&
     shouldReconcileApprovedViewerFlair(userLatest, config, flairCheck, viewerFlairSnapshot)
@@ -3661,7 +3715,7 @@ async function loadDashboardData(
       userLatest = stampedUserLatest;
     } catch (error) {
       console.log(
-        `Viewer flair reconcile timestamp update failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${errorText(error)}`
+        `Viewer flair reconcile timestamp update failed for r/${subredditName} u/${maskUsernameForLog(viewerLookupUsername)}: ${errorText(error)}`
       );
     }
     const previousAppliedTemplateId = normalizeTemplateId(userLatest.lastAppliedFlairTemplateId ?? '');
@@ -3680,17 +3734,17 @@ async function loadDashboardData(
       previousAppliedTemplateId !== desiredTemplateId &&
       detectedTemplateIdBeforeReconcile === previousAppliedTemplateId
     ) {
-      const cleared = await removeUserFlairWithFallbacks(context, subredditName, viewerUsername);
+      const cleared = await removeUserFlairWithFallbacks(context, subredditName, viewerLookupUsername);
       if (!cleared) {
         console.log(
-          `Viewer stale flair clear before reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}`
+          `Viewer stale flair clear before reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerLookupUsername)}`
         );
       }
     }
     const reconcileResult = await applyApprovalFlairWithFallbacks(context, userLatest, config, desiredTemplateId);
     if (reconcileResult.applied) {
-      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName, viewerUsername);
-      flairCheck = await checkVerificationFlair(context, subredditName, viewerUsername, config, viewerFlairSnapshot);
+      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName);
+      flairCheck = await checkVerificationFlair(context, subredditName, config, viewerFlairSnapshot);
       const updatedTemplateId = normalizeTemplateId(reconcileResult.appliedTemplateId ?? desiredTemplateId);
       const detectedTemplateAfterReconcile = normalizeTemplateId(
         viewerFlairSnapshot.flairTemplateId || flairCheck.detectedTemplateId
@@ -3711,29 +3765,29 @@ async function loadDashboardData(
           userLatest = refreshedUserLatest;
         } catch (error) {
           console.log(
-            `Viewer flair reconcile record update failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${errorText(error)}`
+            `Viewer flair reconcile record update failed for r/${subredditName} u/${maskUsernameForLog(viewerLookupUsername)}: ${errorText(error)}`
           );
         }
       } else if (updatedTemplateId) {
         console.log(
-          `Viewer flair reconcile did not confirm updated template for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}; preserving prior record template ID`
+          `Viewer flair reconcile did not confirm updated template for r/${subredditName} u/${maskUsernameForLog(viewerLookupUsername)}; preserving prior record template ID`
         );
       }
     } else if (reconcileResult.error) {
       console.log(
-        `Viewer flair reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerUsername)}: ${reconcileResult.error}`
+        `Viewer flair reconcile failed for r/${subredditName} u/${maskUsernameForLog(viewerLookupUsername)}: ${reconcileResult.error}`
       );
     }
   }
 
   const viewerVerifiedSuppressed = Boolean(
-    viewerUsername && (await shouldSuppressViewerVerifiedState(context, subredditId, viewerUsername, userLatest))
+    viewerLookupUsername && (await shouldSuppressViewerVerifiedState(context, subredditId, viewerLookupUsername, userLatest))
   );
   const viewerShouldDisplayVerified = shouldViewerDisplayVerifiedState(flairCheck, userLatest, viewerVerifiedSuppressed);
   const viewerAwaitingFlairPropagation = isViewerAwaitingFlairPropagation(flairCheck, userLatest);
 
   return {
-    viewerUsername,
+    viewerUsername: viewerLookupUsername,
     subredditName,
     moderatorAccess,
     isModerator: isModeratorUser,
@@ -3776,68 +3830,74 @@ async function loadModDashboard(context: Devvit.Context): Promise<DashboardData>
   return await loadDashboardData(context, { includeModData: true });
 }
 
-async function loadDashboard(context: Devvit.Context): Promise<DashboardData> {
-  return await loadModDashboard(context);
-}
-
 async function getViewerSnapshot(context: Devvit.Context): Promise<UserSnapshot> {
   const emptySnapshot = { accountAgeDays: null, totalKarma: null };
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const user = await context.reddit.getCurrentUser();
-      if (!user) {
-        return emptySnapshot;
-      }
-      const createdAt = user.createdAt;
-      const ageMs = Date.now() - createdAt.getTime();
-      const accountAgeDays = Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
-      const totalKarma = (user.commentKarma ?? 0) + (user.linkKarma ?? 0);
-      return { accountAgeDays, totalKarma };
-    } catch (error) {
-      const message = errorText(error);
-      if (attempt < 1 && looksLikeTransientRedditTransportError(message)) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        continue;
-      }
-      if (!looksLikeTransientRedditTransportError(message)) {
-        console.log(`Viewer snapshot lookup failed: ${message}`);
-      }
-      return emptySnapshot;
-    }
+  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  const user = viewerIdentity.user;
+  if (!user) {
+    return emptySnapshot;
   }
+  try {
+    const createdAt = user.createdAt;
+    const ageMs = Date.now() - createdAt.getTime();
+    const accountAgeDays = Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
+    const totalKarma = (user.commentKarma ?? 0) + (user.linkKarma ?? 0);
+    return { accountAgeDays, totalKarma };
+  } catch (error) {
+    const message = errorText(error);
+    if (!looksLikeTransientRedditTransportError(message)) {
+      console.log(`Viewer snapshot lookup failed: ${message}`);
+    }
+    return emptySnapshot;
+  }
+}
 
-  return emptySnapshot;
+function emptyViewerFlairSnapshot(
+  userId = '',
+  lookupState: ViewerFlairLookupState = 'confirmed_absent',
+  error: string | null = null
+): ViewerFlairSnapshot {
+  return {
+    flairText: '',
+    flairCssClass: '',
+    flairTemplateId: '',
+    userId: normalizeUserId(userId),
+    lookupState,
+    error,
+  };
 }
 
 async function getViewerFlairSnapshot(
   context: Devvit.Context,
-  subredditName: string,
-  username: string
+  subredditName: string
 ): Promise<ViewerFlairSnapshot> {
-  const emptySnapshot = { flairText: '', flairCssClass: '', flairTemplateId: '', userId: '' };
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const normalizedUsername = normalizeUsernameStrict(username);
+  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  const emptySnapshot = emptyViewerFlairSnapshot(
+    viewerIdentity.userId || context.userId,
+    viewerIdentity.state === 'unavailable' || !viewerIdentity.user ? 'unavailable' : 'confirmed_absent',
+    viewerIdentity.state === 'unavailable' || !viewerIdentity.user
+      ? viewerIdentity.error ?? 'Viewer flair lookup unavailable.'
+      : null
+  );
+  if (viewerIdentity.state !== 'confirmed' || !viewerIdentity.user) {
+    return emptySnapshot;
+  }
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      let user = await context.reddit.getCurrentUser();
-      const currentUsername = typeof user?.username === 'string' ? user.username : '';
-      if (!user || (normalizedUsername && currentUsername && !usernamesEqual(currentUsername, normalizedUsername))) {
-        user = normalizedUsername ? await context.reddit.getUserByUsername(normalizedUsername) : undefined;
-      }
-      if (!user) {
-        return emptySnapshot;
-      }
-      const flair = await user.getUserFlairBySubreddit(sanitizedSubreddit);
+      const flair = await viewerIdentity.user.getUserFlairBySubreddit(sanitizedSubreddit);
       if (!flair) {
-        return { ...emptySnapshot, userId: user.id ?? '' };
+        return emptyViewerFlairSnapshot(viewerIdentity.user.id ?? viewerIdentity.userId, 'confirmed_absent', null);
       }
       const flairTemplateId = normalizeTemplateId(extractTemplateId(flair));
       return {
         flairText: (flair.flairText ?? '').trim(),
         flairCssClass: (flair.flairCssClass ?? '').trim(),
         flairTemplateId,
-        userId: user.id ?? '',
+        userId: normalizeUserId(viewerIdentity.user.id ?? viewerIdentity.userId),
+        lookupState: 'confirmed_present',
+        error: null,
       };
     } catch (error) {
       const message = errorText(error);
@@ -3846,13 +3906,17 @@ async function getViewerFlairSnapshot(
         continue;
       }
       if (!looksLikeTransientRedditTransportError(message)) {
-        console.log(`Viewer flair snapshot lookup failed for r/${subredditName} u/${maskUsernameForLog(username)}: ${message}`);
+        await logViewerFlairLookupFailureWithCooldown(
+          context,
+          viewerIdentity.username ?? 'unknown',
+          `Viewer flair snapshot lookup failed for r/${subredditName} u/${maskUsernameForLog(viewerIdentity.username ?? 'unknown')}: ${message}`
+        );
       }
-      return emptySnapshot;
+      return emptyViewerFlairSnapshot(viewerIdentity.userId || context.userId, 'unavailable', message);
     }
   }
 
-  return emptySnapshot;
+  return emptyViewerFlairSnapshot(viewerIdentity.userId || context.userId, 'unavailable', null);
 }
 
 function extractFieldString(value: unknown, keys: string[]): string {
@@ -4122,7 +4186,6 @@ async function refreshConfiguredFlairTemplateCache(
   context: Devvit.Context,
   subredditId: string,
   subredditName: string,
-  _lookupUsername: string,
   config: RuntimeConfig,
   forceRefresh = false,
   preloadedFlairTemplates?: UserFlairTemplateSummary[] | null
@@ -4190,6 +4253,9 @@ function shouldReconcileApprovedViewerFlair(
     return false;
   }
   if (isManualFlairCheckSource(flairCheck.source)) {
+    return false;
+  }
+  if (viewerFlairSnapshot.lookupState === 'unavailable' || flairCheck.source === 'viewer-snapshot:unavailable') {
     return false;
   }
 
@@ -4262,10 +4328,16 @@ function shouldViewerDisplayVerifiedState(
   userLatest: Pick<VerificationRecord, 'status'> | null | undefined,
   isSuppressed: boolean
 ): boolean {
-  if (!flairCheck.verified || isSuppressed) {
+  if (isSuppressed) {
     return false;
   }
   if (userLatest?.status === 'pending') {
+    return false;
+  }
+  if (userLatest?.status === 'approved') {
+    return true;
+  }
+  if (!flairCheck.verified) {
     return false;
   }
   if (
@@ -4278,11 +4350,16 @@ function shouldViewerDisplayVerifiedState(
 }
 
 function isViewerAwaitingFlairPropagation(
-  flairCheck: Pick<FlairVerificationCheck, 'verified'>,
+  flairCheck: Pick<FlairVerificationCheck, 'verified' | 'source'>,
   userLatest: Pick<VerificationRecord, 'status' | 'reviewedAt' | 'submittedAt'> | null | undefined,
   nowMs = Date.now()
 ): boolean {
-  if (flairCheck.verified || !userLatest || userLatest.status !== 'approved') {
+  if (
+    flairCheck.verified ||
+    flairCheck.source === 'viewer-snapshot:unavailable' ||
+    !userLatest ||
+    userLatest.status !== 'approved'
+  ) {
     return false;
   }
   const approvedAtMs = new Date(String(userLatest.reviewedAt || userLatest.submittedAt || '')).getTime();
@@ -4291,11 +4368,6 @@ function isViewerAwaitingFlairPropagation(
   }
   return nowMs - approvedAtMs <= VIEWER_FLAIR_PROPAGATION_WINDOW_MS;
 }
-
-function normalizeSubredditNameForApi(subredditName: string): string {
-  return subredditName.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '');
-}
-
 
 function dedupeNonEmpty(values: string[]): string[] {
   const deduped: string[] = [];
@@ -4314,7 +4386,6 @@ function dedupeNonEmpty(values: string[]): string[] {
 async function checkVerificationFlair(
   context: Devvit.Context,
   subredditName: string,
-  username: string,
   config: RuntimeConfig,
   viewerFlairSnapshot?: ViewerFlairSnapshot
 ): Promise<FlairVerificationCheck> {
@@ -4322,8 +4393,16 @@ async function checkVerificationFlair(
   const configuredTemplateIds = configuredApprovalTemplateIds(config);
   const templateCheckEnabled = Boolean(configuredTemplateId);
   const configuredCssClass = normalizeCssClass(config.flairCssClass);
-  const snapshot =
-    viewerFlairSnapshot ?? (await getViewerFlairSnapshot(context, sanitizeSubredditName(subredditName), username));
+  const snapshot = viewerFlairSnapshot ?? (await getViewerFlairSnapshot(context, sanitizeSubredditName(subredditName)));
+  if (snapshot.lookupState === 'unavailable') {
+    return {
+      verified: false,
+      configuredTemplateId,
+      detectedTemplateId: '',
+      source: 'viewer-snapshot:unavailable',
+      error: snapshot.error ?? 'Viewer flair lookup unavailable.',
+    };
+  }
   const snapshotTemplateId = normalizeTemplateId(snapshot.flairTemplateId);
   const detectedCssClass = normalizeCssClass(snapshot.flairCssClass);
   const cssMatched = configuredCssClass ? cssClassMatchesSubstring(configuredCssClass, detectedCssClass) : false;
@@ -4414,7 +4493,7 @@ async function checkVerificationFlair(
     verified: false,
     configuredTemplateId,
     detectedTemplateId: '',
-    source: 'viewer-snapshot:no-match',
+    source: snapshot.lookupState === 'confirmed_absent' ? 'viewer-snapshot:no-match' : 'viewer-snapshot:template-mismatch',
     error: null,
   };
 }
@@ -5329,8 +5408,8 @@ async function removeAllVerificationRecordsForUser(
   });
   const recordIds = Array.from(new Set(historyEntries.map((entry) => entry.member)));
   if (recordIds.length === 0) {
-    await context.redis.del(userPendingKey(subredditId, normalizedUsername));
-    await context.redis.del(userLatestKey(subredditId, normalizedUsername));
+    await deleteUserPendingPointers(context, subredditId, normalizedUsername, '');
+    await deleteUserLatestPointers(context, subredditId, normalizedUsername, '');
     return;
   }
 
@@ -5341,6 +5420,7 @@ async function removeAllVerificationRecordsForUser(
   const byModerator = new Map<string, string[]>();
   const approvedPrefixEntries: Array<{ recordId: string; username: string }> = [];
   const reopenMetaKeysToDelete = new Set<string>();
+  const userIdsToClear = new Set<string>();
   for (let index = 0; index < payloads.length; index++) {
     const payload = payloads[index];
     const recordId = recordIds[index];
@@ -5350,6 +5430,9 @@ async function removeAllVerificationRecordsForUser(
     const parsed = parseRecord(payload);
     if (!parsed) {
       continue;
+    }
+    if (getRecordUserId(parsed)) {
+      userIdsToClear.add(getRecordUserId(parsed));
     }
     if (parsed.moderator) {
       const normalizedModerator = normalizeUsername(parsed.moderator);
@@ -5388,8 +5471,11 @@ async function removeAllVerificationRecordsForUser(
     await context.redis.del(...Array.from(reopenMetaKeysToDelete));
   }
 
-  await context.redis.del(userPendingKey(subredditId, normalizedUsername));
-  await context.redis.del(userLatestKey(subredditId, normalizedUsername));
+  await deleteUserPendingPointers(context, subredditId, normalizedUsername, '');
+  await deleteUserLatestPointers(context, subredditId, normalizedUsername, '');
+  for (const userId of userIdsToClear) {
+    await context.redis.del(userPendingKeyById(subredditId, userId), userLatestKeyById(subredditId, userId));
+  }
 }
 
 async function pruneHistoryOlderThanDays(
@@ -5416,6 +5502,7 @@ async function pruneHistoryOlderThanDays(
   const missingIds = new Set<string>();
   const recordIdsToDelete = new Set<string>();
   const byUser = new Map<string, string[]>();
+  const userIdByUsername = new Map<string, string>();
   const byModerator = new Map<string, string[]>();
   const approvedPrefixEntries: Array<{ recordId: string; username: string }> = [];
 
@@ -5444,6 +5531,9 @@ async function pruneHistoryOlderThanDays(
     const userIds = byUser.get(normalizedUsername) ?? [];
     userIds.push(recordId);
     byUser.set(normalizedUsername, userIds);
+    if (getRecordUserId(parsed)) {
+      userIdByUsername.set(normalizedUsername, getRecordUserId(parsed));
+    }
 
     if (parsed.moderator) {
       const normalizedModerator = normalizeUsername(parsed.moderator);
@@ -5479,15 +5569,31 @@ async function pruneHistoryOlderThanDays(
     await context.redis.zRem(historyByUserIndexKey(subredditId, normalizedUsername), deletedIds);
     const pendingId = await context.redis.get(userPendingKey(subredditId, normalizedUsername));
     if (pendingId && deletedIds.includes(pendingId)) {
-      await context.redis.del(userPendingKey(subredditId, normalizedUsername));
+      await deleteUserPendingPointers(context, subredditId, normalizedUsername, userIdByUsername.get(normalizedUsername) ?? '');
     }
     const latestId = await context.redis.get(userLatestKey(subredditId, normalizedUsername));
     if (latestId && deletedIds.includes(latestId)) {
       const fallbackLatestId = await findLatestExistingRecordIdForUser(context, subredditId, normalizedUsername);
       if (fallbackLatestId) {
-        await context.redis.set(userLatestKey(subredditId, normalizedUsername), fallbackLatestId);
+        const fallbackLatestRecord = await getRecord(context, subredditId, fallbackLatestId);
+        if (fallbackLatestRecord) {
+          await setUserLatestPointer(
+            context,
+            subredditId,
+            normalizedUsername,
+            fallbackLatestRecord.userId,
+            fallbackLatestId
+          );
+        } else {
+          await deleteUserLatestPointers(
+            context,
+            subredditId,
+            normalizedUsername,
+            userIdByUsername.get(normalizedUsername) ?? ''
+          );
+        }
       } else {
-        await context.redis.del(userLatestKey(subredditId, normalizedUsername));
+        await deleteUserLatestPointers(context, subredditId, normalizedUsername, userIdByUsername.get(normalizedUsername) ?? '');
       }
     }
   }
@@ -5497,6 +5603,134 @@ async function pruneHistoryOlderThanDays(
   }
 
   return recordDeleteList.length;
+}
+
+function getRecordUserId(record: Pick<VerificationRecord, 'userId'> | null | undefined): string {
+  return normalizeUserId(record?.userId);
+}
+
+async function setUserPendingPointer(
+  context: RedisContext,
+  subredditId: string,
+  username: string,
+  userId: string | null | undefined,
+  recordId: string
+): Promise<void> {
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedUserId = normalizeUserId(userId);
+  await context.redis.set(userPendingKey(subredditId, normalizedUsername), recordId);
+  if (normalizedUserId) {
+    await context.redis.set(userPendingKeyById(subredditId, normalizedUserId), recordId);
+  }
+}
+
+async function setUserLatestPointer(
+  context: RedisContext,
+  subredditId: string,
+  username: string,
+  userId: string | null | undefined,
+  recordId: string
+): Promise<void> {
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedUserId = normalizeUserId(userId);
+  await context.redis.set(userLatestKey(subredditId, normalizedUsername), recordId);
+  if (normalizedUserId) {
+    await context.redis.set(userLatestKeyById(subredditId, normalizedUserId), recordId);
+  }
+}
+
+async function deleteUserPendingPointers(
+  context: RedisContext,
+  subredditId: string,
+  username: string,
+  userId: string | null | undefined
+): Promise<void> {
+  const keys = [userPendingKey(subredditId, normalizeUsername(username))];
+  const normalizedUserId = normalizeUserId(userId);
+  if (normalizedUserId) {
+    keys.push(userPendingKeyById(subredditId, normalizedUserId));
+  }
+  await context.redis.del(...keys);
+}
+
+async function deleteUserLatestPointers(
+  context: RedisContext,
+  subredditId: string,
+  username: string,
+  userId: string | null | undefined
+): Promise<void> {
+  const keys = [userLatestKey(subredditId, normalizeUsername(username))];
+  const normalizedUserId = normalizeUserId(userId);
+  if (normalizedUserId) {
+    keys.push(userLatestKeyById(subredditId, normalizedUserId));
+  }
+  await context.redis.del(...keys);
+}
+
+async function clearUserPendingPointersIfMatch(
+  context: RedisContext,
+  subredditId: string,
+  username: string,
+  userId: string | null | undefined,
+  recordId: string
+): Promise<void> {
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedUserId = normalizeUserId(userId);
+  const usernameKey = userPendingKey(subredditId, normalizedUsername);
+  const usernamePendingId = await context.redis.get(usernameKey);
+  if (usernamePendingId === recordId) {
+    await context.redis.del(usernameKey);
+  }
+  if (normalizedUserId) {
+    const userIdKey = userPendingKeyById(subredditId, normalizedUserId);
+    const userIdPendingId = await context.redis.get(userIdKey);
+    if (userIdPendingId === recordId) {
+      await context.redis.del(userIdKey);
+    }
+  }
+}
+
+async function backfillUserRecordPointers(
+  context: RedisContext,
+  subredditId: string,
+  record: VerificationRecord
+): Promise<void> {
+  const normalizedUserId = getRecordUserId(record);
+  if (!normalizedUserId) {
+    return;
+  }
+  await setUserLatestPointer(context, subredditId, record.username, normalizedUserId, record.id);
+  if (record.status === 'pending') {
+    await setUserPendingPointer(context, subredditId, record.username, normalizedUserId, record.id);
+    return;
+  }
+  await context.redis.del(userPendingKeyById(subredditId, normalizedUserId));
+}
+
+async function getLatestRecordForUserId(
+  context: Devvit.Context,
+  subredditId: string,
+  userId: string
+): Promise<VerificationRecord | null> {
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) {
+    return null;
+  }
+
+  const pointerKey = userLatestKeyById(subredditId, normalizedUserId);
+  const id = await context.redis.get(pointerKey);
+  if (!id) {
+    return null;
+  }
+
+  const record = await getRecord(context, subredditId, id);
+  if (!record || getRecordUserId(record) !== normalizedUserId) {
+    await context.redis.del(pointerKey, userPendingKeyById(subredditId, normalizedUserId));
+    return null;
+  }
+
+  await backfillUserRecordPointers(context, subredditId, record);
+  return record;
 }
 
 async function findLatestExistingRecordIdForUser(
@@ -5719,17 +5953,46 @@ async function getLatestRecordForUser(
 
   const record = await getRecord(context, subredditId, id);
   if (!record) {
-    await context.redis.del(userLatestKey(subredditId, normalizedUsername));
-    await context.redis.del(userPendingKey(subredditId, normalizedUsername));
+    await deleteUserLatestPointers(context, subredditId, normalizedUsername, '');
+    await deleteUserPendingPointers(context, subredditId, normalizedUsername, '');
     const fallbackId = await findLatestExistingRecordIdForUser(context, subredditId, normalizedUsername);
     if (!fallbackId) {
       return null;
     }
     await context.redis.set(userLatestKey(subredditId, normalizedUsername), fallbackId);
-    return await getRecord(context, subredditId, fallbackId);
+    const fallbackRecord = await getRecord(context, subredditId, fallbackId);
+    if (fallbackRecord) {
+      await backfillUserRecordPointers(context, subredditId, fallbackRecord);
+    }
+    return fallbackRecord;
   }
 
+  await backfillUserRecordPointers(context, subredditId, record);
   return record;
+}
+
+async function getLatestRecordForCurrentViewer(
+  context: Devvit.Context,
+  subredditId: string,
+  viewerIdentity: ViewerIdentitySnapshot
+): Promise<VerificationRecord | null> {
+  const viewerUserId = normalizeUserId(viewerIdentity.userId || context.userId);
+  if (viewerUserId) {
+    const recordById = await getLatestRecordForUserId(context, subredditId, viewerUserId);
+    if (recordById) {
+      return recordById;
+    }
+  }
+
+  if (viewerIdentity.state !== 'confirmed' || !viewerIdentity.username) {
+    return null;
+  }
+
+  const recordByUsername = await getLatestRecordForUser(context, subredditId, viewerIdentity.username);
+  if (recordByUsername && viewerUserId && getRecordUserId(recordByUsername) === viewerUserId) {
+    await backfillUserRecordPointers(context, subredditId, recordByUsername);
+  }
+  return recordByUsername;
 }
 
 async function getRecord(context: RedisContext, subredditId: string, verificationId: string): Promise<VerificationRecord | null> {
@@ -5806,6 +6069,103 @@ async function setRecord(context: RedisContext, subredditId: string, record: Ver
   });
 }
 
+function getViewerIdentityRequestMemo(
+  context: Devvit.Context
+): Promise<ViewerIdentitySnapshot> | undefined {
+  const memoOwner = context as Devvit.Context & {
+    [viewerIdentityRequestMemoSymbol]?: Promise<ViewerIdentitySnapshot>;
+  };
+  return memoOwner[viewerIdentityRequestMemoSymbol];
+}
+
+async function getViewerIdentitySnapshot(context: Devvit.Context): Promise<ViewerIdentitySnapshot> {
+  const existing = getViewerIdentityRequestMemo(context);
+  if (existing) {
+    return await existing;
+  }
+
+  const memoOwner = context as Devvit.Context & {
+    [viewerIdentityRequestMemoSymbol]?: Promise<ViewerIdentitySnapshot>;
+  };
+
+  const lookupPromise = (async (): Promise<ViewerIdentitySnapshot> => {
+    const fallbackUserId = normalizeUserId(context.userId);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const user = await context.reddit.getCurrentUser();
+        const userId = normalizeUserId(String((user as { id?: string | null } | null)?.id ?? fallbackUserId));
+        let username = normalizeUsernameStrict(
+          String((user as { username?: string | null } | null)?.username ?? '')
+        );
+
+        if (!username) {
+          try {
+            username = normalizeUsernameStrict((await context.reddit.getCurrentUsername()) ?? '');
+          } catch (usernameError) {
+            if (attempt >= 1 && !user && !userId) {
+              return {
+                state: fallbackUserId ? 'unavailable' : 'anonymous',
+                userId: fallbackUserId,
+                username: null,
+                user: null,
+                error: fallbackUserId ? errorText(usernameError) : null,
+              };
+            }
+          }
+        }
+
+        if (!user && !username && !userId) {
+          return {
+            state: 'anonymous',
+            userId: '',
+            username: null,
+            user: null,
+            error: null,
+          };
+        }
+
+        return {
+          state: user || username ? 'confirmed' : userId ? 'unavailable' : 'anonymous',
+          userId,
+          username: username || null,
+          user: user ?? null,
+          error: user || username ? null : 'Viewer identity unavailable.',
+        };
+      } catch (error) {
+        const message = errorText(error);
+        if (attempt < 1 && looksLikeTransientRedditTransportError(message)) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
+        return {
+          state: fallbackUserId ? 'unavailable' : 'anonymous',
+          userId: fallbackUserId,
+          username: null,
+          user: null,
+          error: fallbackUserId ? message : null,
+        };
+      }
+    }
+
+    return {
+      state: fallbackUserId ? 'unavailable' : 'anonymous',
+      userId: fallbackUserId,
+      username: null,
+      user: null,
+      error: null,
+    };
+  })();
+
+  memoOwner[viewerIdentityRequestMemoSymbol] = lookupPromise;
+  try {
+    return await lookupPromise;
+  } catch (error) {
+    delete memoOwner[viewerIdentityRequestMemoSymbol];
+    throw error;
+  }
+}
+
 function getModeratorAccessRequestMemo(
   context: Devvit.Context
 ): Map<string, Promise<ModeratorAccessSnapshot>> {
@@ -5843,73 +6203,8 @@ async function getModeratorAccessSnapshot(
       };
     }
 
-    if (await getCachedModeratorRole(context, username)) {
-      return {
-        state: 'cached',
-        permissionState: permissionSnapshot.state,
-        isModerator: true,
-        permissions: permissionSnapshot.permissions,
-      };
-    }
-
-    const errors: string[] = [];
-    let membershipLookupUnknown = false;
-
-    try {
-      const mods = await context.reddit
-        .getModerators({ subredditName: sanitizedSubreddit, username, limit: 1 })
-        .all();
-      if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
-        await cacheModeratorRole(context, username);
-        return {
-          state: 'confirmed',
-          permissionState: permissionSnapshot.state,
-          isModerator: true,
-          permissions: permissionSnapshot.permissions,
-        };
-      }
-    } catch (error) {
-      membershipLookupUnknown = true;
-      errors.push(`moderators listing path: ${errorText(error)}`);
-    }
-
-    if (membershipLookupUnknown) {
-      try {
-        const mods = await context.reddit.getModerators({ subredditName: sanitizedSubreddit, limit: 100 }).all();
-        if (mods.some((modUser) => usernamesEqual(modUser.username, username))) {
-          await cacheModeratorRole(context, username);
-          return {
-            state: 'confirmed',
-            permissionState: permissionSnapshot.state,
-            isModerator: true,
-            permissions: permissionSnapshot.permissions,
-          };
-        }
-      } catch (error) {
-        errors.push(`broad moderators listing path: ${errorText(error)}`);
-      }
-    }
-
-    if (errors.length > 0) {
-      await logModeratorLookupFailureWithCooldown(
-        context,
-        'membership',
-        username,
-        `Moderator membership lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errors.join(' | ')}`
-      );
-    }
-
-    if (membershipLookupUnknown) {
-      return {
-        state: 'unknown',
-        permissionState: permissionSnapshot.state,
-        isModerator: false,
-        permissions: permissionSnapshot.permissions,
-      };
-    }
-
     return {
-      state: 'denied',
+      state: permissionSnapshot.state === 'unknown' ? 'unknown' : 'denied',
       permissionState: permissionSnapshot.state,
       isModerator: false,
       permissions: permissionSnapshot.permissions,
@@ -5959,8 +6254,12 @@ async function getCurrentModeratorPermissionSnapshot(
   username: string
 ): Promise<{ permissions: string[]; state: ModeratorPermissionState }> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
-  const currentUsername = await context.reddit.getCurrentUsername();
-  if (!currentUsername || !usernamesEqual(currentUsername, username)) {
+  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  if (
+    viewerIdentity.state !== 'confirmed' ||
+    !viewerIdentity.username ||
+    !usernamesEqual(viewerIdentity.username, username)
+  ) {
     return {
       permissions: [],
       state: 'unknown',
@@ -5968,7 +6267,7 @@ async function getCurrentModeratorPermissionSnapshot(
   }
 
   try {
-    const currentUser = await context.reddit.getCurrentUser();
+    const currentUser = viewerIdentity.user;
     if (!currentUser) {
       const cachedPermissions = await getCachedModeratorPermissions(context, username);
       return {
@@ -6184,7 +6483,6 @@ async function onSaveFlairTemplateValues(
       context,
       subredditId,
       subredditName,
-      moderator,
       refreshedConfig,
       true,
       flairTemplatesForSave
@@ -6747,6 +7045,14 @@ function userLatestKey(subredditId: string, normalizedUsername: string): string 
   return `${subredditScopePrefix(subredditId)}:user:${normalizeUsername(normalizedUsername)}:latest`;
 }
 
+function userPendingKeyById(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
+}
+
+function userLatestKeyById(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:latest`;
+}
+
 function blockedUsersKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:blocked`;
 }
@@ -6839,12 +7145,16 @@ function moderatorPermissionCacheKey(subredditId: string, username: string): str
   return `${subredditScopePrefix(subredditId)}:moderator:permissions:${normalizeUsername(username)}`;
 }
 
-function moderatorRoleCacheKey(subredditId: string, username: string): string {
-  return `${subredditScopePrefix(subredditId)}:moderator:role:${normalizeUsername(username)}`;
-}
-
 function moderatorLookupLogCooldownKey(subredditId: string, scope: string, username: string): string {
   return `${subredditScopePrefix(subredditId)}:moderator:lookup-log:${scope}:${normalizeUsername(username) || 'unknown'}`;
+}
+
+function moderatorUiPositiveCacheKey(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator-ui:positive:${normalizeUserId(userId) || 'unknown'}`;
+}
+
+function moderatorUiUnavailableBackoffKey(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator-ui:unavailable:${normalizeUserId(userId) || 'unknown'}`;
 }
 
 function recentViewerFlairRemovalSuppressionKey(subredditId: string, username: string): string {
@@ -6864,6 +7174,10 @@ function sanitizeSubredditId(input: string): string {
 
 function sanitizeSubredditName(input: string): string {
   return input.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
+}
+
+function normalizeUserId(input: string | null | undefined): string {
+  return typeof input === 'string' ? input.trim() : '';
 }
 
 async function getCurrentSubredditNameCompat(
@@ -6972,42 +7286,6 @@ function getModeratorCacheSubredditId(context: { subredditId?: string | null }):
   return sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
 }
 
-async function cacheModeratorRole(
-  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
-  username: string
-): Promise<void> {
-  const subredditId = getModeratorCacheSubredditId(context);
-  const normalizedUsername = normalizeUsername(username);
-  if (!subredditId || !normalizedUsername) {
-    return;
-  }
-
-  try {
-    await context.redis.set(moderatorRoleCacheKey(subredditId, normalizedUsername), '1', {
-      expiration: new Date(Date.now() + MODERATOR_ROLE_CACHE_TTL_MS),
-    });
-  } catch {
-    // Best-effort cache only.
-  }
-}
-
-async function getCachedModeratorRole(
-  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
-  username: string
-): Promise<boolean> {
-  const subredditId = getModeratorCacheSubredditId(context);
-  const normalizedUsername = normalizeUsername(username);
-  if (!subredditId || !normalizedUsername) {
-    return false;
-  }
-
-  try {
-    return Boolean(await context.redis.get(moderatorRoleCacheKey(subredditId, normalizedUsername)));
-  } catch {
-    return false;
-  }
-}
-
 async function cacheModeratorPermissions(
   context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
   username: string,
@@ -7031,8 +7309,6 @@ async function cacheModeratorPermissions(
   } catch {
     // Best-effort cache only.
   }
-
-  await cacheModeratorRole(context, normalizedUsername);
 }
 
 async function getCachedModeratorPermissions(
@@ -7057,6 +7333,71 @@ async function getCachedModeratorPermissions(
     return normalizeModeratorPermissions(parsed.filter((value): value is string => typeof value === 'string'));
   } catch {
     return [];
+  }
+}
+
+async function cachePositiveModeratorUiState(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null; userId?: string | null }
+): Promise<void> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const userId = normalizeUserId(context.userId);
+  if (!subredditId || !userId) {
+    return;
+  }
+  try {
+    await context.redis.set(moderatorUiPositiveCacheKey(subredditId, userId), '1', {
+      expiration: new Date(Date.now() + MODERATOR_UI_POSITIVE_CACHE_TTL_MS),
+    });
+    await context.redis.del(moderatorUiUnavailableBackoffKey(subredditId, userId));
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
+async function hasCachedPositiveModeratorUiState(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null; userId?: string | null }
+): Promise<boolean> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const userId = normalizeUserId(context.userId);
+  if (!subredditId || !userId) {
+    return false;
+  }
+  try {
+    return Boolean(await context.redis.get(moderatorUiPositiveCacheKey(subredditId, userId)));
+  } catch {
+    return false;
+  }
+}
+
+async function setModeratorUiUnavailableBackoff(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null; userId?: string | null }
+): Promise<void> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const userId = normalizeUserId(context.userId);
+  if (!subredditId || !userId) {
+    return;
+  }
+  try {
+    await context.redis.set(moderatorUiUnavailableBackoffKey(subredditId, userId), '1', {
+      expiration: new Date(Date.now() + MODERATOR_UI_UNAVAILABLE_BACKOFF_MS),
+    });
+  } catch {
+    // Best-effort backoff only.
+  }
+}
+
+async function hasModeratorUiUnavailableBackoff(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null; userId?: string | null }
+): Promise<boolean> {
+  const subredditId = getModeratorCacheSubredditId(context);
+  const userId = normalizeUserId(context.userId);
+  if (!subredditId || !userId) {
+    return false;
+  }
+  try {
+    return Boolean(await context.redis.get(moderatorUiUnavailableBackoffKey(subredditId, userId)));
+  } catch {
+    return false;
   }
 }
 
@@ -7092,6 +7433,72 @@ async function logModeratorLookupFailureWithCooldown(
   }
 
   console.log(message);
+}
+
+async function logViewerFlairLookupFailureWithCooldown(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  username: string,
+  message: string
+): Promise<void> {
+  await logModeratorLookupFailureWithCooldown(context, 'viewer-flair', username, message);
+}
+
+async function getHubModeratorUiState(context: Devvit.Context): Promise<HubModeratorUiState> {
+  const hiddenState: HubModeratorUiState = {
+    buttonVisible: false,
+    isModerator: false,
+    canReview: false,
+    pendingCount: 0,
+  };
+  if (!normalizeUserId(context.userId)) {
+    return hiddenState;
+  }
+
+  if (await hasCachedPositiveModeratorUiState(context)) {
+    return {
+      buttonVisible: true,
+      isModerator: true,
+      canReview: true,
+      pendingCount: await context.redis.zCard(pendingIndexKey(sanitizeSubredditId(context.subredditId))),
+    };
+  }
+
+  if (await hasModeratorUiUnavailableBackoff(context)) {
+    return hiddenState;
+  }
+
+  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  if (viewerIdentity.state !== 'confirmed' || !viewerIdentity.username) {
+    if (viewerIdentity.state === 'unavailable') {
+      await setModeratorUiUnavailableBackoff(context);
+    }
+    return hiddenState;
+  }
+
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  const permissionSnapshot = await getCurrentModeratorPermissionSnapshot(context, subredditName, viewerIdentity.username);
+  if (permissionSnapshot.state === 'unknown') {
+    await setModeratorUiUnavailableBackoff(context);
+    return hiddenState;
+  }
+
+  const canReview = hasManageUsersPermissionInList(permissionSnapshot.permissions);
+  if (!canReview) {
+    return {
+      buttonVisible: false,
+      isModerator: permissionSnapshot.permissions.length > 0,
+      canReview: false,
+      pendingCount: 0,
+    };
+  }
+
+  await cachePositiveModeratorUiState(context);
+  return {
+    buttonVisible: true,
+    isModerator: true,
+    canReview: true,
+    pendingCount: await context.redis.zCard(pendingIndexKey(sanitizeSubredditId(context.subredditId))),
+  };
 }
 
 function approvedPrefixFromUsername(username: string): string {
@@ -8263,7 +8670,8 @@ export {
   removeApprovedVerificationByModerator,
   loadHubDashboard,
   loadModDashboard,
-  loadDashboard,
+  getHubModeratorUiState,
+  cachePositiveModeratorUiState,
   searchHistoryRecords,
   searchApprovedRecords,
   searchAuditEntries,
@@ -8334,6 +8742,7 @@ export type {
   RuntimeConfig,
   SubmitVerificationResult,
   SubmitVerificationValues,
+  HubModeratorUiState,
   ThemePalette,
   ThemePresetName,
   UpdateNoticeState,
