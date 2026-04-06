@@ -10,6 +10,7 @@ import { EffectType } from '@devvit/protos/json/devvit/ui/effects/v1alpha/effect
 import { WebViewImmersiveMode } from '@devvit/protos/json/devvit/ui/effects/web_view/v1alpha/immersive_mode.js';
 import { emitEffect } from '@devvit/shared-types/client/emit-effect.js';
 import brandLogoUrl from './logo.png';
+import demoPhotoUrl from './demo.jpg';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -43,7 +44,7 @@ function createShell(root, inline) {
     <div class="shell">
       <div data-el="loading" class="loading-screen">
         <div class="loading-copy">
-          ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
+          ${WORKTREE_LABEL ? `<p data-el="loading-worktree-badge" class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
           <p>${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</p>
         </div>
       </div>
@@ -63,7 +64,7 @@ function createShell(root, inline) {
                 <div class="hub-title-copy">
                   <p class="hub-kicker">VouchX</p>
                   <h1>Verification Hub</h1>
-                  ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
+                  ${WORKTREE_LABEL ? `<p data-el="hero-worktree-badge" class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
                 </div>
               </div>
               <p data-el="meta-username" class="meta"></p>
@@ -123,6 +124,37 @@ function createShell(root, inline) {
           </div>
         </div>
       </div>
+
+      <div data-el="demo-submit-modal" class="hub-modal hidden">
+        <div class="hub-modal-card demo-submit-modal-card">
+          <div data-el="demo-submit-stage-intro">
+            <h2>Demo photo upload</h2>
+            <p class="meta">
+              In the real app, the next step would prompt the user to select a photo or take a photo.
+            </p>
+            <p class="meta">
+              Press OK to continue with the built-in demo image instead.
+            </p>
+            <div class="row">
+              <button data-el="demo-submit-cancel" class="btn-secondary" type="button">Cancel</button>
+              <button data-el="demo-submit-continue" class="btn-primary" type="button">OK</button>
+            </div>
+          </div>
+          <div data-el="demo-submit-stage-preview" class="hidden">
+            <h2>Demo submission preview</h2>
+            <p class="meta">
+              This preview uses the app's bundled demo image. Submitting will not create a real verification request.
+            </p>
+            <div class="demo-submit-preview">
+              <img data-el="demo-submit-image" class="demo-submit-image" src="" alt="Demo submission preview" />
+            </div>
+            <div class="row">
+              <button data-el="demo-submit-back" class="btn-secondary" type="button">Back</button>
+              <button data-el="demo-submit-confirm" class="btn-primary" type="button">Submit Demo Verification</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -130,6 +162,8 @@ function createShell(root, inline) {
     loadingScreen: root.querySelector('[data-el="loading"]'),
     mainContent: root.querySelector('[data-el="main"]'),
     brandLogo: root.querySelector('[data-el="brand-logo"]'),
+    loadingWorktreeBadge: root.querySelector('[data-el="loading-worktree-badge"]'),
+    heroWorktreeBadge: root.querySelector('[data-el="hero-worktree-badge"]'),
     metaUsername: root.querySelector('[data-el="meta-username"]'),
     metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
     metaStatus: root.querySelector('[data-el="meta-status"]'),
@@ -150,6 +184,14 @@ function createShell(root, inline) {
     photoInstructionsScrollHint: root.querySelector('[data-el="photo-instructions-scroll-hint"]'),
     photoInstructionsContinue: root.querySelector('[data-el="photo-instructions-continue"]'),
     photoInstructionsClose: root.querySelector('[data-el="photo-instructions-close"]'),
+    demoSubmitModal: root.querySelector('[data-el="demo-submit-modal"]'),
+    demoSubmitStageIntro: root.querySelector('[data-el="demo-submit-stage-intro"]'),
+    demoSubmitStagePreview: root.querySelector('[data-el="demo-submit-stage-preview"]'),
+    demoSubmitImage: root.querySelector('[data-el="demo-submit-image"]'),
+    demoSubmitCancel: root.querySelector('[data-el="demo-submit-cancel"]'),
+    demoSubmitContinue: root.querySelector('[data-el="demo-submit-continue"]'),
+    demoSubmitBack: root.querySelector('[data-el="demo-submit-back"]'),
+    demoSubmitConfirm: root.querySelector('[data-el="demo-submit-confirm"]'),
   };
 }
 
@@ -885,7 +927,8 @@ export function mountHub(options = {}) {
   }
 
   async function openSubmitForm(triggerEvent = null) {
-    if (!hubForms?.submit) {
+    const demoModeEnabled = Boolean(hubState && hubState.demoMode && hubState.demoMode.enabled === true);
+    if (!hubForms?.submit && !demoModeEnabled) {
       return;
     }
     const shouldShowPhotoInstructionsFirst = Boolean(
@@ -918,6 +961,14 @@ export function mountHub(options = {}) {
     if (!acknowledgements) {
       return;
     }
+    if (demoModeEnabled) {
+      const confirmedDemoSubmit = await requestDemoSubmitPreview();
+      if (!confirmedDemoSubmit) {
+        return;
+      }
+      await performAction('/api/hub/submit', acknowledgements);
+      return;
+    }
     const result = await showForm(hubForms.submit);
     if (!result || result.action !== 'SUBMITTED') {
       return;
@@ -937,6 +988,71 @@ export function mountHub(options = {}) {
       return;
     }
     await performAction('/api/hub/delete', result.values);
+  }
+
+  function requestDemoSubmitPreview() {
+    return new Promise((resolve) => {
+      if (
+        !refs.demoSubmitModal ||
+        !refs.demoSubmitStageIntro ||
+        !refs.demoSubmitStagePreview ||
+        !refs.demoSubmitImage ||
+        !refs.demoSubmitCancel ||
+        !refs.demoSubmitContinue ||
+        !refs.demoSubmitBack ||
+        !refs.demoSubmitConfirm
+      ) {
+        resolve(false);
+        return;
+      }
+
+      refs.demoSubmitImage.src = demoPhotoUrl;
+      refs.demoSubmitStageIntro.classList.remove('hidden');
+      refs.demoSubmitStagePreview.classList.add('hidden');
+
+      const close = (result) => {
+        refs.demoSubmitModal.classList.add('hidden');
+        refs.demoSubmitCancel.removeEventListener('click', onCancel);
+        refs.demoSubmitContinue.removeEventListener('click', onContinue);
+        refs.demoSubmitBack.removeEventListener('click', onBack);
+        refs.demoSubmitConfirm.removeEventListener('click', onConfirm);
+        refs.demoSubmitModal.removeEventListener('click', onBackdrop);
+        refs.demoSubmitStageIntro.classList.remove('hidden');
+        refs.demoSubmitStagePreview.classList.add('hidden');
+        resolve(result);
+      };
+
+      const onCancel = () => {
+        close(false);
+      };
+
+      const onContinue = () => {
+        refs.demoSubmitStageIntro.classList.add('hidden');
+        refs.demoSubmitStagePreview.classList.remove('hidden');
+      };
+
+      const onBack = () => {
+        refs.demoSubmitStagePreview.classList.add('hidden');
+        refs.demoSubmitStageIntro.classList.remove('hidden');
+      };
+
+      const onConfirm = () => {
+        close(true);
+      };
+
+      const onBackdrop = (event) => {
+        if (event.target === refs.demoSubmitModal) {
+          close(false);
+        }
+      };
+
+      refs.demoSubmitCancel.addEventListener('click', onCancel);
+      refs.demoSubmitContinue.addEventListener('click', onContinue);
+      refs.demoSubmitBack.addEventListener('click', onBack);
+      refs.demoSubmitConfirm.addEventListener('click', onConfirm);
+      refs.demoSubmitModal.addEventListener('click', onBackdrop);
+      refs.demoSubmitModal.classList.remove('hidden');
+    });
   }
 
   function requestSubmitAcknowledgements() {
@@ -1103,6 +1219,7 @@ export function mountHub(options = {}) {
       return;
     }
 
+    const demoModeEnabled = Boolean(state.demoMode && state.demoMode.enabled === true);
     const isVerified = Boolean(
       state.viewerShouldDisplayVerified === undefined ? state.viewerVerifiedByFlair : state.viewerShouldDisplayVerified
     );
@@ -1110,13 +1227,18 @@ export function mountHub(options = {}) {
     const isRestricted = Boolean(state.viewerBlocked && !isVerified);
 
     applyTheme(state.resolvedTheme);
+    refs.loadingWorktreeBadge?.classList.toggle('hidden', demoModeEnabled);
+    refs.heroWorktreeBadge?.classList.toggle('hidden', demoModeEnabled);
     refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
     refs.metaSubreddit.textContent = state.subredditName ? `Subreddit: r/${state.subredditName}` : '';
 
     refs.metaStatus.className = 'status-line';
     let statusText = 'Not verified';
     let statusClass = 'status-neutral';
-    if (isVerified) {
+    if (demoModeEnabled) {
+      statusText = 'Demo Mode';
+      statusClass = 'status-warning';
+    } else if (isVerified) {
       statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
       statusClass = 'status-verified';
     } else if (awaitingFlairPropagation) {
@@ -1141,13 +1263,23 @@ export function mountHub(options = {}) {
     refs.metaStatus.classList.add(statusClass);
     refs.metaStatus.textContent = statusText;
 
+    const canOpenModPanel = Boolean(state.canReview || (demoModeEnabled && state.viewerUsername));
     refs.pendingBadge.textContent = state.pendingCount > 99 ? '99+' : String(state.pendingCount || 0);
-    refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
-    refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
+    refs.pendingBadge.classList.toggle('hidden', !(canOpenModPanel && state.pendingCount > 0));
+    refs.modPanelBtn.classList.toggle('hidden', !canOpenModPanel);
 
     let commandTitle = 'Review the instructions, then submit your verification.';
     let infoText = '';
-    if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
+    if (demoModeEnabled) {
+      commandTitle = 'Safe demo environment';
+      infoText =
+        String(state.demoMode.explanation || '').trim() ||
+        'This subreddit is configured for demo use. Real submissions and verification changes are disabled.';
+      infoText += '';
+      if (state.canReview) {
+        infoText += '\nOpen the Mod Panel to review the built-in demo submission.';
+      }
+    } else if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
     } else if (awaitingFlairPropagation) {
@@ -1206,14 +1338,17 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (
+    const canShowDemoSubmitActions = demoModeEnabled && !state.requiresInitialSetup;
+    const canShowLiveSubmitActions =
+      !demoModeEnabled &&
       !isVerified &&
       !isRestricted &&
       !awaitingFlairPropagation &&
       !state.requiresInitialSetup &&
       state.config.verificationsEnabled &&
-      !(state.userLatest && state.userLatest.status === 'pending')
-    ) {
+      !(state.userLatest && state.userLatest.status === 'pending');
+
+    if (canShowDemoSubmitActions || canShowLiveSubmitActions) {
       refs.actionRow.appendChild(
         makeButton('Photo Requirements', 'btn-secondary', (event) => {
           openPhotoInstructionsModal(event);
@@ -1226,7 +1361,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!isVerified && !isRestricted && state.userLatest?.status === 'pending') {
+    if (!demoModeEnabled && !isVerified && !isRestricted && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw', {}, {
@@ -1238,7 +1373,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (isVerified) {
+    if (!demoModeEnabled && isVerified) {
       refs.actionRow.appendChild(
         makeButton('Remove Verification', 'btn-danger', () => {
           void openDeleteForm();

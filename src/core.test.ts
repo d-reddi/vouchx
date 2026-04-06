@@ -4,26 +4,36 @@ import test from 'node:test';
 import {
   assertCanReview,
   approveVerification,
+  blockUserForModerator,
   buildModeratorUpdateNotice,
   checkVerificationFlair,
+  cancelReopenedVerification,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  deleteCurrentUserVerificationData,
   denyVerification,
   dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
+  getDemoModeState,
   getCurrentModeratorPermissionList,
   getModeratorAccessSnapshot,
   getModeratorStats,
   getViewerFlairSnapshot,
   isViewerAwaitingFlairPropagation,
+  loadModDashboard,
   loadApprovalFlairOptionsForSettings,
   looksLikeInternalModmailArchiveError,
   onSaveFlairTemplateValues,
+  onSaveModmailTemplatesValues,
+  onSaveThemeValues,
   removeApprovedVerificationByModerator,
+  reopenDeniedVerification,
   sendUserModmailWithFallback,
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
+  setPendingClaimState,
+  setDemoModeOverride,
   normalizeModmailConversationId,
   normalizeMaxDenialsBeforeBlockSetting,
   normalizeSubmittedPhotoUrl,
@@ -31,6 +41,8 @@ import {
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
   onModeratorPurgeUserData,
+  submitVerification,
+  withdrawCurrentUserPendingVerification,
   parseRecord,
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
@@ -39,12 +51,14 @@ import {
   toModPanelState,
   toPublicHubConfig,
   toHubState,
+  unblockUserForModerator,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
   validateFlairTemplateId,
   validateMaxDenialsBeforeBlockSetting,
   withRedisLock,
   usernameLookupFields,
+  type DemoModeState,
   type RuntimeConfig,
 } from './core.ts';
 
@@ -136,10 +150,36 @@ function buildRuntimeConfig(): RuntimeConfig {
   };
 }
 
+function buildDemoModeStateForTest(overrides: Partial<DemoModeState> = {}): DemoModeState {
+  return {
+    configured: false,
+    enabled: false,
+    forcedOff: false,
+    canOverride: false,
+    subredditId: 't5_example',
+    subredditName: 'example',
+    demoSubmissionId: null,
+    explanation: '',
+    capabilities: {
+      allowThemeEditing: true,
+      allowFlairSettingsEdit: true,
+      allowTemplateEditing: true,
+      allowRealApprove: true,
+      allowRealDeny: true,
+      allowRealQueueMutations: true,
+      allowBlockManagement: true,
+      allowUserSubmissions: true,
+      showDemoSubmission: false,
+    },
+    ...overrides,
+  };
+}
+
 function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]> = {}): Parameters<typeof toHubState>[0] {
   return {
     viewerUsername: 'example_user',
     subredditName: 'example',
+    demoMode: buildDemoModeStateForTest(),
     moderatorAccess: {
       state: 'denied',
       permissionState: 'unknown',
@@ -1003,6 +1043,10 @@ function reopenedAuditByReopenedTestKey(subredditId: string, reopenedVerificatio
   return `${subredditPrefixKey(subredditId)}:reopened-audit-by-reopened:${reopenedVerificationId.trim()}`;
 }
 
+function demoQueueStateTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:demo:queue-state`;
+}
+
 function auditDateIndexTestKey(subredditId: string): string {
   return `${subredditPrefixKey(subredditId)}:idx:audit:date`;
 }
@@ -1107,8 +1151,12 @@ function seedAuditEntries(
 }
 
 function createReviewActionContext(options?: {
+  subredditId?: string;
+  subredditName?: string;
   recordOverrides?: Record<string, unknown>;
   moderatorName?: string;
+  permissions?: string[];
+  flairTemplateId?: string;
   validationResponses?: Array<{ username?: string; id?: string; isSuspended?: boolean } | Error | null>;
   bannedResponses?: Array<unknown[] | Error>;
   unbanResponses?: Array<true | Error>;
@@ -1121,8 +1169,8 @@ function createReviewActionContext(options?: {
   initialRedis?: Record<string, string>;
   initialHashes?: Record<string, Record<string, string>>;
 }) {
-  const subredditId = 't5_example';
-  const subredditName = 'ExampleSub';
+  const subredditId = options?.subredditId ?? 't5_example';
+  const subredditName = options?.subredditName ?? 'ExampleSub';
   const moderatorName = options?.moderatorName ?? 'Mod_One';
   const record = buildRecord({
     subredditId,
@@ -1179,7 +1227,7 @@ function createReviewActionContext(options?: {
     hashStore.set(key, new Map(Object.entries(entries)));
   }
 
-  ensureHash(subredditConfigTestKey(subredditId)).set('flair_template_id', 'abc-123');
+  ensureHash(subredditConfigTestKey(subredditId)).set('flair_template_id', options?.flairTemplateId ?? 'abc-123');
   redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
   redisStore.set(userPendingTestKey(subredditId, normalizedUsername), record.id);
   redisStore.set(userLatestTestKey(subredditId, normalizedUsername), record.id);
@@ -1221,12 +1269,25 @@ function createReviewActionContext(options?: {
         async getCurrentUser() {
           return {
             async getModPermissionsForSubreddit() {
-              return ['access'];
+              return options?.permissions ?? ['access'];
+            },
+            createdAt: new Date('2024-01-01T00:00:00.000Z'),
+            commentKarma: 50,
+            linkKarma: 50,
+            async getUserFlairBySubreddit() {
+              return null;
             },
           };
         },
         async getCurrentSubreddit() {
           return { name: subredditName };
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              return [];
+            },
+          };
         },
         getBannedUsers() {
           return {
@@ -1383,6 +1444,9 @@ function createReviewActionContext(options?: {
         },
         async hGet(key: string, field: string) {
           return ensureHash(key).get(field) ?? null;
+        },
+        async hLen(key: string) {
+          return ensureHash(key).size;
         },
         async hSet(key: string, entries: Record<string, string>) {
           const hash = ensureHash(key);
@@ -2168,6 +2232,307 @@ test('toModPanelState includes account details on pending items', () => {
 
   assert.equal(modState.pending.length, 1);
   assert.deepEqual(modState.pending[0].accountDetails, accountDetails);
+});
+
+test('getDemoModeState enables demo mode for the configured subreddit name only', () => {
+  const byName = getDemoModeState('t5_other', 'vouchx');
+  const byIdOnly = getDemoModeState('t5_example', 'example');
+  const disabled = getDemoModeState('t5_other', 'example');
+
+  assert.equal(byName.configured, true);
+  assert.equal(byName.enabled, true);
+  assert.equal(byName.forcedOff, false);
+  assert.equal(byName.demoSubmissionId, 'demo-submission-1');
+  assert.equal(byName.capabilities.allowThemeEditing, false);
+  assert.equal(byName.capabilities.allowUserSubmissions, false);
+
+  assert.equal(byIdOnly.enabled, false);
+  assert.equal(disabled.configured, false);
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.capabilities.showDemoSubmission, false);
+});
+
+test('setDemoModeOverride lets dcltw disable and re-enable demo mode for a demo install', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx_dev',
+    moderatorName: 'dcltw',
+    permissions: ['all'],
+  });
+
+  const disabledState = await setDemoModeOverride(reviewContext.context as never, true);
+  assert.equal(disabledState.enabled, false);
+  assert.equal(disabledState.forcedOff, true);
+  assert.equal(disabledState.canOverride, true);
+
+  const disabledDashboard = await loadModDashboard(reviewContext.context as never);
+  assert.equal(disabledDashboard.demoMode.enabled, false);
+  assert.equal(disabledDashboard.demoMode.forcedOff, true);
+  assert.equal(disabledDashboard.pending.length, 1);
+  assert.equal('status' in disabledDashboard.pending[0], true);
+
+  const enabledState = await setDemoModeOverride(reviewContext.context as never, false);
+  assert.equal(enabledState.enabled, true);
+  assert.equal(enabledState.forcedOff, false);
+
+  const enabledDashboard = await loadModDashboard(reviewContext.context as never);
+  assert.equal(enabledDashboard.demoMode.enabled, true);
+  const reenabledPending = enabledDashboard.pending[0];
+  assert.ok(reenabledPending && !('status' in reenabledPending));
+  if (!reenabledPending || 'status' in reenabledPending) {
+    assert.fail('expected the demo queue item after re-enabling demo mode');
+  }
+  assert.equal(reenabledPending.isDemoItem, true);
+});
+
+test('setDemoModeOverride rejects non-dcltw moderators', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx_dev',
+    moderatorName: 'mod_one',
+    permissions: ['all'],
+  });
+
+  await assert.rejects(setDemoModeOverride(reviewContext.context as never, true), /Only u\/dcltw/i);
+});
+
+test('loadModDashboard injects a synthetic demo queue item for the demo subreddit', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+    permissions: ['all'],
+    flairTemplateId: '',
+  });
+
+  const dashboard = await loadModDashboard(reviewContext.context as never);
+
+  assert.equal(dashboard.demoMode.enabled, true);
+  assert.equal(dashboard.pendingCount, 1);
+  assert.equal(dashboard.pending.length, 1);
+  const pendingItem = dashboard.pending[0];
+  assert.ok(pendingItem);
+  assert.equal('status' in pendingItem, false);
+  if ('status' in pendingItem) {
+    assert.fail('expected a synthetic demo queue item');
+  }
+  assert.equal(pendingItem.id, 'demo-submission-1');
+  assert.equal(pendingItem.isDemoItem, true);
+  assert.equal(dashboard.approved.length, 1);
+  assert.equal(dashboard.approved[0]?.id, 'demo-record-approved-1');
+  assert.equal(dashboard.approved[0]?.isDemoItem, true);
+  assert.equal(dashboard.auditLog.length, 1);
+  assert.equal(dashboard.auditLog[0]?.id, 'demo-record-audit-1');
+  assert.equal(dashboard.auditLog[0]?.isDemoItem, true);
+  assert.ok(reviewContext.redisStore.has(demoQueueStateTestKey(reviewContext.subredditId)));
+});
+
+test('demo mode search helpers return synthetic records instead of real subreddit history', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+    permissions: ['all'],
+  });
+
+  const history = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {});
+  const approved = await searchApprovedRecords(reviewContext.context as never, reviewContext.subredditId, {});
+  const audit = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {});
+
+  assert.equal(history.items.length, 1);
+  assert.equal(history.items[0]?.id, 'demo-record-history-1');
+  assert.equal(history.items[0]?.isDemoItem, true);
+  assert.equal(approved.items.length, 1);
+  assert.equal(approved.items[0]?.id, 'demo-record-approved-1');
+  assert.equal(approved.items[0]?.isDemoItem, true);
+  assert.equal(audit.items.length, 1);
+  assert.equal(audit.items[0]?.id, 'demo-record-audit-1');
+  assert.equal(audit.items[0]?.isDemoItem, true);
+});
+
+test('demo mode enables all moderator panel surfaces for moderators without Manage Users', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx_dev',
+    permissions: ['config'],
+    flairTemplateId: '',
+  });
+
+  const dashboard = await loadModDashboard(reviewContext.context as never);
+
+  assert.equal(dashboard.demoMode.enabled, true);
+  assert.equal(dashboard.isModerator, true);
+  assert.equal(dashboard.canManageUsers, false);
+  assert.equal(dashboard.canReview, true);
+  assert.equal(dashboard.canAccessSettingsTab, true);
+  assert.equal(dashboard.pendingCount, 1);
+  await assert.doesNotReject(assertCanReview(reviewContext.context as never, 'vouchx_dev', 'Mod_One'));
+});
+
+test('demo mode enables all moderator panel surfaces for signed-in non-mods', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx_dev',
+    permissions: [],
+    flairTemplateId: '',
+  });
+
+  const dashboard = await loadModDashboard(reviewContext.context as never);
+
+  assert.equal(dashboard.demoMode.enabled, true);
+  assert.equal(dashboard.viewerUsername, 'Mod_One');
+  assert.equal(dashboard.isModerator, false);
+  assert.equal(dashboard.canManageUsers, false);
+  assert.equal(dashboard.canReview, true);
+  assert.equal(dashboard.canAccessSettingsTab, true);
+  assert.equal(dashboard.pendingCount, 1);
+  await assert.doesNotReject(assertCanReview(reviewContext.context as never, 'vouchx_dev', 'Mod_One'));
+});
+
+test('setPendingClaimState persists claim and unclaim for the synthetic demo item', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+  });
+
+  const claimed = await setPendingClaimState(reviewContext.context as never, 'demo-submission-1', true);
+  const claimedState = JSON.parse(reviewContext.redisStore.get(demoQueueStateTestKey(reviewContext.subredditId)) ?? '{}');
+
+  assert.equal(claimed.changed, true);
+  assert.equal(claimed.item.isDemoItem, true);
+  assert.equal(claimed.item.claimedBy, 'Mod_One');
+  assert.equal(claimed.pendingCount, 1);
+  assert.equal(claimedState.claimedBy, 'Mod_One');
+
+  const unclaimed = await setPendingClaimState(reviewContext.context as never, 'demo-submission-1', false);
+  const unclaimedState = JSON.parse(reviewContext.redisStore.get(demoQueueStateTestKey(reviewContext.subredditId)) ?? '{}');
+
+  assert.equal(unclaimed.changed, true);
+  assert.equal(unclaimed.item.claimedBy, null);
+  assert.equal(unclaimedState.claimedBy, null);
+  assert.equal(unclaimedState.claimedAt, null);
+});
+
+test('submitVerification simulates demo submissions without storing a real request or requiring uploads', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+  });
+  const initialRedisSize = reviewContext.redisStore.size;
+  const initialPendingCount = reviewContext.zsetStore.get(pendingIndexTestKey(reviewContext.subredditId))?.size ?? 0;
+
+  const result = await submitVerification(
+    {
+      is18Confirmed: true,
+      adultOnlySelfPhotosConfirmed: true,
+      termsAccepted: true,
+      photoOneUrl: '',
+      photoTwoUrl: '',
+    },
+    reviewContext.context as never
+  );
+
+  assert.equal(result.outcome, 'demo_simulated');
+  assert.equal(result.pendingModmail.status, 'skipped');
+  assert.equal(result.pendingModmail.reason, 'demo mode');
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.redisStore.size, initialRedisSize);
+  assert.equal(reviewContext.zsetStore.get(pendingIndexTestKey(reviewContext.subredditId))?.size ?? 0, initialPendingCount);
+  assert.equal(reviewContext.redisStore.get(userPendingTestKey(reviewContext.subredditId, 'Mod_One')) ?? null, null);
+});
+
+test('approveVerification simulates demo approvals without real side effects', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+  });
+
+  await setPendingClaimState(reviewContext.context as never, 'demo-submission-1', true);
+  const result = await approveVerification(reviewContext.context as never, 'demo-submission-1');
+  const demoState = JSON.parse(reviewContext.redisStore.get(demoQueueStateTestKey(reviewContext.subredditId)) ?? '{}');
+
+  assert.equal(result.outcome, 'demo_simulated');
+  assert.equal(result.applied, true);
+  assert.equal(result.flair.status, 'skipped');
+  assert.equal(result.modmail.status, 'skipped');
+  assert.equal(result.modNote.status, 'skipped');
+  assert.equal(demoState.lastOutcome, 'approved');
+  assert.equal(demoState.claimedBy, null);
+  assert.equal(reviewContext.setUserFlairCalls.length, 0);
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.unbanUserCalls.length, 0);
+});
+
+test('denyVerification simulates demo denials without real side effects', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+  });
+
+  const result = await denyVerification(reviewContext.context as never, 'demo-submission-1', 'reason_1', 'demo');
+  const demoState = JSON.parse(reviewContext.redisStore.get(demoQueueStateTestKey(reviewContext.subredditId)) ?? '{}');
+
+  assert.equal(result.outcome, 'demo_simulated');
+  assert.equal(result.applied, true);
+  assert.equal(result.modmail.status, 'skipped');
+  assert.equal(result.modNote.status, 'skipped');
+  assert.equal(demoState.lastOutcome, 'denied');
+  assert.equal(reviewContext.createConversationCalls.length, 0);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+  assert.equal(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+});
+
+test('demo mode rejects blocked workflow mutations server-side', async () => {
+  const reviewContext = createReviewActionContext({
+    subredditName: 'vouchx',
+    permissions: ['all'],
+  });
+
+  const expectations = [
+    () => withdrawCurrentUserPendingVerification(reviewContext.context as never),
+    () => deleteCurrentUserVerificationData(reviewContext.context as never),
+    () => onSaveFlairTemplateValues({ flairTemplateId: 'abc-123' }, reviewContext.context as never),
+    () =>
+      onSaveModmailTemplatesValues(
+        {
+          pendingTurnaroundDays: '3',
+          modmailSubject: 'Pending',
+          pendingBody: 'Pending body',
+          approveHeader: 'Approved',
+          approveBody: 'Approved body',
+          denyHeader: 'Denied',
+          denyReasonTemplates: { reason_1: 'Denied body' },
+          removeHeader: 'Removed',
+          removeBody: 'Removed body',
+        },
+        reviewContext.context as never
+      ),
+    () =>
+      onSaveThemeValues(
+        {
+          themePreset: 'coastal_light',
+          useCustomColors: false,
+          customPrimary: '',
+          customAccent: '',
+          customBackground: '',
+        },
+        reviewContext.context as never
+      ),
+    () =>
+      blockUserForModerator(
+        reviewContext.context as never,
+        reviewContext.subredditId,
+        'vouchx',
+        'example_user',
+        'Mod_One'
+      ),
+    () =>
+      unblockUserForModerator(
+        reviewContext.context as never,
+        reviewContext.subredditId,
+        'vouchx',
+        'example_user',
+        'Mod_One'
+      ),
+    () => reopenDeniedVerification(reviewContext.context as never, 'denied-id'),
+    () => cancelReopenedVerification(reviewContext.context as never, 'reopened-id'),
+    () => removeApprovedVerificationByModerator(reviewContext.context as never, 'approved-id', 'demo'),
+  ];
+
+  for (const runExpectation of expectations) {
+    await assert.rejects(runExpectation(), /Demo mode/i);
+  }
 });
 
 test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {

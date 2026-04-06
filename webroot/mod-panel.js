@@ -1,6 +1,7 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
+import demoPhotoUrl from './demo.jpg';
 
 (function () {
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -26,6 +27,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const heroQueueStatus = document.getElementById('hero-queue-status');
   const heroUpdated = document.getElementById('hero-updated');
   const updateNotice = document.getElementById('update-notice');
+  const demoModeBanner = document.getElementById('demo-mode-banner');
+  const demoModeBannerTitle = demoModeBanner ? demoModeBanner.querySelector('.panel-warning-title') : null;
+  const demoModeBannerCopy = document.getElementById('demo-mode-banner-copy');
+  const demoModeOverrideBtn = document.getElementById('demo-mode-override-btn');
   const updateNoticeKicker = document.getElementById('update-notice-kicker');
   const updateNoticeTitle = document.getElementById('update-notice-title');
   const updateNoticeCopy = document.getElementById('update-notice-copy');
@@ -34,6 +39,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const updateNoticeReleaseLinkBtn = document.getElementById('update-notice-release-link-btn');
   const updateNoticeDismissBtn = document.getElementById('update-notice-dismiss-btn');
   const pendingFlairWarning = document.getElementById('pending-flair-warning');
+  const pendingFlairWarningTitle = pendingFlairWarning ? pendingFlairWarning.querySelector('.panel-warning-title') : null;
   const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
   const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
   const pendingFlairWarningGuideBtn = document.getElementById('pending-flair-warning-guide-btn');
@@ -88,6 +94,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const teamStatsBreakdown = document.getElementById('team-stats-breakdown');
   const blockedList = document.getElementById('blocked-list');
   const blockedSearchInput = document.getElementById('blocked-search');
+  const blockedDemoNote = document.getElementById('blocked-demo-note');
   const storageMeterFill = document.getElementById('storage-meter-fill');
   const storagePercent = document.getElementById('storage-percent');
   const storageSummary = document.getElementById('storage-summary');
@@ -101,6 +108,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const saveTemplatesBtn = document.getElementById('save-templates-btn');
   const saveThemeBtn = document.getElementById('save-theme-btn');
   const resetThemeBtn = document.getElementById('reset-theme-btn');
+  const generalDemoLockNote = document.getElementById('general-demo-lock-note');
+  const templatesDemoLockNote = document.getElementById('templates-demo-lock-note');
+  const themesDemoLockNote = document.getElementById('themes-demo-lock-note');
 
   const approvalFlairSelect = document.getElementById('approval-flair-select');
   const approvalFlairSelectHelp = document.getElementById('approval-flair-select-help');
@@ -726,6 +736,75 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return buildPendingFlairWarningText(getSavedFlairTemplateValidation());
   }
 
+  function isDemoModeEnabled() {
+    return Boolean(state && state.demoMode && state.demoMode.enabled === true);
+  }
+
+  function isDemoModeConfigured() {
+    return Boolean(state && state.demoMode && state.demoMode.configured === true);
+  }
+
+  function isDemoModeForcedOff() {
+    return Boolean(state && state.demoMode && state.demoMode.forcedOff === true);
+  }
+
+  function canOverrideDemoMode() {
+    return Boolean(state && state.demoMode && state.demoMode.canOverride === true);
+  }
+
+  function getDemoModeCapabilities() {
+    return state && state.demoMode && state.demoMode.capabilities ? state.demoMode.capabilities : null;
+  }
+
+  function isDemoPendingItem(item) {
+    return Boolean(item && item.isDemoItem === true);
+  }
+
+  function buildDemoModeBannerCopy() {
+    if (!state || !state.demoMode || !state.demoMode.configured) {
+      return '';
+    }
+    return (
+      String(state.demoMode.explanation || '').trim() ||
+      (state.demoMode.enabled
+        ? 'This is a demo environment. Queue actions are simulated and settings are locked'
+        : 'Demo mode has been manually disabled for this install. Real moderator workflows are active again.')
+    );
+  }
+
+  function buildDemoQueueWarningText() {
+    return '';
+  }
+
+  function getDenyReasonsForItem(item) {
+    const configuredReasons = getEnabledDenyReasons();
+    if (configuredReasons.length > 0) {
+      return configuredReasons;
+    }
+    if (!isDemoPendingItem(item)) {
+      return configuredReasons;
+    }
+    return [
+      {
+        id: 'reason_1',
+        label: 'Demo deny reason',
+        enabled: true,
+      },
+    ];
+  }
+
+  function setElementsDisabled(elements, disabled, title = '') {
+    for (const element of elements) {
+      if (!element) {
+        continue;
+      }
+      element.disabled = disabled;
+      if (title) {
+        element.title = disabled ? title : '';
+      }
+    }
+  }
+
   function setFlairTemplateValidationOverride(validation) {
     flairTemplateValidationOverride =
       validation && typeof validation === 'object' ? { ...validation, source: 'draft' } : null;
@@ -741,15 +820,116 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (!pendingFlairWarning || !pendingFlairWarningText) {
       return;
     }
+    if (isDemoModeEnabled()) {
+      pendingFlairWarning.classList.add('hidden');
+      pendingFlairWarningText.textContent = '';
+      pendingFlairWarningText.classList.add('hidden');
+      if (pendingFlairWarningSettingsBtn) {
+        pendingFlairWarningSettingsBtn.classList.add('hidden');
+      }
+      if (pendingFlairWarningGuideBtn) {
+        pendingFlairWarningGuideBtn.classList.add('hidden');
+      }
+      return;
+    }
     const validation = getSavedFlairTemplateValidation();
     const shouldShow = !validation.isValid;
+    if (pendingFlairWarningTitle) {
+      pendingFlairWarningTitle.textContent = 'Approvals are disabled';
+    }
     pendingFlairWarning.classList.toggle('hidden', !shouldShow);
     pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
+    pendingFlairWarningText.classList.toggle('hidden', !pendingFlairWarningText.textContent);
     if (pendingFlairWarningSettingsBtn) {
       pendingFlairWarningSettingsBtn.classList.toggle('hidden', !shouldShow || !canAccessSettingsTab());
     }
     if (pendingFlairWarningGuideBtn) {
       pendingFlairWarningGuideBtn.classList.toggle('hidden', !shouldShow || !moderatorQuickStartUrl);
+    }
+  }
+
+  function renderDemoModeBanner() {
+    if (!demoModeBanner || !demoModeBannerCopy) {
+      return;
+    }
+    const configured = isDemoModeConfigured();
+    const enabled = isDemoModeEnabled();
+    demoModeBanner.classList.toggle('hidden', !configured);
+    demoModeBannerCopy.textContent = configured ? buildDemoModeBannerCopy() : '';
+    if (demoModeBannerTitle) {
+      demoModeBannerTitle.textContent = enabled ? 'Demo mode is active' : 'Demo mode is disabled for this install';
+    }
+    if (demoModeOverrideBtn) {
+      const showOverride = configured && canOverrideDemoMode();
+      demoModeOverrideBtn.classList.toggle('hidden', !showOverride);
+      demoModeOverrideBtn.textContent = enabled ? 'Disable demo mode for this install' : 'Re-enable demo mode';
+      demoModeOverrideBtn.title = enabled
+        ? 'Temporarily turn off demo restrictions for this subreddit install.'
+        : 'Turn demo restrictions back on for this subreddit install.';
+    }
+  }
+
+  function renderDemoRestrictions() {
+    const enabled = isDemoModeEnabled();
+    const blockedActionsTitle = enabled ? 'Demo mode keeps this control read-only.' : '';
+    const generalInputs = [
+      verificationsEnabledInput,
+      approvalFlairSelect,
+      flairTemplateInput,
+      flairCssClassInput,
+      approvalFlairSecondSelect,
+      approvalFlairThirdSelect,
+      requiredPhotoCountInput,
+      photoInstructionsInput,
+      saveFlairBtn,
+    ];
+    const templateInputs = [
+      pendingTurnaroundDaysInput,
+      modmailSubjectInput,
+      pendingBodyInput,
+      alwaysIncludeDenialNotesInModmailInput,
+      approveHeaderInput,
+      approveBodyInput,
+      denyHeaderInput,
+      removeHeaderInput,
+      removeBodyInput,
+      saveTemplatesBtn,
+      ...denyReasonTemplateControls.map((control) => control.input),
+    ];
+    const themeInputs = [
+      useCustomColorsInput,
+      customPrimaryInput,
+      customPrimaryHexInput,
+      customAccentInput,
+      customAccentHexInput,
+      customBackgroundInput,
+      customBackgroundHexInput,
+      resetThemeBtn,
+      saveThemeBtn,
+    ];
+
+    setElementsDisabled(generalInputs, enabled, blockedActionsTitle);
+    setElementsDisabled(templateInputs, enabled, blockedActionsTitle);
+    setElementsDisabled(themeInputs, enabled, blockedActionsTitle);
+
+    if (generalDemoLockNote) {
+      generalDemoLockNote.classList.toggle('hidden', !enabled);
+    }
+    if (templatesDemoLockNote) {
+      templatesDemoLockNote.classList.toggle('hidden', !enabled);
+    }
+    if (themesDemoLockNote) {
+      themesDemoLockNote.classList.toggle('hidden', !enabled);
+    }
+    if (blockUserBtn) {
+      blockUserBtn.disabled = enabled;
+      blockUserBtn.title = enabled ? 'Demo mode disables manual block management.' : '';
+    }
+    if (blockedDemoNote) {
+      blockedDemoNote.classList.toggle('hidden', !enabled);
+      blockedDemoNote.textContent = enabled
+        ? 'Manual block and unblock controls are disabled in this safe demo subreddit.'
+        : '';
     }
   }
 
@@ -1107,6 +1287,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   async function saveFlairSettings() {
     if (isSavingFlairSettings || isBusy) {
+      return;
+    }
+    if (isDemoModeEnabled()) {
+      showToast('Demo mode keeps verification workflow settings read-only.', 'error');
       return;
     }
     isSavingFlairSettings = true;
@@ -1523,6 +1707,15 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         return;
       }
 
+      if (message.type === 'setDemoModeOverride') {
+        applyMutationApiState(
+          await requestJson('/api/mod/demo-mode/override', {
+            forceDisabled: Boolean(message.forceDisabled),
+          })
+        );
+        return;
+      }
+
       if (message.type === 'approve') {
         const payload = await requestJson('/api/mod/approve', {
           verificationId: message.verificationId,
@@ -1661,6 +1854,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
     }
     syncSaveFlairButtonState();
+    if (!isBusy) {
+      renderDemoRestrictions();
+    }
     if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
       void refreshFromRealtimeSignal();
@@ -1671,7 +1867,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (!saveFlairBtn) {
       return;
     }
-    saveFlairBtn.disabled = isBusy || isSavingFlairSettings;
+    saveFlairBtn.disabled = isBusy || isSavingFlairSettings || isDemoModeEnabled();
   }
 
   function postWithBusy(message) {
@@ -2124,6 +2320,49 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return badge;
   }
 
+  function createDemoSubmissionBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge demo-submission-badge';
+    badge.textContent = 'Demo submission';
+    badge.title = 'This queue item is synthetic and safe to review.';
+    return badge;
+  }
+
+  function createDemoMediaGrid() {
+    const wrap = document.createElement('div');
+    wrap.className = 'demo-media-grid';
+    const cards = [
+      { title: 'Demo photo 1' },
+      { title: 'Demo photo 2' },
+    ];
+    for (const item of cards) {
+      const card = document.createElement('div');
+      card.className = 'photo-wrap demo-photo-wrap';
+      const img = document.createElement('img');
+      img.className = 'photo';
+      img.src = demoPhotoUrl;
+      img.alt = item.title;
+      img.loading = 'lazy';
+      img.addEventListener('click', () => openImage(demoPhotoUrl));
+      card.appendChild(img);
+
+      const title = document.createElement('p');
+      title.className = 'demo-media-card-title';
+      title.textContent = item.title;
+      const actions = document.createElement('div');
+      actions.className = 'row';
+      const previewBtn = document.createElement('button');
+      previewBtn.className = 'btn btn-secondary';
+      previewBtn.type = 'button';
+      previewBtn.textContent = 'Preview';
+      previewBtn.addEventListener('click', () => openImage(demoPhotoUrl));
+      actions.appendChild(previewBtn);
+      card.append(title, actions);
+      wrap.appendChild(card);
+    }
+    return wrap;
+  }
+
   function createPendingAccountAgeMeta(item) {
     const meta = document.createElement('p');
     meta.className = 'item-meta pending-account-meta';
@@ -2146,7 +2385,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function buildPendingCard(item) {
     const card = document.createElement('article');
-    card.className = 'item';
+    const isDemoItem = isDemoPendingItem(item);
+    card.className = `item${isDemoItem ? ' demo-item-card' : ''}`;
     card.dataset.pendingId = String(item.id || '');
     const isReReview = Boolean(item.parentVerificationId);
     const isResubmission = Boolean(item.isResubmission);
@@ -2165,6 +2405,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const ageBadge = createPendingAgeBadge(item.submittedAt);
     if (ageBadge) {
       badgeRow.appendChild(ageBadge);
+    }
+    if (isDemoItem) {
+      badgeRow.appendChild(createDemoSubmissionBadge());
     }
     if (accountDetails && accountDetails.banStatus === 'banned') {
       badgeRow.appendChild(createPendingBannedBadge());
@@ -2190,9 +2433,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       submitted.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
     }
     card.appendChild(submitted);
-    card.appendChild(createPendingAccountAgeMeta(item));
-
-    appendSubmissionAcknowledgementMeta(card, item);
+    if (!isDemoItem) {
+      card.appendChild(createPendingAccountAgeMeta(item));
+      appendSubmissionAcknowledgementMeta(card, item);
+    }
 
     if (isClaimed && !isClaimedByOther) {
       const claimMeta = document.createElement('p');
@@ -2210,27 +2454,31 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       card.appendChild(claimLockMeta);
     }
 
-    const imageGrid = document.createElement('div');
-    imageGrid.className = 'image-grid';
-    const photos = [
-      { url: item.photoOneUrl, label: `u/${item.username} photo 1` },
-      { url: item.photoTwoUrl, label: `u/${item.username} photo 2` },
-      { url: item.photoThreeUrl, label: `u/${item.username} photo 3` },
-    ];
-    for (const photo of photos) {
-      const safeUrl = normalizeExternalUrl(photo.url);
-      if (safeUrl) {
-        imageGrid.appendChild(createPhotoWrap(safeUrl, photo.label));
+    if (isDemoItem) {
+      card.appendChild(createDemoMediaGrid());
+    } else {
+      const imageGrid = document.createElement('div');
+      imageGrid.className = 'image-grid';
+      const photos = [
+        { url: item.photoOneUrl, label: `u/${item.username} photo 1` },
+        { url: item.photoTwoUrl, label: `u/${item.username} photo 2` },
+        { url: item.photoThreeUrl, label: `u/${item.username} photo 3` },
+      ];
+      for (const photo of photos) {
+        const safeUrl = normalizeExternalUrl(photo.url);
+        if (safeUrl) {
+          imageGrid.appendChild(createPhotoWrap(safeUrl, photo.label));
+        }
       }
+      card.appendChild(imageGrid);
     }
-    card.appendChild(imageGrid);
 
     let denyReason = null;
     let denyNotes = null;
     let denyBlockRow = null;
     let denyBlockCheckbox = null;
     if (!isClaimedByOther && !isReReview) {
-      const configuredReasons = getEnabledDenyReasons();
+      const configuredReasons = getDenyReasonsForItem(item);
       denyReason = document.createElement('select');
       denyReason.className = 'field-select';
       denyReason.dataset.role = 'deny-reason';
@@ -2266,40 +2514,42 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
       card.appendChild(denyNotes);
 
-      denyBlockRow = document.createElement('label');
-      denyBlockRow.className = 'toggle-row';
-      denyBlockRow.style.marginTop = '0';
-      denyBlockRow.style.display = 'none';
-      denyBlockRow.setAttribute('aria-hidden', 'true');
-      denyBlockCheckbox = document.createElement('input');
-      denyBlockCheckbox.type = 'checkbox';
-      const denyBlockText = document.createElement('span');
-      denyBlockText.textContent = 'Block user';
-      denyBlockRow.append(denyBlockCheckbox, denyBlockText);
+      if (!isDemoItem) {
+        denyBlockRow = document.createElement('label');
+        denyBlockRow.className = 'toggle-row';
+        denyBlockRow.style.marginTop = '0';
+        denyBlockRow.style.display = 'none';
+        denyBlockRow.setAttribute('aria-hidden', 'true');
+        denyBlockCheckbox = document.createElement('input');
+        denyBlockCheckbox.type = 'checkbox';
+        const denyBlockText = document.createElement('span');
+        denyBlockText.textContent = 'Block user';
+        denyBlockRow.append(denyBlockCheckbox, denyBlockText);
 
-      const syncDenyBlockVisibility = () => {
-        const showBlockToggle = Boolean(denyReason && denyReason.value);
-        if (!denyBlockRow || !denyBlockCheckbox) {
-          return;
-        }
-        denyBlockRow.style.display = showBlockToggle ? 'flex' : 'none';
-        denyBlockRow.setAttribute('aria-hidden', showBlockToggle ? 'false' : 'true');
-        denyBlockCheckbox.disabled = !showBlockToggle;
-        if (!showBlockToggle) {
-          denyBlockCheckbox.checked = false;
-        }
-      };
-      denyReason.addEventListener('change', syncDenyBlockVisibility);
-      syncDenyBlockVisibility();
+        const syncDenyBlockVisibility = () => {
+          const showBlockToggle = Boolean(denyReason && denyReason.value);
+          if (!denyBlockRow || !denyBlockCheckbox) {
+            return;
+          }
+          denyBlockRow.style.display = showBlockToggle ? 'flex' : 'none';
+          denyBlockRow.setAttribute('aria-hidden', showBlockToggle ? 'false' : 'true');
+          denyBlockCheckbox.disabled = !showBlockToggle;
+          if (!showBlockToggle) {
+            denyBlockCheckbox.checked = false;
+          }
+        };
+        denyReason.addEventListener('change', syncDenyBlockVisibility);
+        syncDenyBlockVisibility();
+      }
     }
 
     const row = document.createElement('div');
     row.className = 'row';
-    const approvalsAllowed = canApprovePendingItems();
+    const approvalsAllowed = isDemoItem ? true : canApprovePendingItems();
     const approvalFlairChoices = getConfiguredApprovalFlairChoices();
     let approvalChoiceSelect = null;
 
-    if (!isClaimedByOther && state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1) {
+    if (!isDemoItem && !isClaimedByOther && state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1) {
       approvalChoiceSelect = document.createElement('select');
       approvalChoiceSelect.className = 'field-select';
       approvalChoiceSelect.dataset.role = 'approval-flair-choice';
@@ -2318,9 +2568,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn btn-success';
       approveBtn.textContent = 'Approve';
-      approveBtn.dataset.disableWhenApprovalBlocked = 'true';
+      if (!isDemoItem) {
+        approveBtn.dataset.disableWhenApprovalBlocked = 'true';
+      }
       approveBtn.disabled = !approvalsAllowed;
-      if (!approvalsAllowed) {
+      if (!approvalsAllowed && !isDemoItem) {
         approveBtn.title = buildApproveBlockedMessage();
       }
       approveBtn.addEventListener('click', () => {
@@ -2346,18 +2598,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         denyBtn.className = 'btn btn-danger';
         denyBtn.textContent = 'Deny';
         denyBtn.addEventListener('click', () => {
-          if (!getEnabledDenyReasons().length) {
+          const denyReasons = getDenyReasonsForItem(item);
+          if (!denyReasons.length) {
             showToast('No denial reasons are enabled in install settings.', 'error');
             return;
           }
-          if (!denyReason || !denyReason.value) {
+          if (!denyReason || (!denyReason.value && !isDemoItem)) {
             showToast('Select a denial reason before denying.', 'error');
             return;
           }
           postWithBusy({
             type: 'deny',
             verificationId: item.id,
-            reason: denyReason.value,
+            reason: denyReason && denyReason.value ? denyReason.value : denyReasons[0].id,
             moderatorNotes: denyNotes ? denyNotes.value : '',
             blockUser: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
           });
@@ -2455,7 +2708,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     blockedList.innerHTML = '';
     if (!state || !Array.isArray(state.blocked) || state.blocked.length === 0) {
-      renderEmptyState(blockedList, 'No blocked users', 'Users you block manually and users blocked after repeated denials will appear here.');
+      renderEmptyState(
+        blockedList,
+        'No blocked users',
+        isDemoModeEnabled()
+          ? 'Block management is disabled while demo mode is active.'
+          : 'Users you block manually and users blocked after repeated denials will appear here.'
+      );
       return;
     }
 
@@ -2502,6 +2761,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const unblockBtn = document.createElement('button');
       unblockBtn.className = 'btn btn-secondary';
       unblockBtn.textContent = 'Remove Block';
+      unblockBtn.disabled = isDemoModeEnabled();
+      unblockBtn.title = isDemoModeEnabled() ? 'Demo mode disables manual block management.' : '';
       unblockBtn.addEventListener('click', () => {
         postWithBusy({ type: 'unblockUser', username: item.username });
       });
@@ -2851,7 +3112,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       for (const item of historySearchItems) {
         const card = document.createElement('article');
         card.className = 'item';
-        card.appendChild(createUsernameHeading(item.username));
+        card.appendChild(createUsernameHeading(item.username, { isDemoItem: isDemoArchiveItem(item) }));
+        appendDemoArchiveMeta(card, item);
         const statusLabel =
           item.status === 'pending' && item.parentVerificationId
             ? 'PENDING RE-REVIEW'
@@ -2925,7 +3187,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         const card = document.createElement('article');
         card.className = 'item';
 
-        card.appendChild(createUsernameHeading(item.username));
+        card.appendChild(createUsernameHeading(item.username, { isDemoItem: isDemoArchiveItem(item) }));
+        appendDemoArchiveMeta(card, item);
 
         const approved = document.createElement('p');
         approved.className = 'item-meta';
@@ -2939,28 +3202,30 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
         appendSubmissionAcknowledgementMeta(card, item);
 
-        const removeReason = document.createElement('textarea');
-        removeReason.className = 'field-textarea';
-        removeReason.rows = 2;
-        removeReason.placeholder = 'Reason for revocation (sent to user)';
-        card.appendChild(removeReason);
+        if (!isDemoArchiveItem(item)) {
+          const removeReason = document.createElement('textarea');
+          removeReason.className = 'field-textarea';
+          removeReason.rows = 2;
+          removeReason.placeholder = 'Reason for revocation (sent to user)';
+          card.appendChild(removeReason);
 
-        const row = document.createElement('div');
-        row.className = 'row';
+          const row = document.createElement('div');
+          row.className = 'row';
 
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'btn btn-danger';
-        removeBtn.textContent = 'Revoke Verification';
-        removeBtn.addEventListener('click', () => {
-          const trimmedReason = removeReason.value.trim();
-          if (!trimmedReason) {
-            showToast('Revocation reason is required.', 'error');
-            return;
-          }
-          postWithBusy({ type: 'removeVerification', verificationId: item.id, reason: trimmedReason });
-        });
-        row.appendChild(removeBtn);
-        card.appendChild(row);
+          const removeBtn = document.createElement('button');
+          removeBtn.className = 'btn btn-danger';
+          removeBtn.textContent = 'Revoke Verification';
+          removeBtn.addEventListener('click', () => {
+            const trimmedReason = removeReason.value.trim();
+            if (!trimmedReason) {
+              showToast('Revocation reason is required.', 'error');
+              return;
+            }
+            postWithBusy({ type: 'removeVerification', verificationId: item.id, reason: trimmedReason });
+          });
+          row.appendChild(removeBtn);
+          card.appendChild(row);
+        }
 
         approvedSearchResults.appendChild(card);
       }
@@ -2984,7 +3249,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       for (const item of auditSearchItems) {
         const card = document.createElement('article');
         card.className = 'item';
-        card.appendChild(createUsernameHeading(item.username));
+        card.appendChild(createUsernameHeading(item.username, { isDemoItem: isDemoArchiveItem(item) }));
+        appendDemoArchiveMeta(card, item);
 
         const line = document.createElement('p');
         line.className = 'item-meta';
@@ -3400,6 +3666,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       btn.type = 'button';
       btn.className = `theme-card ${presetKey === selectedThemePreset ? 'theme-card-active' : ''}`;
       btn.dataset.preset = presetKey;
+      btn.disabled = isDemoModeEnabled();
+      btn.title = btn.disabled ? 'Demo mode keeps theme presets read-only.' : '';
       btn.innerHTML = `
         <span class="theme-card-title">${presetKey.replaceAll('_', ' ')}</span>
         <span class="theme-swatch-row">
@@ -3531,6 +3799,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     renderPrimaryTabs();
     activePrimaryTab = setTab(activePrimaryTab);
     updateHeroMeta();
+    renderDemoModeBanner();
     renderUpdateNotice();
     renderPendingFlairWarning();
     renderPending();
@@ -3545,6 +3814,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     renderSettings();
     renderTemplates();
     renderThemes();
+    renderDemoRestrictions();
     renderFooterMeta();
     setSettingsTab(activeSettingsTab);
   }
@@ -3593,11 +3863,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return wrap;
   }
 
-  function createUsernameHeading(username) {
+  function createUsernameHeading(username, options = {}) {
+    const isDemoItem = Boolean(options && options.isDemoItem === true);
     const title = document.createElement('h3');
     title.className = 'item-title';
 
     const normalizedUsername = String(username || '').trim().replace(/^u\//i, '');
+    if (isDemoItem) {
+      title.textContent = `u/${normalizedUsername}`;
+      return title;
+    }
     const usernameBtn = document.createElement('button');
     usernameBtn.type = 'button';
     usernameBtn.className = 'username-link';
@@ -3613,17 +3888,33 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return title;
   }
 
+  function isDemoArchiveItem(item) {
+    return Boolean(item && item.isDemoItem === true);
+  }
+
+  function appendDemoArchiveMeta(container, item) {
+    if (!isDemoArchiveItem(item)) {
+      return;
+    }
+    const meta = document.createElement('p');
+    meta.className = 'item-meta';
+    meta.textContent = 'Demo record';
+    container.appendChild(meta);
+  }
+
   function createPendingTitlePrimary(item) {
     const wrap = document.createElement('div');
     wrap.className = 'pending-title-primary';
-    wrap.appendChild(createUsernameHeading(item.username));
+    wrap.appendChild(createUsernameHeading(item.username, { isDemoItem: isDemoPendingItem(item) }));
 
-    const statsBtn = document.createElement('button');
-    statsBtn.type = 'button';
-    statsBtn.className = 'pending-stats-btn';
-    statsBtn.textContent = 'Stats';
-    statsBtn.addEventListener('click', () => openStatsModal(item));
-    wrap.appendChild(statsBtn);
+    if (!isDemoPendingItem(item)) {
+      const statsBtn = document.createElement('button');
+      statsBtn.type = 'button';
+      statsBtn.className = 'pending-stats-btn';
+      statsBtn.textContent = 'Stats';
+      statsBtn.addEventListener('click', () => openStatsModal(item));
+      wrap.appendChild(statsBtn);
+    }
 
     return wrap;
   }
@@ -3640,6 +3931,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function openBlockModal() {
     if (!blockModal || !blockUsernameInput) {
+      return;
+    }
+    if (isDemoModeEnabled()) {
+      showToast('Demo mode disables manual block management.', 'error');
       return;
     }
     blockUsernameInput.value = '';
@@ -3690,6 +3985,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function submitManualBlock() {
     if (!blockUsernameInput) {
+      return;
+    }
+    if (isDemoModeEnabled()) {
+      showToast('Demo mode disables manual block management.', 'error');
+      closeBlockModal();
       return;
     }
     const username = blockUsernameInput.value.trim().replace(/^u\//i, '');
@@ -4132,6 +4432,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
   }
 
+  if (demoModeOverrideBtn) {
+    demoModeOverrideBtn.addEventListener('click', () => {
+      if (!isDemoModeConfigured() || !canOverrideDemoMode()) {
+        showToast('Only u/dcltw can change the demo mode override for this install.', 'error');
+        return;
+      }
+      postWithBusy({
+        type: 'setDemoModeOverride',
+        forceDisabled: !isDemoModeForcedOff(),
+      });
+    });
+  }
+
   if (pendingFlairWarningSettingsBtn) {
     pendingFlairWarningSettingsBtn.addEventListener('click', () => {
       openFlairSettingsSection();
@@ -4504,6 +4817,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   });
 
   saveTemplatesBtn.addEventListener('click', () => {
+    if (isDemoModeEnabled()) {
+      showToast('Demo mode keeps modmail templates read-only.', 'error');
+      return;
+    }
     postWithBusy({
       type: 'saveTemplates',
       pendingTurnaroundDays: pendingTurnaroundDaysInput ? pendingTurnaroundDaysInput.value : '',
@@ -4579,6 +4896,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
   if (saveThemeBtn) {
     saveThemeBtn.addEventListener('click', () => {
+      if (isDemoModeEnabled()) {
+        showToast('Demo mode keeps theme settings read-only.', 'error');
+        return;
+      }
       const useCustomColors = useCustomColorsInput ? Boolean(useCustomColorsInput.checked) : false;
       const normalizedPrimary = normalizeThemeControlForSave(customPrimaryInput, customPrimaryHexInput, '#0e91b6');
       const normalizedAccent = normalizeThemeControlForSave(customAccentInput, customAccentHexInput, '#ff7a45');

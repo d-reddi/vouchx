@@ -45,6 +45,38 @@ type PendingAccountDetailsSnapshot = {
   banStatus: 'banned' | 'not_banned' | 'unknown';
 };
 
+type DemoModeCapabilities = {
+  allowThemeEditing: boolean;
+  allowFlairSettingsEdit: boolean;
+  allowTemplateEditing: boolean;
+  allowRealApprove: boolean;
+  allowRealDeny: boolean;
+  allowRealQueueMutations: boolean;
+  allowBlockManagement: boolean;
+  allowUserSubmissions: boolean;
+  showDemoSubmission: boolean;
+};
+
+type DemoModeState = {
+  configured: boolean;
+  enabled: boolean;
+  forcedOff: boolean;
+  canOverride: boolean;
+  subredditId: string;
+  subredditName: string;
+  demoSubmissionId: string | null;
+  explanation: string;
+  capabilities: DemoModeCapabilities;
+};
+
+type DemoQueueState = {
+  cycleStartedAt: string;
+  claimedBy: string | null;
+  claimedAt: string | null;
+  lastOutcome: 'approved' | 'denied' | null;
+  lastOutcomeAt: string | null;
+};
+
 type VerificationRecord = {
   id: string;
   username: string;
@@ -166,6 +198,7 @@ type UserSnapshot = {
 type DashboardData = {
   viewerUsername: string | null;
   subredditName: string;
+  demoMode: DemoModeState;
   moderatorAccess: ModeratorAccessSnapshot;
   isModerator: boolean;
   canReview: boolean;
@@ -189,7 +222,7 @@ type DashboardData = {
   userLatest: VerificationRecord | null;
   viewerBlocked: BlockedUserEntry | null;
   pendingCount: number;
-  pending: VerificationRecord[];
+  pending: Array<VerificationRecord | PendingPanelItem>;
   approved: ApprovedSearchPanelItem[];
   blocked: BlockedUserEntry[];
   auditLog: AuditSearchPanelItem[];
@@ -274,7 +307,12 @@ type RedisContext = Pick<Devvit.Context, 'redis'>;
 type RedditRedisContext = Pick<Devvit.Context, 'redis' | 'reddit'>;
 type SchedulerContext = Pick<Devvit.Context, 'redis' | 'scheduler'>;
 type ReviewActionKind = 'approval' | 'denial';
-type ActionOutcome = 'completed' | 'invalid_account_removed' | 'validation_retry' | 'banned_confirmation_required';
+type ActionOutcome =
+  | 'completed'
+  | 'invalid_account_removed'
+  | 'validation_retry'
+  | 'banned_confirmation_required'
+  | 'demo_simulated';
 
 type FlairStepResult = {
   status: 'success' | 'failed' | 'skipped';
@@ -404,6 +442,7 @@ type PendingPanelItem = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
+  isDemoItem?: boolean;
   accountDetails?: PendingAccountDetailsSnapshot | null;
 };
 
@@ -413,6 +452,7 @@ type ApprovedSearchPanelItem = {
   approvedAt: string;
   approvedBy: string;
   acknowledgedAt: string;
+  isDemoItem?: boolean;
 };
 
 type ApprovedSearchResponsePayload = {
@@ -429,6 +469,7 @@ type AuditSearchPanelItem = {
   action: AuditAction;
   line: string;
   at: string;
+  isDemoItem?: boolean;
 };
 
 type AuditSearchResponsePayload = {
@@ -487,6 +528,7 @@ type HistorySearchPanelItem = {
   parentVerificationId?: string | null;
   reopenedChildId?: string | null;
   reopenedState?: 'none' | 'yes' | 'yes_cancelled';
+  isDemoItem?: boolean;
 };
 
 type HistorySearchResponsePayload = {
@@ -499,6 +541,7 @@ type HistorySearchResponsePayload = {
 type ModPanelStatePayload = {
   viewerUsername: string | null;
   subredditName: string;
+  demoMode: DemoModeState;
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
@@ -537,6 +580,7 @@ type PublicHubConfig = {
 type HubStatePayload = {
   viewerUsername: string | null;
   subredditName: string;
+  demoMode: DemoModeState;
   isModerator: boolean;
   canReview: boolean;
   requiresInitialSetup: boolean;
@@ -561,11 +605,65 @@ type ReleaseMetadata = {
 };
 
 type SubmitVerificationResult = {
+  outcome: 'submitted' | 'demo_simulated';
   pendingModmail: ModmailStepResult;
 };
 
 const APP_KEY_PREFIX = 'photo-verification';
 const SUBREDDIT_KEY_PREFIX = 'subreddit';
+const DEMO_SUBMISSION_ID = 'demo-submission-1';
+const DEMO_SUBMISSION_USERNAME = 'demo_applicant';
+const DEMO_SUBREDDIT_NAMES = new Set<string>(['vouchx', 'vouchx_dev']);
+const DEMO_SUBREDDIT_IDS = new Set<string>();
+const DEMO_MODE_OVERRIDE_USERNAME = 'dcltw';
+const DEMO_MODE_EXPLANATION =
+  'This is a demo environment. Queue actions are simulated and settings are locked';
+const DEMO_MODE_FORCED_OFF_EXPLANATION =
+  'Demo mode has been manually disabled for this install. Real moderator workflows are enabled again until demo mode is re-enabled.';
+const DEMO_MODE_SUBMISSION_BLOCK_MESSAGE =
+  'Demo mode is active for this subreddit. Real user submissions are disabled in the safe demo environment.';
+const DEMO_MODE_DELETE_BLOCK_MESSAGE =
+  'Demo mode is active for this subreddit. Real verification removal is disabled in the safe demo environment.';
+const DEMO_MODE_FLAIR_SETTINGS_BLOCK_MESSAGE =
+  'Demo mode keeps verification workflow settings read-only.';
+const DEMO_MODE_TEMPLATE_SETTINGS_BLOCK_MESSAGE =
+  'Demo mode keeps modmail templates read-only.';
+const DEMO_MODE_THEME_SETTINGS_BLOCK_MESSAGE =
+  'Demo mode keeps theme settings read-only.';
+const DEMO_MODE_BLOCK_MANAGEMENT_MESSAGE =
+  'Demo mode is active for this subreddit. Block management is disabled in the safe demo environment.';
+const DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE =
+  'Demo mode is active for this subreddit. This action is disabled in the safe demo environment.';
+const DEMO_MODE_OVERRIDE_UNAUTHORIZED_MESSAGE =
+  'Only u/dcltw can change the demo mode override for this install.';
+const DEMO_MODE_OVERRIDE_UNAVAILABLE_MESSAGE =
+  'This subreddit is not configured for demo mode overrides.';
+const DEFAULT_DEMO_MODE_CAPABILITIES = Object.freeze<DemoModeCapabilities>({
+  allowThemeEditing: true,
+  allowFlairSettingsEdit: true,
+  allowTemplateEditing: true,
+  allowRealApprove: true,
+  allowRealDeny: true,
+  allowRealQueueMutations: true,
+  allowBlockManagement: true,
+  allowUserSubmissions: true,
+  showDemoSubmission: false,
+});
+const RESTRICTED_DEMO_MODE_CAPABILITIES = Object.freeze<DemoModeCapabilities>({
+  allowThemeEditing: false,
+  allowFlairSettingsEdit: false,
+  allowTemplateEditing: false,
+  allowRealApprove: false,
+  allowRealDeny: false,
+  allowRealQueueMutations: false,
+  allowBlockManagement: false,
+  allowUserSubmissions: false,
+  showDemoSubmission: true,
+});
+const DEMO_HISTORY_RECORD_ID = 'demo-record-history-1';
+const DEMO_APPROVED_RECORD_ID = 'demo-record-approved-1';
+const DEMO_AUDIT_RECORD_ID = 'demo-record-audit-1';
+const DEMO_RECORD_ACTOR_USERNAME = 'demo_moderator';
 
 const MAX_PENDING_TO_LOAD = 150;
 const SELF_DELETE_INDEX_SCAN_LIMIT = 1000;
@@ -1032,12 +1130,13 @@ function toModPanelState(dashboard: DashboardData): ModPanelStatePayload {
   return {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
+    demoMode: dashboard.demoMode,
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
     hasConfigAccess: dashboard.hasConfigAccess,
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
     flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
-    pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
+    pending: dashboard.pending.map((record) => ('status' in record ? toPendingPanelItem(record) : record)),
     approved: dashboard.approved,
     approvedHasMore: dashboard.approvedHasMore,
     auditLog: dashboard.auditLog,
@@ -1069,6 +1168,7 @@ function toHubState(dashboard: DashboardData): HubStatePayload {
   return {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
+    demoMode: dashboard.demoMode,
     isModerator: dashboard.isModerator,
     canReview: dashboard.canReview,
     requiresInitialSetup: dashboard.requiresInitialSetup,
@@ -1099,7 +1199,246 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     claimedAt: normalizedRecord.claimedAt ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
+    isDemoItem: false,
     accountDetails: normalizedRecord.accountDetails ?? null,
+  };
+}
+
+function isDemoSubreddit(subredditId: string | null | undefined, subredditName: string | null | undefined): boolean {
+  const normalizedSubredditId = sanitizeSubredditId(String(subredditId ?? ''));
+  const normalizedSubredditName = sanitizeSubredditName(String(subredditName ?? ''));
+  return (
+    (normalizedSubredditId ? DEMO_SUBREDDIT_IDS.has(normalizedSubredditId) : false) ||
+    (normalizedSubredditName ? DEMO_SUBREDDIT_NAMES.has(normalizedSubredditName) : false)
+  );
+}
+
+function getDemoModeState(subredditId: string | null | undefined, subredditName: string | null | undefined): DemoModeState {
+  const normalizedSubredditId = sanitizeSubredditId(String(subredditId ?? ''));
+  const normalizedSubredditName = sanitizeSubredditName(String(subredditName ?? ''));
+  const configured = isDemoSubreddit(normalizedSubredditId, normalizedSubredditName);
+  return {
+    configured,
+    enabled: configured,
+    forcedOff: false,
+    canOverride: false,
+    subredditId: normalizedSubredditId,
+    subredditName: normalizedSubredditName,
+    demoSubmissionId: configured ? DEMO_SUBMISSION_ID : null,
+    explanation: configured ? DEMO_MODE_EXPLANATION : '',
+    capabilities: configured ? RESTRICTED_DEMO_MODE_CAPABILITIES : DEFAULT_DEMO_MODE_CAPABILITIES,
+  };
+}
+
+async function getStoredDemoModeForcedOff(context: Pick<Devvit.Context, 'redis'>, subredditId: string): Promise<boolean> {
+  const rawValue = await context.redis.get(demoModeOverrideKey(subredditId));
+  return rawValue === '1';
+}
+
+async function resolveDemoModeState(
+  context: Pick<Devvit.Context, 'redis'>,
+  subredditId: string | null | undefined,
+  subredditName: string | null | undefined,
+  viewerUsername?: string | null
+): Promise<DemoModeState> {
+  const baseState = getDemoModeState(subredditId, subredditName);
+  if (!baseState.configured) {
+    return {
+      ...baseState,
+      canOverride: usernamesEqual(String(viewerUsername ?? ''), DEMO_MODE_OVERRIDE_USERNAME),
+    };
+  }
+
+  const forcedOff = await getStoredDemoModeForcedOff(context, baseState.subredditId);
+  const enabled = !forcedOff;
+  return {
+    ...baseState,
+    enabled,
+    forcedOff,
+    canOverride: usernamesEqual(String(viewerUsername ?? ''), DEMO_MODE_OVERRIDE_USERNAME),
+    explanation: enabled ? DEMO_MODE_EXPLANATION : DEMO_MODE_FORCED_OFF_EXPLANATION,
+    capabilities: enabled ? RESTRICTED_DEMO_MODE_CAPABILITIES : DEFAULT_DEMO_MODE_CAPABILITIES,
+  };
+}
+
+async function setDemoModeOverride(
+  context: Pick<Devvit.Context, 'redis' | 'reddit'> & { subredditId?: string | null; subredditName?: string | null },
+  forceDisabled: boolean
+): Promise<DemoModeState> {
+  const subredditId = sanitizeSubredditId(String(context.subredditId ?? ''));
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  const configuredState = getDemoModeState(subredditId, subredditName);
+  if (!configuredState.configured) {
+    throw new Error(DEMO_MODE_OVERRIDE_UNAVAILABLE_MESSAGE);
+  }
+  const currentUsername = await context.reddit.getCurrentUsername();
+  if (!currentUsername || !usernamesEqual(currentUsername, DEMO_MODE_OVERRIDE_USERNAME)) {
+    throw new Error(DEMO_MODE_OVERRIDE_UNAUTHORIZED_MESSAGE);
+  }
+
+  if (forceDisabled) {
+    await context.redis.set(demoModeOverrideKey(subredditId), '1');
+  } else {
+    await context.redis.del(demoModeOverrideKey(subredditId));
+  }
+
+  return await resolveDemoModeState(context, subredditId, subredditName, currentUsername);
+}
+
+function assertDemoModeCapability(
+  demoMode: DemoModeState,
+  capability: keyof DemoModeCapabilities,
+  blockedMessage: string
+): void {
+  if (demoMode.enabled && !demoMode.capabilities[capability]) {
+    throw new Error(blockedMessage);
+  }
+}
+
+function isDemoSubmissionId(verificationId: string | null | undefined): boolean {
+  return String(verificationId ?? '').trim() === DEMO_SUBMISSION_ID;
+}
+
+function buildDefaultDemoQueueState(now = new Date()): DemoQueueState {
+  return {
+    cycleStartedAt: now.toISOString(),
+    claimedBy: null,
+    claimedAt: null,
+    lastOutcome: null,
+    lastOutcomeAt: null,
+  };
+}
+
+function buildDemoPendingPanelItem(queueState: DemoQueueState): PendingPanelItem {
+  return {
+    id: DEMO_SUBMISSION_ID,
+    username: DEMO_SUBMISSION_USERNAME,
+    submittedAt: queueState.cycleStartedAt,
+    acknowledgedAt: queueState.cycleStartedAt,
+    photoOneUrl: '',
+    photoTwoUrl: '',
+    photoThreeUrl: '',
+    claimedBy: queueState.claimedBy,
+    claimedAt: queueState.claimedAt,
+    parentVerificationId: null,
+    isResubmission: false,
+    isDemoItem: true,
+    accountDetails: null,
+  };
+}
+
+function resolveDemoRecordTimestamp(value: string | null | undefined, fallback: Date): string {
+  const parsedMs = new Date(String(value ?? '')).getTime();
+  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : fallback.toISOString();
+}
+
+function buildDemoRecordTimeline(queueState: DemoQueueState): {
+  submittedAt: string;
+  reviewedAt: string;
+  status: Extract<VerificationStatus, 'approved' | 'denied'>;
+} {
+  const fallbackNow = new Date();
+  const fallbackSubmittedAt = new Date(fallbackNow.getTime() - 45 * 60 * 1000);
+  const submittedAt = resolveDemoRecordTimestamp(queueState.cycleStartedAt, fallbackSubmittedAt);
+  const reviewedAt = resolveDemoRecordTimestamp(
+    queueState.lastOutcomeAt,
+    new Date(new Date(submittedAt).getTime() + 20 * 60 * 1000)
+  );
+  return {
+    submittedAt,
+    reviewedAt,
+    status: queueState.lastOutcome === 'denied' ? 'denied' : 'approved',
+  };
+}
+
+function buildDemoHistoryPanelItems(queueState: DemoQueueState): HistorySearchPanelItem[] {
+  const timeline = buildDemoRecordTimeline(queueState);
+  return [
+    {
+      id: DEMO_HISTORY_RECORD_ID,
+      username: DEMO_SUBMISSION_USERNAME,
+      status: timeline.status,
+      submittedAt: timeline.submittedAt,
+      acknowledgedAt: timeline.submittedAt,
+      reviewedAt: timeline.reviewedAt,
+      moderator: DEMO_RECORD_ACTOR_USERNAME,
+      denyReason: timeline.status === 'denied' ? 'reason_1' : null,
+      parentVerificationId: null,
+      reopenedChildId: null,
+      reopenedState: 'none',
+      isDemoItem: true,
+    },
+  ];
+}
+
+function buildDemoApprovedPanelItems(queueState: DemoQueueState): ApprovedSearchPanelItem[] {
+  const timeline = buildDemoRecordTimeline(queueState);
+  return [
+    {
+      id: DEMO_APPROVED_RECORD_ID,
+      username: DEMO_SUBMISSION_USERNAME,
+      approvedAt: timeline.reviewedAt,
+      approvedBy: DEMO_RECORD_ACTOR_USERNAME,
+      acknowledgedAt: timeline.submittedAt,
+      isDemoItem: true,
+    },
+  ];
+}
+
+function buildDemoAuditPanelItems(queueState: DemoQueueState): AuditSearchPanelItem[] {
+  const timeline = buildDemoRecordTimeline(queueState);
+  const action: AuditAction = timeline.status === 'denied' ? 'denied' : 'approved';
+  const line =
+    action === 'denied'
+      ? 'Simulated demo denial kept the real subreddit untouched.'
+      : 'Simulated demo approval kept the real subreddit untouched.';
+  return [
+    {
+      id: DEMO_AUDIT_RECORD_ID,
+      username: DEMO_SUBMISSION_USERNAME,
+      actor: DEMO_RECORD_ACTOR_USERNAME,
+      action,
+      line,
+      at: timeline.reviewedAt,
+      isDemoItem: true,
+    },
+  ];
+}
+
+function paginateSyntheticSearchItems<T>(items: T[], offset: number, limit: number): {
+  items: T[];
+  offset: number;
+  hasMore: boolean;
+} {
+  const normalizedOffset = Math.max(0, offset);
+  const pagedItems = items.slice(normalizedOffset, normalizedOffset + limit);
+  const nextOffset = normalizedOffset + pagedItems.length;
+  return {
+    items: pagedItems,
+    offset: nextOffset,
+    hasMore: nextOffset < items.length,
+  };
+}
+
+async function loadDemoPanelRecords(
+  context: Pick<Devvit.Context, 'reddit' | 'redis' | 'subredditId' | 'subredditName'>,
+  subredditId: string
+): Promise<{
+  history: HistorySearchPanelItem[];
+  approved: ApprovedSearchPanelItem[];
+  audit: AuditSearchPanelItem[];
+} | null> {
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  const viewerUsername = await context.reddit.getCurrentUsername();
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, viewerUsername);
+  if (!demoMode.enabled) {
+    return null;
+  }
+  const queueState = await getOrCreateDemoQueueState(context, subredditId);
+  return {
+    history: buildDemoHistoryPanelItems(queueState),
+    approved: buildDemoApprovedPanelItems(queueState),
+    audit: buildDemoAuditPanelItems(queueState),
   };
 }
 
@@ -1495,9 +1834,19 @@ async function submitVerification(
 
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, username);
   const config = await getRuntimeConfig(context, subredditId);
-  if (!config.verificationsEnabled) {
+  if (!demoMode.enabled && !config.verificationsEnabled) {
     throw new Error(config.verificationsDisabledMessage);
+  }
+  if (demoMode.enabled) {
+    return {
+      outcome: 'demo_simulated',
+      pendingModmail: {
+        status: 'skipped',
+        reason: 'demo mode',
+      },
+    };
   }
 
   const rawPhotoOneUrl = normalizePhotoInput((values as { photoOneUrl?: unknown }).photoOneUrl);
@@ -1609,7 +1958,10 @@ async function submitVerification(
       `Pending submission mod note write failed for r/${sanitizeSubredditName(subredditName)} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
   }
-  return { pendingModmail };
+  return {
+    outcome: 'submitted',
+    pendingModmail,
+  };
 }
 
 async function onModeratorPurgeUserData(
@@ -1673,6 +2025,9 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
   }
 
   const subredditId = sanitizeSubredditId(context.subredditId);
+  const subredditName = await getCurrentSubredditNameCompat(context);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, username);
+  assertDemoModeCapability(demoMode, 'allowUserSubmissions', DEMO_MODE_SUBMISSION_BLOCK_MESSAGE);
   const normalizedUsername = normalizeUsername(username);
   const pendingId = await context.redis.get(userPendingKey(subredditId, normalizedUsername));
   if (!pendingId) {
@@ -1685,12 +2040,10 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
     throw new Error('No pending verification request found.');
   }
 
-  const currentSubredditName = await getCurrentSubredditNameCompat(context);
-
   await purgeUserVerificationData(
     context,
     subredditId,
-    currentSubredditName || sanitizeSubredditName(record.subredditName),
+    subredditName || sanitizeSubredditName(record.subredditName),
     record.username,
     {
       removeFlair: true,
@@ -1708,6 +2061,8 @@ async function deleteCurrentUserVerificationData(context: Devvit.Context): Promi
 
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditHint = await getCurrentSubredditNameCompat(context);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditHint, username);
+  assertDemoModeCapability(demoMode, 'allowUserSubmissions', DEMO_MODE_DELETE_BLOCK_MESSAGE);
   const result = await purgeUserVerificationData(context, subredditId, subredditHint, username, {
     removeFlair: true,
     removeAuditEntries: true,
@@ -2249,6 +2604,49 @@ async function setPendingClaimState(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+
+  if (demoMode.enabled && isDemoSubmissionId(verificationId)) {
+    const existingDemoState = await getOrCreateDemoQueueState(context, subredditId);
+    const claimedByNormalized = normalizeUsernameForLookup(existingDemoState.claimedBy ?? '');
+    const moderatorNormalized = normalizeUsernameForLookup(moderator);
+    let updatedDemoState = existingDemoState;
+    let changed = false;
+
+    if (shouldClaim) {
+      if (claimedByNormalized && claimedByNormalized !== moderatorNormalized) {
+        throw new Error(`This request is currently claimed by u/${existingDemoState.claimedBy}.`);
+      }
+      if (claimedByNormalized !== moderatorNormalized) {
+        changed = true;
+        updatedDemoState = {
+          ...existingDemoState,
+          claimedBy: moderator,
+          claimedAt: new Date().toISOString(),
+        };
+      }
+    } else if (existingDemoState.claimedBy || existingDemoState.claimedAt) {
+      changed = true;
+      updatedDemoState = {
+        ...existingDemoState,
+        claimedBy: null,
+        claimedAt: null,
+      };
+    }
+
+    if (changed) {
+      await setDemoQueueState(context, subredditId, updatedDemoState);
+    }
+
+    return {
+      item: buildDemoPendingPanelItem(updatedDemoState),
+      changed,
+      pendingCount: demoMode.capabilities.showDemoSubmission ? 1 : 0,
+    };
+  }
+  if (demoMode.enabled) {
+    throw new Error(DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
+  }
 
   const storedRecord = await getRecord(context, subredditId, verificationId);
   if (!storedRecord) {
@@ -2431,6 +2829,35 @@ async function approveVerification(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  if (demoMode.enabled) {
+    if (!isDemoSubmissionId(verificationId)) {
+      throw new Error(DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
+    }
+    return await withVerificationActionLock(context, subredditId, verificationId, async () => {
+      const existingDemoState = await getOrCreateDemoQueueState(context, subredditId);
+      const claimedBy = normalizeUsernameForLookup(existingDemoState.claimedBy ?? '');
+      if (claimedBy && !usernamesEqual(claimedBy, moderator)) {
+        throw new Error(`This request is currently claimed by u/${existingDemoState.claimedBy}.`);
+      }
+      void confirmBannedApproval;
+      void selectedFlairTemplateId;
+      const now = new Date();
+      await setDemoQueueState(context, subredditId, {
+        ...buildDefaultDemoQueueState(now),
+        lastOutcome: 'approved',
+        lastOutcomeAt: now.toISOString(),
+      });
+      return {
+        outcome: 'demo_simulated',
+        applied: true,
+        username: DEMO_SUBMISSION_USERNAME,
+        flair: { status: 'skipped', reason: 'demo mode' },
+        modmail: { status: 'skipped', reason: 'demo mode' },
+        modNote: { status: 'skipped', reason: 'demo mode' },
+      };
+    });
+  }
   return await withVerificationActionLock(context, subredditId, verificationId, async () => {
     const record = await getRecord(context, subredditId, verificationId);
     if (!record) {
@@ -2745,6 +3172,35 @@ async function denyVerification(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  if (demoMode.enabled) {
+    if (!isDemoSubmissionId(verificationId)) {
+      throw new Error(DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
+    }
+    return await withVerificationActionLock(context, subredditId, verificationId, async () => {
+      const existingDemoState = await getOrCreateDemoQueueState(context, subredditId);
+      const claimedBy = normalizeUsernameForLookup(existingDemoState.claimedBy ?? '');
+      if (claimedBy && !usernamesEqual(claimedBy, moderator)) {
+        throw new Error(`This request is currently claimed by u/${existingDemoState.claimedBy}.`);
+      }
+      void reason;
+      void moderatorNotes;
+      const now = new Date();
+      await setDemoQueueState(context, subredditId, {
+        ...buildDefaultDemoQueueState(now),
+        lastOutcome: 'denied',
+        lastOutcomeAt: now.toISOString(),
+      });
+      return {
+        outcome: 'demo_simulated',
+        applied: true,
+        username: DEMO_SUBMISSION_USERNAME,
+        flair: { status: 'skipped', reason: 'demo mode' },
+        modmail: { status: 'skipped', reason: 'demo mode' },
+        modNote: { status: 'skipped', reason: 'demo mode' },
+      };
+    });
+  }
   return await withVerificationActionLock(context, subredditId, verificationId, async () => {
     const config = await getRuntimeConfig(context, subredditId);
     const configuredReason = getConfiguredDenyReason(config, reason);
@@ -2912,6 +3368,8 @@ async function reopenDeniedVerification(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowRealQueueMutations', DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
   return await withVerificationActionLock(context, subredditId, verificationId, async () => {
     const deniedRecord = await getRecord(context, subredditId, verificationId);
     if (!deniedRecord) {
@@ -3014,6 +3472,8 @@ async function cancelReopenedVerification(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowRealQueueMutations', DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
   return await withVerificationActionLock(context, subredditId, verificationId, async () => {
     const reopenedRecord = await getRecord(context, subredditId, verificationId);
     if (!reopenedRecord) {
@@ -3089,6 +3549,8 @@ async function removeApprovedVerificationByModerator(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const currentSubreddit = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, currentSubreddit, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, currentSubreddit, moderator);
+  assertDemoModeCapability(demoMode, 'allowRealQueueMutations', DEMO_MODE_QUEUE_MUTATION_BLOCK_MESSAGE);
   return await withVerificationActionLock(context, subredditId, verificationId, async () => {
     const record = await getRecord(context, subredditId, verificationId);
     if (!record) {
@@ -3571,6 +4033,7 @@ async function loadDashboardData(
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
   const viewerUsername = (await context.reddit.getCurrentUsername()) ?? null;
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, viewerUsername);
   const moderatorAccess = viewerUsername
     ? await getModeratorAccessSnapshot(context, subredditName, viewerUsername)
     : ({
@@ -3585,8 +4048,10 @@ async function loadDashboardData(
   const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
   const canOpenInstallSettings = hasAllModeratorPermissionInList(moderatorPermissions);
   const hasConfigAccess = hasConfigAccessPermissionInList(moderatorPermissions);
-  const canReviewUser = isModeratorUser && canManageUsers;
-  const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
+  const canReviewUser = Boolean(viewerUsername) && getModeratorReviewAccessError(moderatorAccess, demoMode) === null;
+  const canAccessSettingsTab = demoMode.enabled
+    ? canReviewUser
+    : canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
   let config = await getRuntimeConfig(context, subredditId);
   let flairTemplateValidation = validateFlairTemplateId(config.flairTemplateId);
   if (viewerUsername && config.flairTemplateId.trim()) {
@@ -3595,18 +4060,25 @@ async function loadDashboardData(
   if (canReviewUser && options.includeModData) {
     flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
-  const requiresInitialSetup = !config.flairTemplateId.trim();
+  const requiresInitialSetup = demoMode.enabled ? false : !config.flairTemplateId.trim();
 
   let userLatest = viewerUsername ? await getLatestRecordForUser(context, subredditId, viewerUsername) : null;
   if (viewerUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerUsername, userLatest);
   }
   const viewerBlocked = viewerUsername ? await repairMissingAutoBlockForUser(context, subredditId, viewerUsername, config) : null;
-  const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
+  const pendingRecords =
+    canReviewUser && options.includeModData && !demoMode.enabled ? await listPendingVerifications(context, subredditId) : [];
+  const pending =
+    canReviewUser && options.includeModData && demoMode.enabled && demoMode.capabilities.showDemoSubmission
+      ? [buildDemoPendingPanelItem(await getOrCreateDemoQueueState(context, subredditId))]
+      : pendingRecords;
   const pendingCount = canReviewUser
-    ? options.includeModData
-      ? pending.length
-      : await context.redis.zCard(pendingIndexKey(subredditId))
+    ? demoMode.enabled && demoMode.capabilities.showDemoSubmission
+      ? 1
+      : options.includeModData
+        ? pendingRecords.length
+        : await context.redis.zCard(pendingIndexKey(subredditId))
     : 0;
   const defaultSearchFromAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const defaultSearchToAt = new Date().toISOString();
@@ -3735,6 +4207,7 @@ async function loadDashboardData(
   return {
     viewerUsername,
     subredditName,
+    demoMode,
     moderatorAccess,
     isModerator: isModeratorUser,
     canReview: canReviewUser,
@@ -4481,6 +4954,11 @@ async function searchHistoryRecords(
 ): Promise<HistorySearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
+  const demoPanelRecords = await loadDemoPanelRecords(context, subredditId);
+  if (demoPanelRecords) {
+    const paged = paginateSyntheticSearchItems(demoPanelRecords.history, offset, limit);
+    return { ...paged, requestId: 0 };
+  }
   const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsernameForLookup);
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
@@ -4627,6 +5105,11 @@ async function searchApprovedRecords(
 ): Promise<ApprovedSearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
+  const demoPanelRecords = await loadDemoPanelRecords(context, subredditId);
+  if (demoPanelRecords) {
+    const paged = paginateSyntheticSearchItems(demoPanelRecords.approved, offset, limit);
+    return { ...paged, requestId: 0 };
+  }
   const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsername);
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
@@ -4851,6 +5334,11 @@ async function searchAuditEntries(
 ): Promise<AuditSearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
+  const demoPanelRecords = await loadDemoPanelRecords(context, subredditId);
+  if (demoPanelRecords) {
+    const paged = paginateSyntheticSearchItems(demoPanelRecords.audit, offset, limit);
+    return { ...paged, requestId: 0 };
+  }
   const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsernameForLookup);
   const actorFilter = normalizeUsernamePrefixFilter(query.actor, normalizeUsernameForLookup);
   const actionFilter = asAuditAction(query.action);
@@ -5225,6 +5713,8 @@ async function unblockUserForModerator(
   moderator: string
 ): Promise<boolean> {
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowBlockManagement', DEMO_MODE_BLOCK_MANAGEMENT_MESSAGE);
   const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     return false;
@@ -5264,6 +5754,8 @@ async function blockUserForModerator(
   moderator: string
 ): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
   await assertCanReview(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowBlockManagement', DEMO_MODE_BLOCK_MANAGEMENT_MESSAGE);
   const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
     throw new Error('A valid username is required.');
@@ -5747,6 +6239,25 @@ async function getRecord(context: RedisContext, subredditId: string, verificatio
   return parsed;
 }
 
+async function getStoredDemoQueueState(context: RedisContext, subredditId: string): Promise<DemoQueueState | null> {
+  const payload = await context.redis.get(demoQueueStateKey(subredditId));
+  return payload ? parseDemoQueueState(payload) : null;
+}
+
+async function getOrCreateDemoQueueState(context: RedisContext, subredditId: string): Promise<DemoQueueState> {
+  const stored = await getStoredDemoQueueState(context, subredditId);
+  if (stored) {
+    return stored;
+  }
+  const initialState = buildDefaultDemoQueueState();
+  await context.redis.set(demoQueueStateKey(subredditId), JSON.stringify(initialState));
+  return initialState;
+}
+
+async function setDemoQueueState(context: RedisContext, subredditId: string, demoState: DemoQueueState): Promise<void> {
+  await context.redis.set(demoQueueStateKey(subredditId), JSON.stringify(demoState));
+}
+
 function getFiniteTimestampMs(input: string | null | undefined, fallbackMs: number): number {
   const parsedMs = typeof input === 'string' ? new Date(input).getTime() : Number.NaN;
   return Number.isFinite(parsedMs) ? parsedMs : fallbackMs;
@@ -5932,7 +6443,13 @@ async function assertCanReview(
   access?: ModeratorAccessSnapshot
 ): Promise<void> {
   const snapshot = access ?? (await getModeratorAccessSnapshot(context, sanitizeSubredditName(subredditName), username));
-  const accessError = getModeratorReviewAccessError(snapshot);
+  const demoMode = await resolveDemoModeState(
+    context,
+    sanitizeSubredditId(context.subredditId),
+    subredditName,
+    username
+  );
+  const accessError = getModeratorReviewAccessError(snapshot, demoMode);
   if (accessError) {
     throw accessError;
   }
@@ -6012,9 +6529,18 @@ async function assertCanAccessModeratorSettingsTab(
 ): Promise<void> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
   const access = await getModeratorAccessSnapshot(context, sanitizedSubreddit, username);
-  const reviewAccessError = getModeratorReviewAccessError(access);
+  const demoMode = await resolveDemoModeState(
+    context,
+    sanitizeSubredditId(context.subredditId),
+    sanitizedSubreddit,
+    username
+  );
+  const reviewAccessError = getModeratorReviewAccessError(access, demoMode);
   if (reviewAccessError) {
     throw reviewAccessError;
+  }
+  if (demoMode.enabled) {
+    return;
   }
   const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
   if (!settingsTabRequiresConfigAccess) {
@@ -6052,22 +6578,25 @@ function moderatorPermissionLookupNeedsRetry(access: ModeratorAccessSnapshot): b
 }
 
 function getModeratorReviewAccessError(
-  access: ModeratorAccessSnapshot
+  access: ModeratorAccessSnapshot,
+  demoMode?: DemoModeState
 ): (Error & { status: number }) | null {
-  const membershipError = getModeratorMembershipError(
-    access,
-    'Only moderators with Manage Users permission can review verifications.'
-  );
+  const demoReviewAllowed = Boolean(demoMode && demoMode.enabled);
+  if (demoReviewAllowed) {
+    return null;
+  }
+  const deniedMessage = 'Only moderators with Manage Users permission can review verifications.';
+  const membershipError = getModeratorMembershipError(access, deniedMessage);
   if (membershipError) {
     return membershipError.status === 503
       ? createStatusError(503, membershipError.message)
-      : createStatusError(403, 'Only moderators with Manage Users permission can review verifications.');
+      : createStatusError(403, deniedMessage);
   }
   if (moderatorPermissionLookupNeedsRetry(access)) {
     return createStatusError(503, 'Unable to verify moderator permissions right now. Please retry.');
   }
   if (!hasManageUsersPermissionInList(access.permissions)) {
-    return createStatusError(403, 'Only moderators with Manage Users permission can review verifications.');
+    return createStatusError(403, deniedMessage);
   }
   return null;
 }
@@ -6099,6 +6628,8 @@ async function onSaveFlairTemplateValues(
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowFlairSettingsEdit', DEMO_MODE_FLAIR_SETTINGS_BLOCK_MESSAGE);
 
   const existingConfig = await getRuntimeConfig(context, subredditId);
   const requiredPhotoCount =
@@ -6204,6 +6735,8 @@ async function onSaveModmailTemplatesValues(
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowTemplateEditing', DEMO_MODE_TEMPLATE_SETTINGS_BLOCK_MESSAGE);
 
   const pendingTurnaroundDays = parsePositiveInt(values.pendingTurnaroundDays, DEFAULT_PENDING_TURNAROUND_DAYS);
   const modmailSubject = values.modmailSubject?.trim();
@@ -6271,6 +6804,8 @@ async function onSaveThemeValues(values: ThemeSettingsValues, context: Devvit.Co
   const subredditName = await getCurrentSubredditNameCompat(context);
   const subredditId = sanitizeSubredditId(context.subredditId);
   await assertCanAccessModeratorSettingsTab(context, subredditName, moderator);
+  const demoMode = await resolveDemoModeState(context, subredditId, subredditName, moderator);
+  assertDemoModeCapability(demoMode, 'allowThemeEditing', DEMO_MODE_THEME_SETTINGS_BLOCK_MESSAGE);
 
   const preset = parseThemePreset(values.themePreset);
   const useCustomColors = values.useCustomColors === true;
@@ -6629,6 +7164,24 @@ function parseRecord(payload: string): VerificationRecord | null {
   }
 }
 
+function parseDemoQueueState(payload: string): DemoQueueState | null {
+  try {
+    const parsed = JSON.parse(payload) as Partial<DemoQueueState>;
+    if (!parsed || typeof parsed.cycleStartedAt !== 'string') {
+      return null;
+    }
+    return {
+      cycleStartedAt: parsed.cycleStartedAt,
+      claimedBy: typeof parsed.claimedBy === 'string' ? parsed.claimedBy : null,
+      claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
+      lastOutcome: parsed.lastOutcome === 'approved' || parsed.lastOutcome === 'denied' ? parsed.lastOutcome : null,
+      lastOutcomeAt: typeof parsed.lastOutcomeAt === 'string' ? parsed.lastOutcomeAt : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parseBlockedUserEntry(
   normalizedUsername: string,
   payload: string,
@@ -6765,6 +7318,14 @@ function auditEntryKey(subredditId: string, id: string): string {
 
 function subredditConfigKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:config`;
+}
+
+function demoModeOverrideKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:demo:forced-off`;
+}
+
+function demoQueueStateKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:demo:queue-state`;
 }
 
 function validationDueIndexKey(subredditId: string): string {
@@ -8272,6 +8833,7 @@ export {
   getModeratorAccessSnapshot,
   unblockUserForModerator,
   blockUserForModerator,
+  setDemoModeOverride,
   repairMissingAutoBlockForUser,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
@@ -8283,6 +8845,7 @@ export {
   sanitizeSubredditId,
   sanitizeSubredditName,
   getCurrentSubredditNameCompat,
+  getDemoModeState,
   parseDenyReason,
   parseRecord,
   errorText,
@@ -8323,6 +8886,8 @@ export type {
   CreatePostValues,
   DeleteDataConfirmValues,
   DeleteDataResult,
+  DemoModeCapabilities,
+  DemoModeState,
   DenyReason,
   FlairTemplateValidationState,
   HubStatePayload,

@@ -688,7 +688,8 @@ textarea {
 }
 
 .field-input:disabled,
-.field-select:disabled {
+.field-select:disabled,
+.field-textarea:disabled {
   color: color-mix(in srgb, var(--muted) 82%, white 18%);
   -webkit-text-fill-color: color-mix(in srgb, var(--muted) 82%, white 18%);
   background-color: color-mix(in srgb, var(--panel-surface-soft) 94%, black 6%);
@@ -1064,6 +1065,12 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--danger) 34%, transparent);
 }
 
+.demo-submission-badge {
+  color: color-mix(in srgb, #fff4d6 36%, #f1c162 64%);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
 .approval-flair-preview {
   display: flex;
   align-items: center;
@@ -1092,6 +1099,52 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+.demo-item-card {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--panel-border) 76%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 52%, transparent), transparent 36%),
+    var(--panel-surface);
+}
+
+.demo-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.demo-media-card {
+  display: grid;
+  gap: 8px;
+  min-height: 126px;
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 30%, var(--panel-border) 70%);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+    color-mix(in srgb, var(--panel-surface-soft) 94%, var(--accent-soft) 6%);
+}
+
+.demo-photo-wrap {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.demo-media-card-title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.96rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.demo-media-card-copy {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.48;
 }
 
 .photo-wrap {

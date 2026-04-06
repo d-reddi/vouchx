@@ -654,6 +654,37 @@ button:not(:disabled):hover {
   margin: 3px 0 0;
 }
 
+.demo-submit-modal-card {
+  display: grid;
+  gap: 14px;
+  width: min(480px, 100%);
+  max-height: min(88vh, 760px);
+  overflow: auto;
+}
+
+.demo-submit-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  max-height: min(56vh, 420px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--card) 90%, var(--bg) 10%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card) 85%, transparent);
+}
+
+.demo-submit-image {
+  width: auto;
+  max-width: 100%;
+  max-height: min(52vh, 396px);
+  display: block;
+  object-fit: contain;
+}
+
 .legal-links-modal {
   justify-content: flex-start;
   padding-top: 12px;
@@ -709,6 +740,18 @@ button:not(:disabled):hover {
   .hub-modal-card {
     width: 100%;
     padding: 16px;
+  }
+
+  .demo-submit-modal-card {
+    max-height: none;
+  }
+
+  .demo-submit-preview {
+    max-height: min(44vh, 320px);
+  }
+
+  .demo-submit-image {
+    max-height: min(40vh, 280px);
   }
 
   .hub-scroll-shell::after {

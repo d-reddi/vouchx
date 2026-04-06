@@ -32,6 +32,7 @@ import {
   searchAuditEntries,
   searchHistoryRecords,
   setPendingClaimState,
+  setDemoModeOverride,
   submitVerification,
   moderatorPermissionLookupNeedsRetry,
   toHubState,
@@ -228,18 +229,20 @@ async function buildModPayload(appContext: Devvit.Context) {
   if (!dashboard.viewerUsername) {
     throw httpError(403, 'You must be logged in as a moderator.');
   }
-  const membershipError = getModeratorMembershipError(
-    dashboard.moderatorAccess,
-    'Only moderators can use the moderator panel.'
-  );
-  if (membershipError) {
-    throw membershipError;
-  }
-  if (moderatorPermissionLookupNeedsRetry(dashboard.moderatorAccess)) {
-    throw httpError(503, 'Unable to verify moderator permissions right now. Please retry.');
-  }
-  if (!dashboard.canReview) {
-    throw httpError(403, 'Only moderators with Manage Users permission can use the moderator panel.');
+  if (!dashboard.demoMode.enabled) {
+    const membershipError = getModeratorMembershipError(
+      dashboard.moderatorAccess,
+      'Only moderators can use the moderator panel.'
+    );
+    if (membershipError) {
+      throw membershipError;
+    }
+    if (moderatorPermissionLookupNeedsRetry(dashboard.moderatorAccess)) {
+      throw httpError(503, 'Unable to verify moderator permissions right now. Please retry.');
+    }
+    if (!dashboard.canReview) {
+      throw httpError(403, 'Only moderators with Manage Users permission can use the moderator panel.');
+    }
   }
   const updateNotice = dashboard.viewerUsername ? await buildModeratorUpdateNotice(appContext, dashboard.viewerUsername) : null;
   return {
@@ -306,6 +309,12 @@ function sendFastModRefreshResponse(
 }
 
 function submitToast(result: Awaited<ReturnType<typeof submitVerification>>): ToastPayload {
+  if (result.outcome === 'demo_simulated') {
+    return {
+      text: 'Demo submission simulated. No verification was created, and the built-in demo item in the Mod Panel is still the only review item.',
+      tone: 'info',
+    };
+  }
   const pendingModmailSent =
     result.pendingModmail.status === 'created' ||
     result.pendingModmail.status === 'replied' ||
@@ -379,7 +388,9 @@ app.post('/api/hub/submit', async (req, res) => {
   try {
     const appContext = currentContext();
     const result = await submitVerification(req.body as SubmitVerificationValues, appContext);
-    await sendRefreshSignals(appContext);
+    if (result.outcome !== 'demo_simulated') {
+      await sendRefreshSignals(appContext);
+    }
     res.json({
       ...(await buildHubPayload(appContext)),
       toast: submitToast(result),
@@ -469,6 +480,27 @@ app.get('/api/mod/state', async (_req, res) => {
   }
 });
 
+app.post('/api/mod/demo-mode/override', async (req, res) => {
+  try {
+    const forceDisabled = parseBooleanFlag(req.body?.forceDisabled);
+    const appContext = currentContext();
+    await requireReviewAccess(appContext);
+    const demoMode = await setDemoModeOverride(appContext, forceDisabled);
+    await sendRefreshSignals(appContext);
+    res.json({
+      ...(await buildModPayload(appContext)),
+      toast: {
+        text: demoMode.enabled
+          ? 'Demo mode re-enabled for this install.'
+          : 'Demo mode disabled for this install. Real moderator workflows are active again.',
+        tone: 'success',
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 app.post('/api/mod/approve', async (req, res) => {
   try {
     const verificationId = String(req.body?.verificationId ?? '').trim();
@@ -511,6 +543,16 @@ app.post('/api/mod/approve', async (req, res) => {
         toast: {
           text: 'User no longer exists or is suspended. Verification removed from review.',
           tone: 'info',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'demo_simulated') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'Demo approval simulated. The demo submission was reset and no real moderation side effects were sent.',
+          tone: 'success',
         },
       });
       return;
@@ -594,6 +636,16 @@ app.post('/api/mod/deny', async (req, res) => {
         toast: {
           text: 'User no longer exists or is suspended. Verification removed from review.',
           tone: 'info',
+        },
+      });
+      return;
+    }
+    if (result.outcome === 'demo_simulated') {
+      res.json({
+        ...payload,
+        toast: {
+          text: 'Demo denial simulated. The demo submission was reset and no real moderation side effects were sent.',
+          tone: 'success',
         },
       });
       return;

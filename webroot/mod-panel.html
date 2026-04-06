@@ -51,6 +51,16 @@
         </div>
       </div>
 
+      <div id="demo-mode-banner" class="content-card panel-warning panel-warning-info hidden" role="status">
+        <div class="panel-warning-body">
+          <p class="panel-warning-title">Demo mode is active</p>
+          <p id="demo-mode-banner-copy" class="panel-warning-copy"></p>
+        </div>
+        <div class="row panel-warning-actions">
+          <button id="demo-mode-override-btn" class="btn btn-secondary hidden" type="button"></button>
+        </div>
+      </div>
+
       <nav class="tabs primary-tabs" aria-label="Moderator navigation">
         <button class="tab-btn tab-btn-active" data-tab="pending">Queue</button>
         <button class="tab-btn" data-tab="history">History</button>
@@ -108,6 +118,7 @@
             <div>
               <h2>Blocked users</h2>
               <p class="section-copy muted">Review manual blocks and users who reached the denial threshold.</p>
+              <p id="blocked-demo-note" class="section-copy muted small hidden"></p>
             </div>
             <button id="block-user-btn" class="btn btn-primary">Block user</button>
           </div>
@@ -330,6 +341,12 @@
           </nav>
 
           <div id="settings-panel-general" class="settings-panel">
+            <div id="general-demo-lock-note" class="content-card panel-warning panel-warning-info hidden" role="note">
+              <div class="panel-warning-body">
+                <p class="panel-warning-title">Workflow settings are read-only in demo mode</p>
+                <p class="panel-warning-copy">Verification workflow, templates, and theme settings are locked to avoid real side effects.</p>
+              </div>
+            </div>
             <div class="settings-grid">
               <div class="content-card">
                 <div class="card-head">
@@ -478,6 +495,12 @@
           </div>
 
           <div id="settings-panel-templates" class="settings-panel hidden">
+            <div id="templates-demo-lock-note" class="content-card panel-warning panel-warning-info hidden" role="note">
+              <div class="panel-warning-body">
+                <p class="panel-warning-title">Template editing is read-only in demo mode</p>
+                <p class="panel-warning-copy">Approval, denial, pending, and revocation templates are locked to keep the demo subreddit safe.</p>
+              </div>
+            </div>
             <div class="settings-grid template-settings-grid">
               <div class="content-card">
                 <div class="card-head">
@@ -684,6 +707,12 @@
           </div>
 
           <div id="settings-panel-themes" class="settings-panel hidden">
+            <div id="themes-demo-lock-note" class="content-card panel-warning panel-warning-info hidden" role="note">
+              <div class="panel-warning-body">
+                <p class="panel-warning-title">Theme settings are read-only in demo mode</p>
+                <p class="panel-warning-copy">Theme controls are locked in this demo environment to keep moderator settings predictable during demos.</p>
+              </div>
+            </div>
             <div class="settings-grid theme-settings-grid">
               <div class="content-card content-card-span-2">
                 <div class="card-head">
