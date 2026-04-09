@@ -13,6 +13,7 @@ import {
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getHubModeratorUiState,
+  getRuntimeConfig,
   getModeratorAccessSnapshot,
   getModeratorStats,
   getViewerFlairSnapshot,
@@ -104,6 +105,9 @@ function buildRuntimeConfig(): RuntimeConfig {
     maxDenialsBeforeBlock: 3,
     requiredPhotoCount: 2,
     photoInstructions: 'Follow the instructions.',
+    photoInstructionsEs: 'Sigue las instrucciones.',
+    photoInstructionsFr: 'Suivez les instructions.',
+    photoInstructionsDefaultLanguage: 'en',
     showPhotoInstructionsBeforeSubmit: true,
     denyReasons: [
       {
@@ -1908,6 +1912,64 @@ test('onSaveFlairTemplateValues preserves verificationsEnabled when it is omitte
 
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verifications_enabled'), 'false');
   assert.ok(saveContext.setFieldsCalls.every((entries) => !('verifications_enabled' in entries)));
+});
+
+test('onSaveFlairTemplateValues saves translated photo instructions with the primary instructions', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      flair_template_id: 'ABC-123',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: '',
+      requiredPhotoCount: 2,
+      photoInstructionsDefaultLanguage: 'fr',
+      photoInstructions: '  Follow the instructions.  ',
+      photoInstructionsEs: '  Sigue las instrucciones.  ',
+      photoInstructionsFr: '  Suivez les instructions.  ',
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions'), 'Follow the instructions.');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_es'), 'Sigue las instrucciones.');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_fr'), 'Suivez les instructions.');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_default_language'), 'fr');
+});
+
+test('getRuntimeConfig reads translated photo instructions from stored settings', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      photo_instructions: 'Follow the instructions.',
+      photo_instructions_es: 'Sigue las instrucciones.',
+      photo_instructions_fr: '  Suivez les instructions.  ',
+      photo_instructions_default_language: 'fr',
+    },
+  });
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.photoInstructions, 'Follow the instructions.');
+  assert.equal(runtimeConfig.photoInstructionsEs, 'Sigue las instrucciones.');
+  assert.equal(runtimeConfig.photoInstructionsFr, 'Suivez les instructions.');
+  assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'fr');
+});
+
+test('getRuntimeConfig defaults translated photo instructions to empty strings and english default language when unset', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      photo_instructions: 'Follow the instructions.',
+    },
+  });
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.photoInstructionsEs, '');
+  assert.equal(runtimeConfig.photoInstructionsFr, '');
+  assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'en');
 });
 
 test('onSaveFlairTemplateValues still updates verificationsEnabled when explicitly provided', async () => {
@@ -3875,6 +3937,9 @@ test('toPublicHubConfig omits moderator-only template content', () => {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
     photoInstructions: 'Follow the instructions.',
+    photoInstructionsEs: 'Sigue las instrucciones.',
+    photoInstructionsFr: 'Suivez les instructions.',
+    photoInstructionsDefaultLanguage: 'en',
     showPhotoInstructionsBeforeSubmit: true,
     pendingTurnaroundDays: 3,
     denyReasons: [

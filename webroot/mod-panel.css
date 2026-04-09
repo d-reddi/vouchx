@@ -82,6 +82,7 @@ h3,
 h4,
 .tab-btn,
 .settings-tab-btn,
+.settings-language-tab-btn,
 .theme-card-title {
   font-family: var(--font-display);
 }
@@ -279,6 +280,47 @@ textarea {
   color: var(--text);
   background: color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%);
   border-bottom-color: color-mix(in srgb, var(--primary) 72%, white 28%);
+}
+
+.settings-language-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.settings-language-tab-btn {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 90%, black 10%);
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-language-tab-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--panel-border-strong) 58%, transparent);
+}
+
+.settings-language-tab-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.settings-language-tab-btn-active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--panel-border) 58%);
+  background: color-mix(in srgb, var(--panel-surface-strong) 82%, var(--primary-soft) 18%);
 }
 
 #main-content {
@@ -530,6 +572,11 @@ textarea {
 .settings-panel {
   display: grid;
   gap: 18px;
+}
+
+.settings-language-panel {
+  display: grid;
+  gap: 8px;
 }
 
 .template-settings-grid,

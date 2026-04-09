@@ -18,6 +18,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const settingsTabButtons = Array.from(document.querySelectorAll('.settings-tab-btn'));
   const settingsPanels = {
     general: document.getElementById('settings-panel-general'),
+    instructions: document.getElementById('settings-panel-instructions'),
     templates: document.getElementById('settings-panel-templates'),
     themes: document.getElementById('settings-panel-themes'),
   };
@@ -98,6 +99,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const refreshBtn = document.getElementById('refresh-btn');
   const blockUserBtn = document.getElementById('block-user-btn');
   const saveFlairBtn = document.getElementById('save-flair-btn');
+  const saveInstructionsBtn = document.getElementById('save-instructions-btn');
   const saveTemplatesBtn = document.getElementById('save-templates-btn');
   const saveThemeBtn = document.getElementById('save-theme-btn');
   const resetThemeBtn = document.getElementById('reset-theme-btn');
@@ -124,7 +126,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const installSettingsRow = document.getElementById('install-settings-row');
   const installSettingsLink = document.getElementById('install-settings-link');
   const requiredPhotoCountInput = document.getElementById('required-photo-count');
+  const photoInstructionsDefaultLanguageInput = document.getElementById('photo-instructions-default-language');
   const photoInstructionsInput = document.getElementById('photo-instructions');
+  const photoInstructionsEsInput = document.getElementById('photo-instructions-es');
+  const photoInstructionsFrInput = document.getElementById('photo-instructions-fr');
+  const instructionLanguageTabButtons = Array.from(document.querySelectorAll('.settings-language-tab-btn'));
+  const instructionLanguagePanels = {
+    en: document.getElementById('instruction-language-panel-en'),
+    es: document.getElementById('instruction-language-panel-es'),
+    fr: document.getElementById('instruction-language-panel-fr'),
+  };
 
   const pendingTurnaroundDaysInput = document.getElementById('pending-turnaround-days');
   const modmailSubjectInput = document.getElementById('modmail-subject');
@@ -205,6 +216,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
+  let activeInstructionLanguage = 'en';
   let activeStatsRange = 'weekly';
   let selectedThemePreset = 'coastal_light';
   let lastStateUpdatedAt = 0;
@@ -1188,7 +1200,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
           additionalApprovalFlairs,
           requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+          photoInstructionsDefaultLanguage: photoInstructionsDefaultLanguageInput
+            ? photoInstructionsDefaultLanguageInput.value
+            : 'en',
           photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
+          photoInstructionsEs: photoInstructionsEsInput ? photoInstructionsEsInput.value : '',
+          photoInstructionsFr: photoInstructionsFrInput ? photoInstructionsFrInput.value : '',
         };
         const savedVerificationsEnabled = state ? state.config.verificationsEnabled !== false : true;
         if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
@@ -1268,7 +1285,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       additionalApprovalFlairThird: stringInputValue(approvalFlairThirdSelect),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
       requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
+      photoInstructionsDefaultLanguage: stringInputValue(photoInstructionsDefaultLanguageInput) || 'en',
       photoInstructions: stringInputValue(photoInstructionsInput),
+      photoInstructionsEs: stringInputValue(photoInstructionsEsInput),
+      photoInstructionsFr: stringInputValue(photoInstructionsFrInput),
     };
     const savedRequiredPhotoCount = `${Number(state.config.requiredPhotoCount || 2)}`;
     const dirty =
@@ -1277,10 +1297,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       normalizeTemplateIdValue(draft.additionalApprovalFlairSecond) !==
         normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[0]?.templateId || '') ||
       normalizeTemplateIdValue(draft.additionalApprovalFlairThird) !==
-        normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '') ||
+      normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '') ||
       draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
       draft.requiredPhotoCount !== savedRequiredPhotoCount ||
-      draft.photoInstructions !== String(state.config.photoInstructions || '');
+      draft.photoInstructionsDefaultLanguage !== String(state.config.photoInstructionsDefaultLanguage || 'en') ||
+      draft.photoInstructions !== String(state.config.photoInstructions || '') ||
+      draft.photoInstructionsEs !== String(state.config.photoInstructionsEs || '') ||
+      draft.photoInstructionsFr !== String(state.config.photoInstructionsFr || '');
     return dirty ? draft : null;
   }
 
@@ -1407,12 +1430,22 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (requiredPhotoCountInput) {
       requiredPhotoCountInput.value = draft.requiredPhotoCount;
     }
+    if (photoInstructionsDefaultLanguageInput) {
+      photoInstructionsDefaultLanguageInput.value = draft.photoInstructionsDefaultLanguage || 'en';
+    }
     if (photoInstructionsInput) {
       photoInstructionsInput.value = draft.photoInstructions;
+    }
+    if (photoInstructionsEsInput) {
+      photoInstructionsEsInput.value = draft.photoInstructionsEs || '';
+    }
+    if (photoInstructionsFrInput) {
+      photoInstructionsFrInput.value = draft.photoInstructionsFr || '';
     }
     additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairSecond || '');
     additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairThird || '');
     renderApprovalFlairPicker();
+    setInstructionsLanguage(activeInstructionLanguage);
   }
 
   function restoreTemplatesDraft(draft) {
@@ -1697,10 +1730,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function syncSaveFlairButtonState() {
-    if (!saveFlairBtn) {
-      return;
+    for (const button of [saveFlairBtn, saveInstructionsBtn]) {
+      if (!button) {
+        continue;
+      }
+      button.disabled = isBusy || isSavingFlairSettings;
     }
-    saveFlairBtn.disabled = isBusy || isSavingFlairSettings;
   }
 
   function postWithBusy(message) {
@@ -1800,7 +1835,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const uiDrafts = captureUiDrafts();
       const hadPriorState = stateInitialized;
       const previousSubredditName = state ? normalizeSubredditName(state.subredditName) : '';
-      const preserveSettingsScroll = activePrimaryTab === 'settings' && activeSettingsTab === 'general';
+      const preserveSettingsScroll = activePrimaryTab === 'settings';
       const viewportScrollTop = preserveSettingsScroll ? getViewportScrollTop() : 0;
       state = message.payload;
       flairTemplateValidationOverride = null;
@@ -1934,8 +1969,24 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return resolvedTab;
   }
 
+  function setInstructionsLanguage(language) {
+    activeInstructionLanguage = language === 'es' || language === 'fr' ? language : 'en';
+    for (const [name, panel] of Object.entries(instructionLanguagePanels)) {
+      if (!panel) {
+        continue;
+      }
+      panel.classList.toggle('hidden', name !== activeInstructionLanguage);
+    }
+    for (const button of instructionLanguageTabButtons) {
+      const isActive = String(button.dataset.instructionLanguage || 'en') === activeInstructionLanguage;
+      button.classList.toggle('settings-language-tab-btn-active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+  }
+
   function setSettingsTab(tabName) {
-    activeSettingsTab = tabName === 'templates' || tabName === 'themes' ? tabName : 'general';
+    activeSettingsTab =
+      tabName === 'instructions' || tabName === 'templates' || tabName === 'themes' ? tabName : 'general';
     for (const [name, panel] of Object.entries(settingsPanels)) {
       if (!panel) {
         continue;
@@ -1953,6 +2004,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (activeSettingsTab === 'general' && tabPanels.settings && !tabPanels.settings.classList.contains('hidden')) {
       void ensureApprovalFlairOptionsLoaded();
+      return;
+    }
+    if (activeSettingsTab === 'instructions') {
+      setInstructionsLanguage(activeInstructionLanguage);
     }
   }
 
@@ -3067,11 +3122,21 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const count = Number(state.config.requiredPhotoCount || 2);
       requiredPhotoCountInput.value = `${count >= 1 && count <= 3 ? count : 2}`;
     }
+    if (photoInstructionsDefaultLanguageInput) {
+      photoInstructionsDefaultLanguageInput.value = state.config.photoInstructionsDefaultLanguage || 'en';
+    }
     if (photoInstructionsInput) {
       photoInstructionsInput.value = state.config.photoInstructions || '';
     }
+    if (photoInstructionsEsInput) {
+      photoInstructionsEsInput.value = state.config.photoInstructionsEs || '';
+    }
+    if (photoInstructionsFrInput) {
+      photoInstructionsFrInput.value = state.config.photoInstructionsFr || '';
+    }
     renderApprovalFlairPicker();
     renderFlairTemplateValidationFeedback();
+    setInstructionsLanguage(activeInstructionLanguage);
   }
 
   function renderTemplates() {
@@ -4528,9 +4593,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
   }
 
-  saveFlairBtn.addEventListener('click', () => {
-    void saveFlairSettings();
-  });
+  if (saveFlairBtn) {
+    saveFlairBtn.addEventListener('click', () => {
+      void saveFlairSettings();
+    });
+  }
+
+  if (saveInstructionsBtn) {
+    saveInstructionsBtn.addEventListener('click', () => {
+      void saveFlairSettings();
+    });
+  }
 
   saveTemplatesBtn.addEventListener('click', () => {
     postWithBusy({
@@ -4690,6 +4763,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       if (tab) {
         setSettingsTab(tab);
       }
+    });
+  }
+
+  for (const btn of instructionLanguageTabButtons) {
+    btn.addEventListener('click', () => {
+      setInstructionsLanguage(btn.dataset.instructionLanguage);
     });
   }
 

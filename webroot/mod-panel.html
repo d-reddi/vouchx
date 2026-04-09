@@ -320,11 +320,12 @@
           <div class="section-head">
             <div>
               <h2>Settings</h2>
-              <p class="section-copy muted">Configure verification workflow, modmail templates, and the user-facing theme.</p>
+              <p class="section-copy muted">Configure verification workflow, localized photo instructions, modmail templates, and the user-facing theme.</p>
             </div>
           </div>
           <nav class="settings-tabs" aria-label="Settings sections">
             <button class="settings-tab-btn settings-tab-btn-active" data-settings-tab="general">General</button>
+            <button class="settings-tab-btn" data-settings-tab="instructions">Instructions</button>
             <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
             <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
           </nav>
@@ -442,29 +443,6 @@
                   </div>
                 </div>
                 <p class="muted small field-help">Controls how many upload fields users see in the submit form.</p>
-
-                <label class="minor-heading field-subsection-heading" for="photo-instructions">Photo instructions</label>
-                <div class="field-label-row">
-                  <label class="field-label" for="photo-instructions">Instructions shown when user presses Photo Requirements</label>
-                  <details class="team-stats-help">
-                    <summary class="team-stats-help-button" aria-label="Explain Markdown formatting">?</summary>
-                    <div class="team-stats-help-tooltip" role="note">
-                      <p><strong>Markdown and placeholders</strong></p>
-                      <p><strong>Bold:</strong> <code>**text**</code></p>
-                      <p><em>Italic:</em> <code>*text*</code></p>
-                      <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
-                      <p><strong>Inline code:</strong> <code>`text`</code></p>
-                      <p><strong>Heading:</strong> <code>## Heading</code></p>
-                      <p><strong>Line break:</strong> press Enter twice</p>
-                      <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
-                      <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
-                      <p><strong>Placeholders:</strong> <code>{{subreddit}}</code>, <code>{{days}}</code></p>
-                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
-                      <p>What you type is what users will see in the Photo Requirements popup.</p>
-                    </div>
-                  </details>
-                </div>
-                <textarea id="photo-instructions" class="field-textarea" rows="8"></textarea>
               </div>
 
               <div class="row section-actions">
@@ -474,6 +452,86 @@
                 Install settings for this subreddit are available here:
                 <a id="install-settings-link" href="#" target="_blank" rel="noopener noreferrer">Open install settings</a>
               </p>
+            </div>
+          </div>
+
+          <div id="settings-panel-instructions" class="settings-panel hidden">
+            <div class="content-card">
+              <div class="card-head">
+                <div>
+                  <h3 class="section-heading">Photo instructions</h3>
+                  <p class="section-copy muted small">
+                    These instructions only affect the user-facing Photo Requirements view. You can add Spanish or French versions and choose which language opens first.
+                  </p>
+                </div>
+              </div>
+
+              <p class="muted small field-help">
+                We recommend using
+                <a href="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a>
+                to help provide instructions in multiple languages for non-native speakers.
+              </p>
+
+              <div class="field-stack">
+                <label class="field-label" for="photo-instructions-default-language">Default instruction language</label>
+                <select id="photo-instructions-default-language" class="field-select">
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                </select>
+                <p class="muted small field-help">If the selected language is empty, VouchX falls back to the next available instruction language.</p>
+              </div>
+
+              <div class="field-label-row">
+                <p class="field-label">Formatting help</p>
+                <details class="team-stats-help">
+                  <summary class="team-stats-help-button" aria-label="Explain markdown and placeholders">?</summary>
+                  <div class="team-stats-help-tooltip" role="note">
+                    <p><strong>Markdown and placeholders</strong></p>
+                    <p><strong>Bold:</strong> <code>**text**</code></p>
+                    <p><em>Italic:</em> <code>*text*</code></p>
+                    <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
+                    <p><strong>Inline code:</strong> <code>`text`</code></p>
+                    <p><strong>Heading:</strong> <code>## Heading</code></p>
+                    <p><strong>Line break:</strong> press Enter twice</p>
+                    <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
+                    <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
+                    <p><strong>Placeholders:</strong> <code>{{subreddit}}</code>, <code>{{days}}</code></p>
+                    <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                    <p>What you type is what users will see in the Photo Requirements popup or Android instructions page.</p>
+                  </div>
+                </details>
+              </div>
+
+              <nav class="settings-language-tabs" aria-label="Instruction languages">
+                <button class="settings-language-tab-btn settings-language-tab-btn-active" data-instruction-language="en" type="button">English</button>
+                <button class="settings-language-tab-btn" data-instruction-language="es" type="button">Spanish</button>
+                <button class="settings-language-tab-btn" data-instruction-language="fr" type="button">French</button>
+              </nav>
+
+              <div id="instruction-language-panel-en" class="settings-language-panel">
+                <label class="field-label" for="photo-instructions">English instructions</label>
+                <p class="muted small field-help">Used when the default language is English, and also as a fallback when other languages are unavailable.</p>
+                <textarea id="photo-instructions" class="field-textarea" rows="10"></textarea>
+              </div>
+
+              <div id="instruction-language-panel-es" class="settings-language-panel hidden">
+                <label class="field-label" for="photo-instructions-es">Spanish instructions</label>
+                <p class="muted small field-help">Adds `es` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
+                <textarea id="photo-instructions-es" class="field-textarea" rows="10"></textarea>
+              </div>
+
+              <div id="instruction-language-panel-fr" class="settings-language-panel hidden">
+                <label class="field-label" for="photo-instructions-fr">French instructions</label>
+                <p class="muted small field-help">Adds `fr` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
+                <textarea id="photo-instructions-fr" class="field-textarea" rows="10"></textarea>
+              </div>
+            </div>
+
+            <div class="panel-footer">
+              <div class="row section-actions section-actions-inline">
+                <button id="save-instructions-btn" class="btn btn-primary">Save instructions</button>
+              </div>
             </div>
           </div>
 

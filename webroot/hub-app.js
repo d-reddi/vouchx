@@ -37,6 +37,25 @@ const SUBMIT_ACKNOWLEDGEMENTS = [
 ];
 const MANUAL_SOURCE_MARKERS = ['css-substring-match', 'css-wildcard-match'];
 const WORKTREE_LABEL = typeof __VOUCHX_WORKTREE_LABEL__ === 'string' ? __VOUCHX_WORKTREE_LABEL__.trim() : '';
+const PHOTO_INSTRUCTION_LANGUAGE_OPTIONS = Object.freeze([
+  { id: 'en', label: 'en', configField: 'photoInstructions' },
+  { id: 'es', label: 'es', configField: 'photoInstructionsEs' },
+  { id: 'fr', label: 'fr', configField: 'photoInstructionsFr' },
+]);
+const PHOTO_INSTRUCTION_LANGUAGE_COPY = Object.freeze({
+  en: {
+    title: 'Photo Requirements',
+    subtitle: 'Review these instructions carefully before submitting your photos.',
+  },
+  es: {
+    title: 'Requisitos para las fotos',
+    subtitle: 'Lea atentamente estas instrucciones antes de enviar sus fotos.',
+  },
+  fr: {
+    title: 'Exigences relatives aux photos',
+    subtitle: 'Veuillez lire attentivement ces instructions avant de soumettre vos photos.',
+  },
+});
 
 function createShell(root, inline) {
   root.innerHTML = `
@@ -115,10 +134,16 @@ function createShell(root, inline) {
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card">
-          <h2>Photo Requirements</h2>
-          <p class="meta">
+          <h2 data-el="photo-instructions-title">Photo Requirements</h2>
+          <p data-el="photo-instructions-subtitle" class="meta">
             Review these instructions carefully before submitting your photos.
           </p>
+          <div
+            data-el="photo-instructions-language-toggle"
+            class="hub-language-switcher hidden"
+            role="group"
+            aria-label="Instruction language"
+          ></div>
           <div data-el="photo-instructions-scroll-shell" class="hub-scroll-shell" data-scroll-overflow="false" data-scroll-bottom="true">
             <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
             <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Scroll Down ↓</div>
@@ -152,6 +177,9 @@ function createShell(root, inline) {
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsTitle: root.querySelector('[data-el="photo-instructions-title"]'),
+    photoInstructionsSubtitle: root.querySelector('[data-el="photo-instructions-subtitle"]'),
+    photoInstructionsLanguageToggle: root.querySelector('[data-el="photo-instructions-language-toggle"]'),
     photoInstructionsScrollShell: root.querySelector('[data-el="photo-instructions-scroll-shell"]'),
     photoInstructionsBody: root.querySelector('[data-el="photo-instructions-body"]'),
     photoInstructionsScrollHint: root.querySelector('[data-el="photo-instructions-scroll-hint"]'),
@@ -434,6 +462,42 @@ function renderInstructionTemplate(value, state) {
       .replace(/\s+/g, '_');
     return replacements[normalizedKey] ?? '';
   });
+}
+
+function getPhotoInstructionContent(config, language) {
+  const option = PHOTO_INSTRUCTION_LANGUAGE_OPTIONS.find((item) => item.id === language);
+  if (!option) {
+    return '';
+  }
+  return String(config?.[option.configField] || '').trim();
+}
+
+function getAvailablePhotoInstructionLanguages(state) {
+  return PHOTO_INSTRUCTION_LANGUAGE_OPTIONS.filter((option) =>
+    Boolean(getPhotoInstructionContent(state?.config, option.id))
+  );
+}
+
+function getDefaultPhotoInstructionLanguage(state) {
+  const availableLanguages = getAvailablePhotoInstructionLanguages(state);
+  const configuredDefaultLanguage = String(state?.config?.photoInstructionsDefaultLanguage || 'en')
+    .trim()
+    .toLowerCase();
+  if (availableLanguages.some((option) => option.id === configuredDefaultLanguage)) {
+    return configuredDefaultLanguage;
+  }
+  if (availableLanguages.some((option) => option.id === 'en')) {
+    return 'en';
+  }
+  return availableLanguages[0]?.id || 'en';
+}
+
+function getPhotoInstructionHeading(language) {
+  return PHOTO_INSTRUCTION_LANGUAGE_COPY[language] || PHOTO_INSTRUCTION_LANGUAGE_COPY.en;
+}
+
+function hasAnyConfiguredPhotoInstructions(config) {
+  return PHOTO_INSTRUCTION_LANGUAGE_OPTIONS.some((option) => Boolean(getPhotoInstructionContent(config, option.id)));
 }
 
 function buildStatusTooltipHtml(content) {
@@ -739,6 +803,42 @@ export function mountHub(options = {}) {
     }
   }
 
+  function renderPhotoInstructionsLanguageSwitcher(availableLanguages, activeLanguage, onSelect) {
+    if (!refs.photoInstructionsLanguageToggle) {
+      return;
+    }
+    refs.photoInstructionsLanguageToggle.innerHTML = '';
+    refs.photoInstructionsLanguageToggle.classList.toggle('hidden', availableLanguages.length <= 1);
+    if (availableLanguages.length <= 1) {
+      return;
+    }
+
+    for (const [index, option] of availableLanguages.entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'hub-language-switcher-btn';
+      button.textContent = option.label;
+      button.setAttribute('aria-pressed', option.id === activeLanguage ? 'true' : 'false');
+      if (option.id === activeLanguage) {
+        button.classList.add('is-active');
+      }
+      button.addEventListener('click', () => {
+        if (option.id !== activeLanguage) {
+          onSelect(option.id);
+        }
+      });
+      refs.photoInstructionsLanguageToggle.appendChild(button);
+
+      if (index < availableLanguages.length - 1) {
+        const separator = document.createElement('span');
+        separator.className = 'hub-language-switcher-separator';
+        separator.setAttribute('aria-hidden', 'true');
+        separator.textContent = '|';
+        refs.photoInstructionsLanguageToggle.appendChild(separator);
+      }
+    }
+  }
+
   if (refs.photoInstructionsBody) {
     refs.photoInstructionsBody.addEventListener('scroll', () => {
       updatePhotoInstructionsScrollAffordance();
@@ -952,7 +1052,7 @@ export function mountHub(options = {}) {
       return;
     }
     const shouldShowPhotoInstructionsFirst = Boolean(
-      hubState?.config?.showPhotoInstructionsBeforeSubmit && String(hubState?.config?.photoInstructions || '').trim()
+      hubState?.config?.showPhotoInstructionsBeforeSubmit && hasAnyConfiguredPhotoInstructions(hubState?.config)
     );
     if (shouldShowPhotoInstructionsFirst) {
       if (shouldUseAndroidPhotoInstructionsStep() && !photoInstructionsOnly) {
@@ -1069,11 +1169,30 @@ export function mountHub(options = {}) {
         return;
       }
 
-      refs.photoInstructionsBody.innerHTML = renderMarkdown(
-        renderInstructionTemplate(hubState?.config?.photoInstructions || '', hubState)
-      );
-      refs.photoInstructionsBody.scrollTop = 0;
-      refs.photoInstructionsModal.scrollTop = 0;
+      const availableLanguages = getAvailablePhotoInstructionLanguages(hubState);
+      let selectedLanguage = getDefaultPhotoInstructionLanguage(hubState);
+      const renderPhotoInstructionsContent = () => {
+        const source = getPhotoInstructionContent(hubState?.config, selectedLanguage);
+        const heading = getPhotoInstructionHeading(selectedLanguage);
+        if (refs.photoInstructionsTitle) {
+          refs.photoInstructionsTitle.textContent = heading.title;
+        }
+        if (refs.photoInstructionsSubtitle) {
+          refs.photoInstructionsSubtitle.textContent = heading.subtitle;
+        }
+        refs.photoInstructionsBody.innerHTML = renderMarkdown(renderInstructionTemplate(source, hubState));
+        refs.photoInstructionsBody.scrollTop = 0;
+        refs.photoInstructionsModal.scrollTop = 0;
+        renderPhotoInstructionsLanguageSwitcher(availableLanguages, selectedLanguage, (nextLanguage) => {
+          selectedLanguage = nextLanguage;
+          renderPhotoInstructionsContent();
+          window.requestAnimationFrame(() => {
+            updatePhotoInstructionsScrollAffordance();
+          });
+        });
+      };
+
+      renderPhotoInstructionsContent();
       const hideCloseButton = dedicatedView && requireContinue;
       refs.photoInstructionsContinue.classList.toggle('hidden', !requireContinue);
       refs.photoInstructionsClose.classList.toggle('hidden', hideCloseButton);
@@ -1108,6 +1227,10 @@ export function mountHub(options = {}) {
         refs.photoInstructionsContinue.classList.add('hidden');
         refs.photoInstructionsClose.classList.remove('hidden');
         refs.photoInstructionsClose.textContent = 'Close';
+        if (refs.photoInstructionsLanguageToggle) {
+          refs.photoInstructionsLanguageToggle.innerHTML = '';
+          refs.photoInstructionsLanguageToggle.classList.add('hidden');
+        }
         if (dedicatedView) {
           window.location.replace(buildInternalNavigationUrl('./hub.html'));
         }
