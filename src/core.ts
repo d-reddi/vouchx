@@ -99,6 +99,9 @@ type RuntimeConfig = {
   maxDenialsBeforeBlock: number;
   requiredPhotoCount: number;
   photoInstructions: string;
+  photoInstructionsEs: string;
+  photoInstructionsFr: string;
+  photoInstructionsDefaultLanguage: string;
   showPhotoInstructionsBeforeSubmit: boolean;
   denyReasons: DenyReasonConfig[];
   pendingTurnaroundDays: number;
@@ -355,6 +358,9 @@ type FlairTemplateFormValues = {
   verificationsEnabled?: boolean;
   requiredPhotoCount?: number;
   photoInstructions?: string;
+  photoInstructionsEs?: string;
+  photoInstructionsFr?: string;
+  photoInstructionsDefaultLanguage?: string;
   flairTemplateId?: string;
   flairCssClass?: string;
   multipleApprovalFlairsEnabled?: boolean;
@@ -559,6 +565,9 @@ type PublicHubConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
   photoInstructions: string;
+  photoInstructionsEs: string;
+  photoInstructionsFr: string;
+  photoInstructionsDefaultLanguage: string;
   showPhotoInstructionsBeforeSubmit: boolean;
   pendingTurnaroundDays: number;
   denyReasons: PublicDenyReasonConfig[];
@@ -913,6 +922,9 @@ const CONFIG_FIELD = {
   verificationsEnabled: 'verifications_enabled',
   requiredPhotoCount: 'required_photo_count',
   photoInstructions: 'photo_instructions',
+  photoInstructionsEs: 'photo_instructions_es',
+  photoInstructionsFr: 'photo_instructions_fr',
+  photoInstructionsDefaultLanguage: 'photo_instructions_default_language',
   pendingTurnaroundDays: 'pending_turnaround_days',
   modmailSubject: 'modmail_subject',
   pendingBody: 'pending_body',
@@ -1086,6 +1098,9 @@ function toPublicHubConfig(config: RuntimeConfig): PublicHubConfig {
     verificationsEnabled: config.verificationsEnabled,
     verificationsDisabledMessage: config.verificationsDisabledMessage,
     photoInstructions: config.photoInstructions,
+    photoInstructionsEs: config.photoInstructionsEs,
+    photoInstructionsFr: config.photoInstructionsFr,
+    photoInstructionsDefaultLanguage: config.photoInstructionsDefaultLanguage,
     showPhotoInstructionsBeforeSubmit: config.showPhotoInstructionsBeforeSubmit,
     pendingTurnaroundDays: config.pendingTurnaroundDays,
     denyReasons: config.denyReasons.map((reason) => ({
@@ -6474,6 +6489,14 @@ async function onSaveFlairTemplateValues(
     values.requiredPhotoCount === undefined
       ? existingConfig.requiredPhotoCount
       : parseRequiredPhotoCount(values.requiredPhotoCount, existingConfig.requiredPhotoCount);
+  const photoInstructions = values.photoInstructions?.trim() ?? '';
+  const photoInstructionsEs =
+    values.photoInstructionsEs === undefined ? existingConfig.photoInstructionsEs : values.photoInstructionsEs.trim();
+  const photoInstructionsFr =
+    values.photoInstructionsFr === undefined ? existingConfig.photoInstructionsFr : values.photoInstructionsFr.trim();
+  const photoInstructionsDefaultLanguage = normalizePhotoInstructionLanguage(
+    values.photoInstructionsDefaultLanguage ?? existingConfig.photoInstructionsDefaultLanguage
+  );
   const flairTemplateId = values.flairTemplateId?.trim() ?? '';
   const flairTemplateValidation = validateFlairTemplateId(flairTemplateId);
   if (!flairTemplateValidation.isValid) {
@@ -6528,7 +6551,10 @@ async function onSaveFlairTemplateValues(
       ? {}
       : { [CONFIG_FIELD.verificationsEnabled]: `${values.verificationsEnabled !== false}` }),
     [CONFIG_FIELD.requiredPhotoCount]: `${requiredPhotoCount}`,
-    [CONFIG_FIELD.photoInstructions]: values.photoInstructions?.trim() ?? '',
+    [CONFIG_FIELD.photoInstructions]: photoInstructions,
+    [CONFIG_FIELD.photoInstructionsEs]: photoInstructionsEs,
+    [CONFIG_FIELD.photoInstructionsFr]: photoInstructionsFr,
+    [CONFIG_FIELD.photoInstructionsDefaultLanguage]: photoInstructionsDefaultLanguage,
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
     [CONFIG_FIELD.flairCssClass]: values.flairCssClass?.trim() ?? '',
     [CONFIG_FIELD.additionalApprovalFlairs]: serializeAdditionalApprovalFlairs(normalizedAdditional),
@@ -6539,7 +6565,10 @@ async function onSaveFlairTemplateValues(
     ...existingConfig,
     verificationsEnabled: values.verificationsEnabled === undefined ? existingConfig.verificationsEnabled : values.verificationsEnabled !== false,
     requiredPhotoCount,
-    photoInstructions: values.photoInstructions?.trim() ?? '',
+    photoInstructions,
+    photoInstructionsEs,
+    photoInstructionsFr,
+    photoInstructionsDefaultLanguage,
     flairTemplateId,
     flairCssClass: values.flairCssClass?.trim() ?? '',
     additionalApprovalFlairs: normalizedAdditional,
@@ -6691,6 +6720,11 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
       ? rawShowPhotoInstructionsBeforeSubmit
       : parseBooleanString(rawShowPhotoInstructionsBeforeSubmit, false);
+  const photoInstructionsEs = normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructionsEs]);
+  const photoInstructionsFr = normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructionsFr]);
+  const photoInstructionsDefaultLanguage = normalizePhotoInstructionLanguage(
+    stored[CONFIG_FIELD.photoInstructionsDefaultLanguage]
+  );
   const pendingTurnaroundRaw = firstNonEmpty(stored[CONFIG_FIELD.pendingTurnaroundDays]);
   const pendingTurnaroundDays = parsePositiveInt(pendingTurnaroundRaw, DEFAULT_PENDING_TURNAROUND_DAYS);
   const approveBodyRaw = firstNonEmpty(stored[CONFIG_FIELD.approveBody]) ?? DEFAULT_APPROVE_BODY;
@@ -6713,7 +6747,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     autoFlairReconcileEnabled,
     maxDenialsBeforeBlock,
     requiredPhotoCount,
-    photoInstructions: stored[CONFIG_FIELD.photoInstructions] ?? '',
+    photoInstructions: normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructions]),
+    photoInstructionsEs,
+    photoInstructionsFr,
+    photoInstructionsDefaultLanguage,
     showPhotoInstructionsBeforeSubmit,
     denyReasons,
     pendingTurnaroundDays: pendingTurnaroundDays ?? DEFAULT_PENDING_TURNAROUND_DAYS,
@@ -8192,6 +8229,17 @@ function normalizeInstallSettingMessage(
   return normalized || fallback;
 }
 
+function normalizeOptionalSettingText(value: string | undefined | null): string {
+  return String(value ?? '').trim();
+}
+
+function normalizePhotoInstructionLanguage(value: string | undefined | null): string {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  return normalized === 'es' || normalized === 'fr' ? normalized : 'en';
+}
+
 function formatPendingTurnaroundDays(days: number): string {
   const normalizedDays = Number.isFinite(days) ? Math.max(0, Math.trunc(days)) : 0;
   return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
@@ -8741,6 +8789,7 @@ export {
   loadHubDashboard,
   loadModDashboard,
   getHubModeratorUiState,
+  getRuntimeConfig,
   cachePositiveModeratorUiState,
   searchHistoryRecords,
   searchApprovedRecords,
