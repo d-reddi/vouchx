@@ -16,6 +16,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   };
 
   const settingsTabButtons = Array.from(document.querySelectorAll('.settings-tab-btn'));
+  const settingsTabsShell = document.getElementById('settings-tabs-shell');
+  const settingsTabsNav = document.getElementById('settings-tabs');
+  const settingsTabsScrollHint = document.getElementById('settings-tabs-scroll-hint');
   const settingsPanels = {
     general: document.getElementById('settings-panel-general'),
     instructions: document.getElementById('settings-panel-instructions'),
@@ -1966,6 +1969,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
     }
     activePrimaryTab = resolvedTab;
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
     return resolvedTab;
   }
 
@@ -1981,6 +1987,31 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const isActive = String(button.dataset.instructionLanguage || 'en') === activeInstructionLanguage;
       button.classList.toggle('settings-language-tab-btn-active', isActive);
       button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+  }
+
+  function updateSettingsTabsScrollAffordance() {
+    if (!settingsTabsShell || !settingsTabsNav) {
+      return;
+    }
+    const settingsVisible = Boolean(tabPanels.settings && !tabPanels.settings.classList.contains('hidden'));
+    if (!settingsVisible) {
+      settingsTabsShell.dataset.scrollLeft = 'false';
+      settingsTabsShell.dataset.scrollRight = 'false';
+      if (settingsTabsScrollHint) {
+        settingsTabsScrollHint.classList.add('hidden');
+      }
+      return;
+    }
+
+    const overflow = settingsTabsNav.scrollWidth - settingsTabsNav.clientWidth > 8;
+    const canScrollLeft = settingsTabsNav.scrollLeft > 6;
+    const canScrollRight =
+      settingsTabsNav.scrollLeft + settingsTabsNav.clientWidth < settingsTabsNav.scrollWidth - 6;
+    settingsTabsShell.dataset.scrollLeft = canScrollLeft ? 'true' : 'false';
+    settingsTabsShell.dataset.scrollRight = canScrollRight ? 'true' : 'false';
+    if (settingsTabsScrollHint) {
+      settingsTabsScrollHint.classList.toggle('hidden', !overflow || !canScrollRight);
     }
   }
 
@@ -2009,6 +2040,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (activeSettingsTab === 'instructions') {
       setInstructionsLanguage(activeInstructionLanguage);
     }
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
   }
 
   function formatDateInputValue(date) {
@@ -4821,6 +4855,18 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       prefersDarkMedia.addListener(onColorSchemeChange);
     }
   }
+
+  if (settingsTabsNav) {
+    settingsTabsNav.addEventListener('scroll', () => {
+      updateSettingsTabsScrollAffordance();
+    }, { passive: true });
+  }
+
+  window.addEventListener('resize', () => {
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
+  });
 
   window.addEventListener('pagehide', closeRealtimeSubscription);
 

@@ -323,12 +323,20 @@
               <p class="section-copy muted">Configure verification workflow, localized photo instructions, modmail templates, and the user-facing theme.</p>
             </div>
           </div>
-          <nav class="settings-tabs" aria-label="Settings sections">
-            <button class="settings-tab-btn settings-tab-btn-active" data-settings-tab="general">General</button>
-            <button class="settings-tab-btn" data-settings-tab="instructions">Instructions</button>
-            <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
-            <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
-          </nav>
+          <div
+            id="settings-tabs-shell"
+            class="settings-tabs-shell"
+            data-scroll-left="false"
+            data-scroll-right="false"
+          >
+            <nav id="settings-tabs" class="settings-tabs" aria-label="Settings sections">
+              <button class="settings-tab-btn settings-tab-btn-active" data-settings-tab="general">General</button>
+              <button class="settings-tab-btn" data-settings-tab="instructions">Photo Instructions</button>
+              <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
+              <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
+            </nav>
+            <div id="settings-tabs-scroll-hint" class="settings-tabs-scroll-hint hidden" aria-hidden="true">&rarr;</div>
+          </div>
 
           <div id="settings-panel-general" class="settings-panel">
             <div class="settings-grid">
@@ -456,23 +464,23 @@
           </div>
 
           <div id="settings-panel-instructions" class="settings-panel hidden">
-            <div class="content-card">
+            <div class="content-card instructions-settings-card">
               <div class="card-head">
                 <div>
-                  <h3 class="section-heading">Photo instructions</h3>
+                  <h3 class="section-heading">Photo Instructions</h3>
                   <p class="section-copy muted small">
                     These instructions only affect the user-facing Photo Requirements view. You can add Spanish or French versions and choose which language opens first.
                   </p>
                 </div>
               </div>
 
-              <p class="muted small field-help">
+              <p class="instructions-settings-note muted small">
                 We recommend using
                 <a href="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a>
                 to help provide instructions in multiple languages for non-native speakers.
               </p>
 
-              <div class="field-stack">
+              <div class="field-stack instructions-default-language-block">
                 <label class="field-label" for="photo-instructions-default-language">Default instruction language</label>
                 <select id="photo-instructions-default-language" class="field-select">
                   <option value="en">English</option>
@@ -482,7 +490,7 @@
                 <p class="muted small field-help">If the selected language is empty, VouchX falls back to the next available instruction language.</p>
               </div>
 
-              <div class="field-label-row">
+              <div class="field-label-row instructions-formatting-help-row">
                 <p class="field-label">Formatting help</p>
                 <details class="team-stats-help">
                   <summary class="team-stats-help-button" aria-label="Explain markdown and placeholders">?</summary>

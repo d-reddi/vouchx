@@ -272,8 +272,78 @@ textarea {
   flex-wrap: wrap;
   gap: 6px 10px;
   padding: 0 0 12px;
-  margin: 0 0 18px;
+  margin: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-divider) 88%, transparent);
+}
+
+.settings-tabs-shell {
+  position: relative;
+  margin: 0 0 18px;
+}
+
+.settings-tabs-shell::before,
+.settings-tabs-shell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 10px;
+  width: 34px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  z-index: 1;
+}
+
+.settings-tabs-shell::before {
+  left: 0;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--panel-bg) 100%, transparent) 0%,
+      color-mix(in srgb, var(--panel-bg) 88%, transparent) 52%,
+      color-mix(in srgb, var(--panel-bg) 0%, transparent) 100%
+    );
+}
+
+.settings-tabs-shell::after {
+  right: 0;
+  background:
+    linear-gradient(
+      270deg,
+      color-mix(in srgb, var(--panel-bg) 100%, transparent) 0%,
+      color-mix(in srgb, var(--panel-bg) 88%, transparent) 52%,
+      color-mix(in srgb, var(--panel-bg) 0%, transparent) 100%
+    );
+}
+
+.settings-tabs-shell[data-scroll-left="true"]::before {
+  opacity: 1;
+}
+
+.settings-tabs-shell[data-scroll-right="true"]::after {
+  opacity: 1;
+}
+
+.settings-tabs-scroll-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary) 36%, var(--panel-border) 64%);
+  background: color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%);
+  color: color-mix(in srgb, var(--primary) 74%, var(--text) 26%);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 }
 
 .settings-tab-btn-active {
@@ -577,6 +647,28 @@ textarea {
 .settings-language-panel {
   display: grid;
   gap: 8px;
+}
+
+.instructions-settings-card {
+  display: grid;
+  gap: 18px;
+}
+
+.instructions-settings-note {
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+
+.instructions-default-language-block {
+  margin-top: 14px;
+}
+
+.instructions-default-language-block .field-help {
+  margin-top: 10px;
+}
+
+.instructions-formatting-help-row {
+  margin-top: 16px;
 }
 
 .template-settings-grid,
@@ -2177,6 +2269,10 @@ textarea {
     overflow-x: auto;
     gap: 6px;
     padding-bottom: 8px;
+    margin-bottom: 0;
+  }
+
+  .settings-tabs-shell {
     margin-bottom: 16px;
   }
 
@@ -2284,6 +2380,19 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .settings-tabs-shell::before,
+  .settings-tabs-shell::after {
+    width: 28px;
+  }
+
+  .settings-tabs-scroll-hint {
+    right: 8px;
+    bottom: 6px;
+    width: 24px;
+    height: 24px;
+    font-size: 0.82rem;
+  }
+
   .queue-section-head {
     gap: 8px;
   }

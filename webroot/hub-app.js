@@ -46,14 +46,17 @@ const PHOTO_INSTRUCTION_LANGUAGE_COPY = Object.freeze({
   en: {
     title: 'Photo Requirements',
     subtitle: 'Review these instructions carefully before submitting your photos.',
+    scrollHint: 'Scroll Down ↓',
   },
   es: {
     title: 'Requisitos para las fotos',
     subtitle: 'Lea atentamente estas instrucciones antes de enviar sus fotos.',
+    scrollHint: 'Desplázate hacia abajo ↓',
   },
   fr: {
     title: 'Exigences relatives aux photos',
     subtitle: 'Veuillez lire attentivement ces instructions avant de soumettre vos photos.',
+    scrollHint: 'Défilez vers le bas ↓',
   },
 });
 
@@ -1179,6 +1182,9 @@ export function mountHub(options = {}) {
         }
         if (refs.photoInstructionsSubtitle) {
           refs.photoInstructionsSubtitle.textContent = heading.subtitle;
+        }
+        if (refs.photoInstructionsScrollHint) {
+          refs.photoInstructionsScrollHint.textContent = heading.scrollHint;
         }
         refs.photoInstructionsBody.innerHTML = renderMarkdown(renderInstructionTemplate(source, hubState));
         refs.photoInstructionsBody.scrollTop = 0;
