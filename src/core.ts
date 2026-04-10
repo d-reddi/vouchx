@@ -1421,7 +1421,9 @@ async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Pro
   try {
     return await fn();
   } catch (error) {
-    console.log(`${label} failed on first attempt: ${errorText(error)}`);
+    if (!looksLikeTransientRedditTransportError(errorText(error))) {
+      console.log(`${label} failed on first attempt: ${errorText(error)}`);
+    }
   }
 
   try {
@@ -3942,18 +3944,35 @@ async function getViewerFlairSnapshot(
     return emptySnapshot;
   }
 
+  const lookupUsername = normalizeUsernameStrict(viewerIdentity.username ?? viewerIdentity.user.username ?? '');
+  if (!lookupUsername) {
+    return emptyViewerFlairSnapshot(
+      viewerIdentity.userId || context.userId,
+      'unavailable',
+      'Viewer flair lookup unavailable.'
+    );
+  }
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const flair = await viewerIdentity.user.getUserFlairBySubreddit(sanitizedSubreddit);
+      const lookupUser = await context.reddit.getUserByUsername(lookupUsername);
+      if (!lookupUser) {
+        return emptyViewerFlairSnapshot(
+          viewerIdentity.userId || context.userId,
+          'unavailable',
+          'Viewer flair lookup unavailable.'
+        );
+      }
+      const flair = await lookupUser.getUserFlairBySubreddit(sanitizedSubreddit);
       if (!flair) {
-        return emptyViewerFlairSnapshot(viewerIdentity.user.id ?? viewerIdentity.userId, 'confirmed_absent', null);
+        return emptyViewerFlairSnapshot(lookupUser.id ?? viewerIdentity.user.id ?? viewerIdentity.userId, 'confirmed_absent', null);
       }
       const flairTemplateId = normalizeTemplateId(extractTemplateId(flair));
       return {
         flairText: (flair.flairText ?? '').trim(),
         flairCssClass: (flair.flairCssClass ?? '').trim(),
         flairTemplateId,
-        userId: normalizeUserId(viewerIdentity.user.id ?? viewerIdentity.userId),
+        userId: normalizeUserId(lookupUser.id ?? viewerIdentity.user.id ?? viewerIdentity.userId),
         lookupState: 'confirmed_present',
         error: null,
       };
@@ -8325,40 +8344,43 @@ async function ensureUserValidationSchedule(
     }
     lockAcquired = true;
 
-    const jobs = await context.scheduler.listJobs();
-    const alreadyScheduled = jobs.some((job) => {
-      if (job.name !== USER_VALIDATION_JOB_NAME) {
-        return false;
-      }
-      const jobData = (job.data ?? {}) as Partial<AuditRetentionJobData>;
-      return sanitizeSubredditId(jobData.subredditId ?? '') === normalizedSubredditId;
-    });
-
-    if (alreadyScheduled) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await context.redis.set(presenceKey, '1', {
-          expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS),
+        const jobs = await context.scheduler.listJobs();
+        const alreadyScheduled = jobs.some((job) => {
+          if (job.name !== USER_VALIDATION_JOB_NAME) {
+            return false;
+          }
+          const jobData = (job.data ?? {}) as Partial<AuditRetentionJobData>;
+          return sanitizeSubredditId(jobData.subredditId ?? '') === normalizedSubredditId;
         });
-      } catch {
-        // Best-effort marker only.
-      }
-      return;
-    }
 
-    await context.scheduler.runJob({
-      name: USER_VALIDATION_JOB_NAME,
-      cron: USER_VALIDATION_CRON,
-      data: {
-        subredditId: normalizedSubredditId,
-        subredditName: normalizedSubreddit,
-      },
-    });
-    try {
-      await context.redis.set(presenceKey, '1', {
-        expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS),
-      });
-    } catch {
-      // Best-effort marker only.
+        if (!alreadyScheduled) {
+          await context.scheduler.runJob({
+            name: USER_VALIDATION_JOB_NAME,
+            cron: USER_VALIDATION_CRON,
+            data: {
+              subredditId: normalizedSubredditId,
+              subredditName: normalizedSubreddit,
+            },
+          });
+        }
+
+        try {
+          await context.redis.set(presenceKey, '1', {
+            expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS),
+          });
+        } catch {
+          // Best-effort marker only.
+        }
+        return;
+      } catch (error) {
+        if (attempt < 1 && looksLikeTransientRedditTransportError(errorText(error))) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
+        throw error;
+      }
     }
   } catch (error) {
     console.log(`[user-validation] Failed to schedule validation for r/${normalizedSubreddit}: ${errorText(error)}`);
@@ -8685,8 +8707,12 @@ function looksLikeTransientRedditTransportError(message: string): boolean {
     return false;
   }
   return (
+    normalized.includes('unknown internal error') ||
     (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
     normalized.includes('unexpected eof') ||
+    normalized.includes('i/o timeout') ||
+    normalized.includes('read tcp') ||
+    normalized.includes('write tcp') ||
     normalized.includes('upstream request missing or timed out') ||
     normalized.includes('timed out') ||
     normalized.includes('timeout') ||

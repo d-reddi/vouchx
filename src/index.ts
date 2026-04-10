@@ -45,6 +45,10 @@ import {
   parseDenyReason,
   type SubmitVerificationValues,
 } from './core.js';
+import {
+  installDevvitUnhandledRejectionGuard,
+  shouldIgnoreDevvitLogStreamAuthRejection,
+} from './runtime-guards.js';
 
 type ToastPayload = {
   text: string;
@@ -68,35 +72,9 @@ type HttpError = Error & {
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 const REFRESH_SIGNAL = Object.freeze({ type: 'refresh' });
-let unhandledRejectionGuardInstalled = false;
 type RouteModeratorAccess = Awaited<ReturnType<typeof getModeratorAccessSnapshot>>;
 
-function shouldIgnoreDevvitLogStreamAuthRejection(reason: unknown): boolean {
-  const message = errorText(reason).toLowerCase();
-  return (
-    message.includes('unauthenticated') &&
-    message.includes('failed to authenticate plugin request') &&
-    message.includes('upstream request missing or timed out')
-  );
-}
-
-function installUnhandledRejectionGuard(): void {
-  if (unhandledRejectionGuardInstalled || typeof process === 'undefined' || typeof process.on !== 'function') {
-    return;
-  }
-  process.on('unhandledRejection', (reason) => {
-    if (shouldIgnoreDevvitLogStreamAuthRejection(reason)) {
-      return;
-    }
-    const propagatedError = reason instanceof Error ? reason : new Error(errorText(reason));
-    setImmediate(() => {
-      throw propagatedError;
-    });
-  });
-  unhandledRejectionGuardInstalled = true;
-}
-
-installUnhandledRejectionGuard();
+installDevvitUnhandledRejectionGuard();
 
 function httpError(status: number, message: string): HttpError {
   const error = new Error(message) as HttpError;

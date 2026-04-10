@@ -745,6 +745,7 @@ function createViewerFlairSnapshotContext(options?: {
   let currentUserCallCount = 0;
   let currentUsernameCallCount = 0;
   let usernameLookupCallCount = 0;
+  const usernameLookupCalls: string[] = [];
   let flairLookupCallCount = 0;
 
   const toMockUser = (
@@ -806,7 +807,8 @@ function createViewerFlairSnapshotContext(options?: {
           currentUsernameCallCount += 1;
           return currentUsername;
         },
-        async getUserByUsername() {
+        async getUserByUsername(username: string) {
+          usernameLookupCalls.push(username);
           const response = usernameUserResponses[Math.min(usernameLookupCallCount, usernameUserResponses.length - 1)];
           usernameLookupCallCount += 1;
           return toMockUser(response, () => {
@@ -823,6 +825,9 @@ function createViewerFlairSnapshotContext(options?: {
     },
     get usernameLookupCallCount() {
       return usernameLookupCallCount;
+    },
+    get usernameLookupCalls() {
+      return usernameLookupCalls;
     },
     get flairLookupCallCount() {
       return flairLookupCallCount;
@@ -867,6 +872,54 @@ function createHubDashboardContext(options?: {
   let currentUserCallCount = 0;
   let currentUsernameCallCount = 0;
 
+  const toHubDashboardUser = (
+    response:
+      | {
+          username?: string;
+          id?: string;
+          createdAt?: Date;
+          commentKarma?: number | null;
+          linkKarma?: number | null;
+          flair?:
+            | {
+                flairText?: string;
+                flairCssClass?: string;
+                flairTemplateId?: string;
+              }
+            | null
+            | Error;
+        }
+      | null
+      | Error
+  ) => {
+    if (response instanceof Error) {
+      throw response;
+    }
+    if (!response) {
+      return null;
+    }
+    return {
+      username: response.username ?? '',
+      id: response.id ?? userId,
+      createdAt: response.createdAt ?? new Date('2026-03-01T12:00:00.000Z'),
+      commentKarma: response.commentKarma ?? 0,
+      linkKarma: response.linkKarma ?? 0,
+      async getUserFlairBySubreddit() {
+        if (response.flair instanceof Error) {
+          throw response.flair;
+        }
+        if (!response.flair) {
+          return undefined;
+        }
+        return {
+          flairText: response.flair.flairText ?? '',
+          flairCssClass: response.flair.flairCssClass ?? '',
+          flairTemplateId: response.flair.flairTemplateId ?? '',
+        };
+      },
+    };
+  };
+
   if (record) {
     redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
     ensureTestZSet(zsetStore, historyDateIndexTestKey(subredditId)).set(
@@ -892,36 +945,15 @@ function createHubDashboardContext(options?: {
           const responses = options?.currentUserResponses ?? [];
           const response = responses[Math.min(currentUserCallCount, responses.length - 1)];
           currentUserCallCount += 1;
-          if (response instanceof Error) {
-            throw response;
-          }
-          if (!response) {
-            return null;
-          }
-          return {
-            username: response.username ?? '',
-            id: response.id ?? userId,
-            createdAt: response.createdAt ?? new Date('2026-03-01T12:00:00.000Z'),
-            commentKarma: response.commentKarma ?? 0,
-            linkKarma: response.linkKarma ?? 0,
-            async getUserFlairBySubreddit() {
-              if (response.flair instanceof Error) {
-                throw response.flair;
-              }
-              if (!response.flair) {
-                return undefined;
-              }
-              return {
-                flairText: response.flair.flairText ?? '',
-                flairCssClass: response.flair.flairCssClass ?? '',
-                flairTemplateId: response.flair.flairTemplateId ?? '',
-              };
-            },
-          };
+          return toHubDashboardUser(response);
         },
         async getCurrentUsername() {
           currentUsernameCallCount += 1;
           return options?.currentUsername ?? null;
+        },
+        async getUserByUsername() {
+          const responses = options?.currentUserResponses ?? [];
+          return toHubDashboardUser(responses[0] ?? null);
         },
       },
       settings: {
@@ -1462,6 +1494,9 @@ function createReviewActionContext(options?: {
             username: response.username ?? username,
             id: response.id ?? 't2_target',
             isSuspended: response.isSuspended,
+            async getUserFlairBySubreddit() {
+              return undefined;
+            },
           };
         },
         async setUserFlair(args: Record<string, unknown>) {
@@ -2610,9 +2645,20 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
   }
 });
 
-test('getViewerFlairSnapshot uses the current viewer identity only', async () => {
+test('getViewerFlairSnapshot resolves flair through the username lookup after confirming the viewer identity', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Ignored current-user flair',
+          flairCssClass: 'ignored',
+          flairTemplateId: 'zzz999',
+        },
+      },
+    ],
+    usernameUserResponses: [
       {
         username: 'Ornery_Locksmith_176',
         id: 't2_viewer',
@@ -2639,7 +2685,8 @@ test('getViewerFlairSnapshot uses the current viewer identity only', async () =>
     error: null,
   });
   assert.equal(snapshotContext.currentUserCallCount, 1);
-  assert.equal(snapshotContext.usernameLookupCallCount, 0);
+  assert.equal(snapshotContext.usernameLookupCallCount, 1);
+  assert.deepEqual(snapshotContext.usernameLookupCalls, ['ornery_locksmith_176']);
   assert.equal(snapshotContext.flairLookupCallCount, 1);
 });
 
@@ -2647,6 +2694,12 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
       new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF'),
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+      },
+    ],
+    usernameUserResponses: [
       {
         username: 'Ornery_Locksmith_176',
         id: 't2_viewer',
@@ -2679,7 +2732,7 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
       error: null,
     });
     assert.equal(snapshotContext.currentUserCallCount, 2);
-    assert.equal(snapshotContext.usernameLookupCallCount, 0);
+    assert.equal(snapshotContext.usernameLookupCallCount, 1);
     assert.equal(consoleLogCallCount, 0);
   } finally {
     console.log = originalConsoleLog;
@@ -2689,6 +2742,12 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
 test('getViewerFlairSnapshot returns unavailable when the current viewer flair lookup is forbidden', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
+      {
+        username: 'HLmikemcd',
+        id: 't2_viewer',
+      },
+    ],
+    usernameUserResponses: [
       {
         username: 'HLmikemcd',
         id: 't2_viewer',
@@ -2717,7 +2776,7 @@ test('getViewerFlairSnapshot returns unavailable when the current viewer flair l
         '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1 failed with error: Get "https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1": httpbp.ClientError: http status 403 Forbidden',
     });
     assert.equal(snapshotContext.currentUserCallCount, 1);
-    assert.equal(snapshotContext.usernameLookupCallCount, 0);
+    assert.equal(snapshotContext.usernameLookupCallCount, 1);
     assert.equal(snapshotContext.flairLookupCallCount, 1);
     assert.equal(consoleLogCallCount, 0);
   } finally {

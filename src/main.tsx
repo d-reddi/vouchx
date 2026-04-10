@@ -12,10 +12,13 @@ import {
   type CreatePostValues,
   type PurgeUserDataFormValues,
 } from './core.js';
+import { installDevvitUnhandledRejectionGuard } from './runtime-guards.js';
 
 type RemoveVerificationPostFormValues = {
   confirmationText?: string;
 };
+
+installDevvitUnhandledRejectionGuard();
 
 async function onCreateVerificationPost(
   event: FormOnSubmitEvent<CreatePostValues>,
