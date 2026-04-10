@@ -82,6 +82,7 @@ h3,
 h4,
 .tab-btn,
 .settings-tab-btn,
+.settings-language-tab-btn,
 .theme-card-title {
   font-family: var(--font-display);
 }
@@ -271,14 +272,125 @@ textarea {
   flex-wrap: wrap;
   gap: 6px 10px;
   padding: 0 0 12px;
-  margin: 0 0 18px;
+  margin: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-divider) 88%, transparent);
+}
+
+.settings-tabs-shell {
+  position: relative;
+  margin: 0 0 18px;
+}
+
+.settings-tabs-shell::before,
+.settings-tabs-shell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 10px;
+  width: 34px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  z-index: 1;
+}
+
+.settings-tabs-shell::before {
+  left: 0;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--panel-bg) 100%, transparent) 0%,
+      color-mix(in srgb, var(--panel-bg) 88%, transparent) 52%,
+      color-mix(in srgb, var(--panel-bg) 0%, transparent) 100%
+    );
+}
+
+.settings-tabs-shell::after {
+  right: 0;
+  background:
+    linear-gradient(
+      270deg,
+      color-mix(in srgb, var(--panel-bg) 100%, transparent) 0%,
+      color-mix(in srgb, var(--panel-bg) 88%, transparent) 52%,
+      color-mix(in srgb, var(--panel-bg) 0%, transparent) 100%
+    );
+}
+
+.settings-tabs-shell[data-scroll-left="true"]::before {
+  opacity: 1;
+}
+
+.settings-tabs-shell[data-scroll-right="true"]::after {
+  opacity: 1;
+}
+
+.settings-tabs-scroll-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary) 36%, var(--panel-border) 64%);
+  background: color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%);
+  color: color-mix(in srgb, var(--primary) 74%, var(--text) 26%);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 }
 
 .settings-tab-btn-active {
   color: var(--text);
   background: color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%);
   border-bottom-color: color-mix(in srgb, var(--primary) 72%, white 28%);
+}
+
+.settings-language-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.settings-language-tab-btn {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 90%, black 10%);
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-language-tab-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--panel-border-strong) 58%, transparent);
+}
+
+.settings-language-tab-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.settings-language-tab-btn-active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--panel-border) 58%);
+  background: color-mix(in srgb, var(--panel-surface-strong) 82%, var(--primary-soft) 18%);
 }
 
 #main-content {
@@ -530,6 +642,33 @@ textarea {
 .settings-panel {
   display: grid;
   gap: 18px;
+}
+
+.settings-language-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.instructions-settings-card {
+  display: grid;
+  gap: 18px;
+}
+
+.instructions-settings-note {
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+
+.instructions-default-language-block {
+  margin-top: 14px;
+}
+
+.instructions-default-language-block .field-help {
+  margin-top: 10px;
+}
+
+.instructions-formatting-help-row {
+  margin-top: 16px;
 }
 
 .template-settings-grid,
@@ -2130,6 +2269,10 @@ textarea {
     overflow-x: auto;
     gap: 6px;
     padding-bottom: 8px;
+    margin-bottom: 0;
+  }
+
+  .settings-tabs-shell {
     margin-bottom: 16px;
   }
 
@@ -2237,6 +2380,19 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .settings-tabs-shell::before,
+  .settings-tabs-shell::after {
+    width: 28px;
+  }
+
+  .settings-tabs-scroll-hint {
+    right: 8px;
+    bottom: 6px;
+    width: 24px;
+    height: 24px;
+    font-size: 0.82rem;
+  }
+
   .queue-section-head {
     gap: 8px;
   }
