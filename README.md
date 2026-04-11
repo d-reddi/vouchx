@@ -24,7 +24,7 @@ Full setup guides and advanced configuration:
 [https://www.reddit.com/r/vouchx/wiki/guide/](https://www.reddit.com/r/vouchx/wiki/guide/)
 
 Workflow demos:  
-[https://www.reddit.com/r/vouchx/wiki/demo/](https://www.reddit.com/r/vouchx/wiki/demo/)
+[https://www.reddit.com/r/vouchx](https://www.reddit.com/r/vouchx/)
 
 ---
 
@@ -36,7 +36,7 @@ Workflow demos:
 4. In **Settings > General**, set your primary approval flair (**required**)  
 5. Configure:
    - Submissions on/off  
-   - Photo requirements  
+   - Photo requirements  (Optional Translation for ES, FR)
    - Instructions  
 6. (Optional) Customize modmail templates  
 
@@ -108,6 +108,15 @@ These background processes help ensure data is kept up to date and not retained 
 Full changelog:  
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
+
+### v1.4.0
+
+- Photo Intructions panel now supports English, Spanish, French (set up langages in mod panel)
+
+Back-end changes:
+- Performance improvements for flair and mod lookup
+- Updated to devvit 0.12.18
+
 ### v1.3.9
 
 Critical Fix: resolves occasional mod lookup breaking behavior
@@ -136,26 +145,5 @@ Updates/Performance Improvements:
 - Improved flair application and consistency
 - Improved mod panel refresh behavior
 - Improved contrast for the young account badge
-- Increased user retention to 90 days to allow time away before removal from verified records (privacy policy updated)
+- Increased user retention to 90 days to allow time away before removal for verified records (privacy policy updated)
 - Backend: improved error handling and logging
-
----
-
-### v1.2.1
-
-- Account age now shown on pending queue cards
-- New Stats button showing subreddit karma, previous denials, and ban status
-- Clearer color-coded status badges and improved action instructions
-- Install setting to restrict Settings tab to mods with config/everything permissions
-- Install setting to require viewing photo instructions before submission
-- Optional submission limits (block after X submissions or disable resubmits)
-- Main verification hub now updates live when status changes
-- Improved mod note handling
-- Simpler first-time setup flow
-- Flair Template ID verification before save
-- Android fix for photo instructions scrolling
-- Performance improvements for moderators and users
-- Report a Bug / Request a Feature link added to the mod panel
-- How to Use This App link added to the hub
-- Clearer status instructions for users
-- Notifications for updates, and critical update messages
