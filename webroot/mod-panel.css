@@ -1105,7 +1105,8 @@ textarea {
   line-height: 1.5;
 }
 
-.username-link {
+.username-link,
+.photo-link {
   appearance: none;
   border: 0;
   background: transparent;
@@ -1116,7 +1117,8 @@ textarea {
   font-weight: inherit;
 }
 
-.username-link:hover {
+.username-link:hover,
+.photo-link:hover {
   color: var(--primary-strong);
 }
 
