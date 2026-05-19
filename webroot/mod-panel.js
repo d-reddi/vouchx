@@ -3744,18 +3744,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
     const meta = document.createElement('p');
     meta.className = 'item-meta photo-links';
-    meta.appendChild(document.createTextNode('View photos: '));
-    for (let index = 0; index < photos.length; index += 1) {
-      if (index > 0) {
-        meta.appendChild(document.createTextNode(' | '));
-      }
-      const photo = photos[index];
-      const link = document.createElement('button');
-      link.type = 'button';
-      link.className = 'photo-link';
-      link.textContent = photo.label;
-      link.addEventListener('click', () => openImage(photo.url));
-      meta.appendChild(link);
+    const label = document.createElement('span');
+    label.textContent = 'View photos:';
+    meta.appendChild(label);
+    for (const photo of photos) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'photo-button';
+      button.textContent = photo.label;
+      button.addEventListener('click', () => openImage(photo.url));
+      meta.appendChild(button);
     }
     container.appendChild(meta);
   }
