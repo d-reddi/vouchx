@@ -3008,6 +3008,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           card.appendChild(reasonMeta);
         }
         appendSubmissionAcknowledgementMeta(card, item);
+        if (item.status === 'approved') {
+          appendPhotoLinksMeta(card, item);
+        }
         if (item.status === 'denied' && !item.reopenedChildId) {
           const row = document.createElement('div');
           row.className = 'row';
@@ -3056,6 +3059,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         card.appendChild(by);
 
         appendSubmissionAcknowledgementMeta(card, item);
+        appendPhotoLinksMeta(card, item);
 
         const removeReason = document.createElement('textarea');
         removeReason.className = 'field-textarea';
@@ -3118,6 +3122,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         at.className = 'item-meta';
         at.textContent = formatTime(item.at);
         card.appendChild(at);
+
+        if (item.action === 'approved') {
+          appendPhotoLinksMeta(card, item);
+        }
 
         auditSearchResults.appendChild(card);
       }
@@ -3719,6 +3727,35 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     wrap.appendChild(row);
 
     return wrap;
+  }
+
+  function appendPhotoLinksMeta(container, item) {
+    const photos = [
+      { url: item.photoOneUrl, label: 'Photo 1' },
+      { url: item.photoTwoUrl, label: 'Photo 2' },
+      { url: item.photoThreeUrl, label: 'Photo 3' },
+    ]
+      .map((photo) => ({ ...photo, url: normalizeExternalUrl(photo.url) }))
+      .filter((photo) => photo.url);
+
+    if (photos.length === 0) {
+      return;
+    }
+
+    const meta = document.createElement('p');
+    meta.className = 'item-meta photo-links';
+    const label = document.createElement('span');
+    label.textContent = 'View photos:';
+    meta.appendChild(label);
+    for (const photo of photos) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'photo-button';
+      button.textContent = photo.label;
+      button.addEventListener('click', () => openImage(photo.url));
+      meta.appendChild(button);
+    }
+    container.appendChild(meta);
   }
 
   function createUsernameHeading(username) {
