@@ -3,11 +3,20 @@ import { errorText } from './core.js';
 let devvitUnhandledRejectionGuardInstalled = false;
 
 function shouldIgnoreDevvitLogStreamAuthRejection(reason: unknown): boolean {
-  const message = errorText(reason).toLowerCase();
-  return (
+  const message = `${errorText(reason)}\n${reason instanceof Error ? (reason.stack ?? '') : ''}`.toLowerCase();
+  const isPluginAuthTimeout =
     message.includes('unauthenticated') &&
     message.includes('failed to authenticate plugin request') &&
-    message.includes('upstream request missing or timed out')
+    message.includes('upstream request missing or timed out');
+  const isInvalidJwtLogStreamFailure =
+    message.includes('unauthenticated') &&
+    message.includes('invalid jwt token') &&
+    message.includes('token validation failed') &&
+    (message.includes('logstream') || message.includes('forwardingconsole'));
+
+  return (
+    isPluginAuthTimeout ||
+    isInvalidJwtLogStreamFailure
   );
 }
 

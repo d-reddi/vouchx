@@ -1120,6 +1120,39 @@ textarea {
   color: var(--primary-strong);
 }
 
+.photo-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.photo-button {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--panel-border) 78%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 10%, var(--panel-surface-soft) 90%);
+  color: color-mix(in srgb, var(--primary) 84%, white 16%);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  min-height: 28px;
+  padding: 4px 9px;
+}
+
+.photo-button:hover {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--panel-border) 66%);
+  background: color-mix(in srgb, var(--primary) 15%, var(--panel-surface-strong) 85%);
+  color: var(--primary-strong);
+}
+
+.photo-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .pending-stats-btn {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);

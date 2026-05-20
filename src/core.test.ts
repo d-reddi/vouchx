@@ -47,6 +47,7 @@ import {
   validateFlairTemplateId,
   validateMaxDenialsBeforeBlockSetting,
   withRedisLock,
+  withdrawCurrentUserPendingVerification,
   usernameLookupFields,
   type RuntimeConfig,
 } from './core.ts';
@@ -1166,6 +1167,10 @@ function approvedIndexTestKey(subredditId: string): string {
   return `${subredditPrefixKey(subredditId)}:idx:approved`;
 }
 
+function approvedPrefixIndexTestKey(subredditId: string, prefix3: string): string {
+  return `${subredditPrefixKey(subredditId)}:idx:approved:prefix3:v1:${normalizeUsername(prefix3).slice(0, 3)}`;
+}
+
 function historyDateIndexTestKey(subredditId: string): string {
   return `${subredditPrefixKey(subredditId)}:idx:history:date`;
 }
@@ -1269,6 +1274,9 @@ function seedApprovedRecords(
     approvedAt: string;
     username?: string;
     moderator?: string;
+    photoOneUrl?: string;
+    photoTwoUrl?: string;
+    photoThreeUrl?: string;
     includeApprovedIndex?: boolean;
   }>
 ) {
@@ -1286,6 +1294,9 @@ function seedApprovedRecords(
       submittedAt,
       ageAcknowledgedAt: submittedAt,
       reviewedAt: record.approvedAt,
+      photoOneUrl: record.photoOneUrl ?? 'https://i.redd.it/example.png',
+      photoTwoUrl: record.photoTwoUrl ?? '',
+      photoThreeUrl: record.photoThreeUrl ?? '',
     });
 
     reviewContext.redisStore.set(
@@ -1304,6 +1315,10 @@ function seedApprovedRecords(
 
     if (record.includeApprovedIndex !== false) {
       ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).set(record.id, approvedAtMs);
+      ensureTestZSet(reviewContext.zsetStore, approvedPrefixIndexTestKey(reviewContext.subredditId, username)).set(
+        record.id,
+        approvedAtMs
+      );
     }
   }
 }
@@ -2345,6 +2360,32 @@ test('assertCanReview returns a temporary error when moderator lookup is transie
   }
 });
 
+test('assertCanReview suppresses noisy logs for Devvit gRPC 500 moderator lookup failures', async () => {
+  const lookupContext = createModeratorLookupContext({
+    permissionResponses: [new Error('2 UNKNOWN: grpc invocation failed with status 2; 500 Internal Server Error')],
+  });
+  const originalConsoleLog = console.log;
+  let loggedMessages = 0;
+  console.log = () => {
+    loggedMessages += 1;
+  };
+
+  try {
+    await assert.rejects(
+      () => assertCanReview(lookupContext.context as never, 'ExampleSub', 'mod_one'),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        assert.equal((error as Error & { status?: number }).status, 503);
+        assert.equal((error as Error).message, 'Unable to verify moderator access right now. Please retry.');
+        return true;
+      }
+    );
+    assert.equal(loggedMessages, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
 test('getHubModeratorUiState returns a visible button for confirmed review moderators', async () => {
   const lookupContext = createModeratorLookupContext({
     permissionResponses: [['access']],
@@ -2884,6 +2925,103 @@ test('searchApprovedRecords treats short username prefixes as unfiltered baselin
   });
 });
 
+test('searchApprovedRecords returns approved photo URLs in unfiltered and prefix searches', async () => {
+  const reviewContext = createReviewActionContext();
+  seedApprovedRecords(reviewContext, [
+    {
+      id: 'approved_with_photos',
+      username: 'Example_User',
+      approvedAt: '2026-03-25T12:00:00.000Z',
+      photoOneUrl: 'https://i.redd.it/approved-one.png',
+      photoTwoUrl: 'https://i.redd.it/approved-two.png',
+      photoThreeUrl: 'https://i.redd.it/approved-three.png',
+    },
+  ]);
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const unfiltered = await searchApprovedRecords(reviewContext.context as never, reviewContext.subredditId, {
+      offset: 0,
+      limit: 25,
+    });
+    const prefixed = await searchApprovedRecords(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'exa',
+      offset: 0,
+      limit: 25,
+    });
+
+    for (const result of [unfiltered, prefixed]) {
+      const item = result.items.find((candidate) => candidate.id === 'approved_with_photos');
+      assert.equal(item?.photoOneUrl, 'https://i.redd.it/approved-one.png');
+      assert.equal(item?.photoTwoUrl, 'https://i.redd.it/approved-two.png');
+      assert.equal(item?.photoThreeUrl, 'https://i.redd.it/approved-three.png');
+    }
+  });
+});
+
+test('searchApprovedRecords omits photo URL fields for old scrubbed approved records', async () => {
+  const reviewContext = createReviewActionContext();
+  seedApprovedRecords(reviewContext, [
+    {
+      id: 'approved_scrubbed',
+      approvedAt: '2026-03-25T12:00:00.000Z',
+      photoOneUrl: '',
+      photoTwoUrl: '',
+      photoThreeUrl: '',
+    },
+  ]);
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const result = await searchApprovedRecords(reviewContext.context as never, reviewContext.subredditId, {
+      offset: 0,
+      limit: 25,
+    });
+    const item = result.items.find((candidate) => candidate.id === 'approved_scrubbed');
+
+    assert.ok(item);
+    assert.equal(item.photoOneUrl, undefined);
+    assert.equal(item.photoTwoUrl, undefined);
+    assert.equal(item.photoThreeUrl, undefined);
+  });
+});
+
+test('searchHistoryRecords returns photo URLs only for approved records', async () => {
+  const approvedContext = createReviewActionContext({
+    recordOverrides: {
+      status: 'approved',
+      reviewedAt: '2026-03-25T12:00:00.000Z',
+      moderator: 'Mod_One',
+      photoOneUrl: 'https://i.redd.it/history-approved-one.png',
+      photoTwoUrl: 'https://i.redd.it/history-approved-two.png',
+      photoThreeUrl: 'https://i.redd.it/history-approved-three.png',
+    },
+  });
+  const deniedContext = createReviewActionContext({
+    recordOverrides: {
+      status: 'denied',
+      reviewedAt: '2026-03-25T12:00:00.000Z',
+      moderator: 'Mod_One',
+      denyReason: 'reason_1',
+      photoOneUrl: 'https://i.redd.it/history-denied-one.png',
+    },
+  });
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const approved = await searchHistoryRecords(approvedContext.context as never, approvedContext.subredditId, {
+      offset: 0,
+      limit: 25,
+    });
+    const denied = await searchHistoryRecords(deniedContext.context as never, deniedContext.subredditId, {
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(approved.items[0]?.photoOneUrl, 'https://i.redd.it/history-approved-one.png');
+    assert.equal(approved.items[0]?.photoTwoUrl, 'https://i.redd.it/history-approved-two.png');
+    assert.equal(approved.items[0]?.photoThreeUrl, 'https://i.redd.it/history-approved-three.png');
+    assert.equal(denied.items[0]?.photoOneUrl, undefined);
+  });
+});
+
 test('searchAuditEntries treats short username and actor prefixes as unfiltered baseline queries', async () => {
   const reviewContext = createReviewActionContext();
 
@@ -2907,6 +3045,122 @@ test('searchAuditEntries treats short username and actor prefixes as unfiltered 
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0]?.id, 'audit_short_prefix');
   });
+});
+
+test('searchAuditEntries attaches photo URLs to approved audit entries by verification id', async () => {
+  const reviewContext = createReviewActionContext();
+  const verificationId = 'removed_after_approval';
+  const record = buildRecord({
+    id: verificationId,
+    subredditId: reviewContext.subredditId,
+    subredditName: reviewContext.record.subredditName,
+    status: 'removed',
+    moderator: 'Mod_One',
+    reviewedAt: '2026-03-25T12:00:00.000Z',
+    removedAt: '2026-03-26T12:00:00.000Z',
+    photoOneUrl: 'https://i.redd.it/audit-one.png',
+    photoTwoUrl: 'https://i.redd.it/audit-two.png',
+    photoThreeUrl: 'https://i.redd.it/audit-three.png',
+  });
+  reviewContext.redisStore.set(
+    verificationRecordTestKey(reviewContext.subredditId, verificationId),
+    JSON.stringify(record)
+  );
+  seedAuditEntries(reviewContext, [
+    {
+      id: 'audit_approved_with_photos',
+      action: 'approved',
+      actor: 'Mod_One',
+      at: '2026-03-25T12:00:00.000Z',
+      verificationId,
+    },
+    {
+      id: 'audit_denied_with_same_record',
+      action: 'denied',
+      actor: 'Mod_One',
+      at: '2026-03-24T12:00:00.000Z',
+      verificationId,
+    },
+  ]);
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const approved = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      action: 'approved',
+      offset: 0,
+      limit: 25,
+    });
+    const denied = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      action: 'denied',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(approved.items[0]?.photoOneUrl, 'https://i.redd.it/audit-one.png');
+    assert.equal(approved.items[0]?.photoTwoUrl, 'https://i.redd.it/audit-two.png');
+    assert.equal(approved.items[0]?.photoThreeUrl, 'https://i.redd.it/audit-three.png');
+    assert.equal(denied.items[0]?.photoOneUrl, undefined);
+  });
+});
+
+test('withdrawCurrentUserPendingVerification writes a dated mod note and removes pending data', async () => {
+  const withdrawIso = '2026-04-01T15:30:00.000Z';
+  const reviewContext = createReviewActionContext({ moderatorName: 'example_user' });
+
+  await withFixedNow(withdrawIso, async () => {
+    await withdrawCurrentUserPendingVerification(reviewContext.context as never);
+  });
+
+  assert.equal(reviewContext.addModNoteCalls.length, 1);
+  assert.deepEqual(reviewContext.addModNoteCalls[0], {
+    subreddit: 'examplesub',
+    user: 'example_user',
+    note: `User withdrew pending verification request on: ${new Date(withdrawIso).toLocaleString()}`,
+  });
+  assert.equal(reviewContext.redisStore.get(verificationRecordTestKey(reviewContext.subredditId, reviewContext.record.id)), undefined);
+  assert.equal(
+    reviewContext.redisStore.get(userPendingTestKey(reviewContext.subredditId, reviewContext.record.username)),
+    undefined
+  );
+  assert.equal(
+    reviewContext.redisStore.get(userLatestTestKey(reviewContext.subredditId, reviewContext.record.username)),
+    undefined
+  );
+  assert.equal(
+    ensureTestZSet(reviewContext.zsetStore, pendingIndexTestKey(reviewContext.subredditId)).has(reviewContext.record.id),
+    false
+  );
+  assert.equal(
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).has(reviewContext.record.id),
+    false
+  );
+});
+
+test('withdrawCurrentUserPendingVerification still removes pending data when mod note write fails', async () => {
+  const reviewContext = createReviewActionContext({
+    moderatorName: 'example_user',
+    addModNoteResponses: [new Error('mod notes unavailable')],
+  });
+
+  await withdrawCurrentUserPendingVerification(reviewContext.context as never);
+
+  assert.equal(reviewContext.addModNoteCalls.length, 1);
+  assert.equal(reviewContext.redisStore.get(verificationRecordTestKey(reviewContext.subredditId, reviewContext.record.id)), undefined);
+  assert.equal(
+    reviewContext.redisStore.get(userPendingTestKey(reviewContext.subredditId, reviewContext.record.username)),
+    undefined
+  );
+});
+
+test('withdrawCurrentUserPendingVerification does not write a mod note without a pending request', async () => {
+  const reviewContext = createReviewActionContext({ moderatorName: 'example_user' });
+  reviewContext.redisStore.delete(userPendingTestKey(reviewContext.subredditId, reviewContext.record.username));
+
+  await assert.rejects(
+    withdrawCurrentUserPendingVerification(reviewContext.context as never),
+    /No pending verification request found/
+  );
+
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
 });
 
 test('shouldViewerDisplayVerifiedState lets manual CSS flair matches override denied and removed, but not pending', () => {
@@ -3381,6 +3635,7 @@ test('removeApprovedVerificationByModerator adds a moderator removal mod note', 
   assert.equal(result.applied, true);
   assert.equal(result.modNote.status, 'success');
   assert.equal(storedRecord?.status, 'removed');
+  assert.equal(storedRecord?.photoOneUrl, reviewContext.record.photoOneUrl);
   assert.equal(reviewContext.addModNoteCalls.length, 2);
   assert.deepEqual(latestModNote, {
     subreddit: 'examplesub',
@@ -3390,7 +3645,13 @@ test('removeApprovedVerificationByModerator adds a moderator removal mod note', 
 });
 
 test('approveVerification keeps valid approvals working', async () => {
-  const reviewContext = createReviewActionContext();
+  const reviewContext = createReviewActionContext({
+    recordOverrides: {
+      photoOneUrl: 'https://i.redd.it/approval-one.png',
+      photoTwoUrl: 'https://i.redd.it/approval-two.png',
+      photoThreeUrl: 'https://i.redd.it/approval-three.png',
+    },
+  });
 
   const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
   const storedRecord = reviewContext.getParsedRecord();
@@ -3411,6 +3672,9 @@ test('approveVerification keeps valid approvals working', async () => {
   );
   assert.equal(storedRecord?.status, 'approved');
   assert.equal(storedRecord?.moderator, 'Mod_One');
+  assert.equal(storedRecord?.photoOneUrl, 'https://i.redd.it/approval-one.png');
+  assert.equal(storedRecord?.photoTwoUrl, 'https://i.redd.it/approval-two.png');
+  assert.equal(storedRecord?.photoThreeUrl, 'https://i.redd.it/approval-three.png');
   assert.equal(reviewContext.setUserFlairCalls.length, 1);
   assert.equal(reviewContext.createConversationCalls.length, 1);
   assert.equal(reviewContext.addModNoteCalls.length, 1);

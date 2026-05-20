@@ -443,7 +443,13 @@ type PendingPanelItem = {
   accountDetails?: PendingAccountDetailsSnapshot | null;
 };
 
-type ApprovedSearchPanelItem = {
+type SearchPhotoLinkFields = {
+  photoOneUrl?: string;
+  photoTwoUrl?: string;
+  photoThreeUrl?: string;
+};
+
+type ApprovedSearchPanelItem = SearchPhotoLinkFields & {
   id: string;
   username: string;
   approvedAt: string;
@@ -458,7 +464,7 @@ type ApprovedSearchResponsePayload = {
   requestId: number;
 };
 
-type AuditSearchPanelItem = {
+type AuditSearchPanelItem = SearchPhotoLinkFields & {
   id: string;
   username: string;
   actor: string;
@@ -511,7 +517,7 @@ type AuditWindowCandidate = {
   entry: AuditLogEntry | null;
 };
 
-type HistorySearchPanelItem = {
+type HistorySearchPanelItem = SearchPhotoLinkFields & {
   id: string;
   username: string;
   status: VerificationStatus;
@@ -1733,6 +1739,7 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
     throw new Error('No pending verification request found.');
   }
 
+  const withdrawnAt = new Date(Date.now()).toISOString();
   const currentSubredditName = await getCurrentSubredditNameCompat(context);
 
   await purgeUserVerificationData(
@@ -1746,6 +1753,14 @@ async function withdrawCurrentUserPendingVerification(context: Devvit.Context): 
       clearModerationRecords: false,
     }
   );
+
+  try {
+    await addPendingWithdrawalModNote(context, record, withdrawnAt);
+  } catch (error) {
+    console.log(
+      `Pending withdrawal mod note write failed for r/${sanitizeSubredditName(record.subredditName)} u/${maskUsernameForLog(record.username)}: ${errorText(error)}`
+    );
+  }
 }
 
 async function deleteCurrentUserVerificationData(context: Devvit.Context): Promise<DeleteDataResult> {
@@ -2588,9 +2603,6 @@ async function approveVerification(
       claimedAt: null,
       parentVerificationId: null,
       accountDetails: null,
-      photoOneUrl: '',
-      photoTwoUrl: '',
-      photoThreeUrl: '',
       removedAt: null,
       removedBy: null,
       lastValidatedAt: new Date().toISOString(),
@@ -3329,6 +3341,19 @@ async function addPendingSubmissionModNote(context: Devvit.Context, record: Veri
     subreddit: subredditName,
     user: record.username,
     note: `Verification request submitted. Terms accepted and 18+ confirmation recorded on: ${acknowledgedAt}`,
+  });
+}
+
+async function addPendingWithdrawalModNote(
+  context: Devvit.Context,
+  record: VerificationRecord,
+  withdrawnAt: string
+): Promise<void> {
+  const subredditName = sanitizeSubredditName(record.subredditName);
+  await context.reddit.addModNote({
+    subreddit: subredditName,
+    user: record.username,
+    note: `User withdrew pending verification request on: ${formatTimestamp(withdrawnAt)}`,
   });
 }
 
@@ -4624,6 +4649,36 @@ async function listPendingVerifications(context: Devvit.Context, subredditId: st
   return records;
 }
 
+function toSearchPhotoLinkFields(
+  record: Pick<VerificationRecord, 'photoOneUrl' | 'photoTwoUrl' | 'photoThreeUrl'>
+): SearchPhotoLinkFields {
+  const photoOneUrl = normalizeSubmittedPhotoUrl(record.photoOneUrl);
+  const photoTwoUrl = normalizeSubmittedPhotoUrl(record.photoTwoUrl);
+  const photoThreeUrl = normalizeSubmittedPhotoUrl(record.photoThreeUrl);
+  const fields: SearchPhotoLinkFields = {};
+  if (photoOneUrl) {
+    fields.photoOneUrl = photoOneUrl;
+  }
+  if (photoTwoUrl) {
+    fields.photoTwoUrl = photoTwoUrl;
+  }
+  if (photoThreeUrl) {
+    fields.photoThreeUrl = photoThreeUrl;
+  }
+  return fields;
+}
+
+function toApprovedSearchPanelItem(record: VerificationRecord): ApprovedSearchPanelItem {
+  return {
+    id: record.id,
+    username: record.username,
+    approvedAt: record.reviewedAt ?? record.submittedAt,
+    approvedBy: record.moderator ?? 'unknown',
+    acknowledgedAt: record.ageAcknowledgedAt,
+    ...toSearchPhotoLinkFields(record),
+  };
+}
+
 async function searchHistoryRecords(
   context: Devvit.Context,
   subredditId: string,
@@ -4695,6 +4750,7 @@ async function searchHistoryRecords(
       parentVerificationId: parsed.parentVerificationId ?? null,
       reopenedChildId: null,
       reopenedState: 'none',
+      ...(parsed.status === 'approved' ? toSearchPhotoLinkFields(parsed) : {}),
     });
     if (items.length >= limit) {
       break;
@@ -4823,13 +4879,7 @@ async function searchApprovedRecords(
         staleIds.push(recordId);
         continue;
       }
-      items.push({
-        id: parsed.id,
-        username: parsed.username,
-        approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
-        approvedBy: parsed.moderator ?? 'unknown',
-        acknowledgedAt: parsed.ageAcknowledgedAt,
-      });
+      items.push(toApprovedSearchPanelItem(parsed));
       if (items.length >= limit) {
         break;
       }
@@ -4889,13 +4939,7 @@ async function searchApprovedRecords(
     }
     matchedCount += 1;
     if (items.length < limit) {
-      items.push({
-        id: parsed.id,
-        username: parsed.username,
-        approvedAt: parsed.reviewedAt ?? parsed.submittedAt,
-        approvedBy: parsed.moderator ?? 'unknown',
-        acknowledgedAt: parsed.ageAcknowledgedAt,
-      });
+      items.push(toApprovedSearchPanelItem(parsed));
     }
   }
 
@@ -5029,6 +5073,7 @@ async function searchAuditEntries(
   }
 
   const items: AuditSearchPanelItem[] = [];
+  const approvedAuditItemsByVerificationId = new Map<string, AuditSearchPanelItem[]>();
   let scannedCount = 0;
   for (const candidate of candidates) {
     scannedCount += 1;
@@ -5045,16 +5090,49 @@ async function searchAuditEntries(
     if (actionFilter && parsed.action !== actionFilter) {
       continue;
     }
-    items.push({
+    const item: AuditSearchPanelItem = {
       id: parsed.id,
       username: parsed.username,
       actor: parsed.actor,
       action: parsed.action,
       line: formatAuditEntry(parsed),
       at: parsed.at,
-    });
+    };
+    items.push(item);
+    const verificationId = parsed.action === 'approved' ? (parsed.verificationId ?? '').trim() : '';
+    if (verificationId) {
+      const verificationItems = approvedAuditItemsByVerificationId.get(verificationId) ?? [];
+      verificationItems.push(item);
+      approvedAuditItemsByVerificationId.set(verificationId, verificationItems);
+    }
     if (items.length >= limit) {
       break;
+    }
+  }
+
+  if (approvedAuditItemsByVerificationId.size > 0) {
+    const verificationIds = Array.from(approvedAuditItemsByVerificationId.keys());
+    const payloads = await mGetStringValuesInChunks(
+      context,
+      verificationIds.map((verificationId) => verificationRecordKey(subredditId, verificationId))
+    );
+    for (let index = 0; index < payloads.length; index++) {
+      const verificationId = verificationIds[index];
+      if (!verificationId) {
+        continue;
+      }
+      const payload = payloads[index];
+      if (!payload) {
+        continue;
+      }
+      const record = parseRecord(payload);
+      if (!record) {
+        continue;
+      }
+      const photoFields = toSearchPhotoLinkFields(record);
+      for (const item of approvedAuditItemsByVerificationId.get(verificationId) ?? []) {
+        Object.assign(item, photoFields);
+      }
     }
   }
 
@@ -8709,6 +8787,8 @@ function looksLikeTransientRedditTransportError(message: string): boolean {
   return (
     normalized.includes('unknown internal error') ||
     (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
+    (normalized.includes('grpc invocation failed') && /\b5\d\d\b/.test(normalized)) ||
+    /\b5\d\d\s+internal server error\b/.test(normalized) ||
     normalized.includes('unexpected eof') ||
     normalized.includes('i/o timeout') ||
     normalized.includes('read tcp') ||
