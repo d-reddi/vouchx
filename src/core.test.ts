@@ -39,6 +39,7 @@ import {
   repairMissingAutoBlockForUser,
   refreshConfiguredFlairTemplateCache,
   shouldViewerDisplayVerifiedState,
+  submitVerification,
   toModPanelState,
   toPublicHubConfig,
   toHubState,
@@ -51,6 +52,12 @@ import {
   usernameLookupFields,
   type RuntimeConfig,
 } from './core.ts';
+import {
+  GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME,
+  GLOBAL_BLOCKED_USERNAME_SETTING_NAMES,
+  parseRedditUsernameList,
+  splitRedditUsernameListAcrossSettings,
+} from './shared/global-usernames.ts';
 
 function buildRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -841,6 +848,7 @@ function createHubDashboardContext(options?: {
   subredditName?: string;
   userId?: string;
   currentUsername?: string | null;
+  settingsValues?: Record<string, unknown>;
   currentUserResponses?: Array<
     | {
         username?: string;
@@ -958,8 +966,8 @@ function createHubDashboardContext(options?: {
         },
       },
       settings: {
-        async get() {
-          return undefined;
+        async get(key: string) {
+          return options?.settingsValues?.[key];
         },
       },
       redis: {
@@ -1720,6 +1728,49 @@ test('normalizeUsernameStrict rejects malformed non-user inputs', () => {
   assert.equal(normalizeUsernameStrict('   '), '');
   assert.equal(normalizeUsernameStrict('https://www.reddit.com/message/compose'), '');
   assert.equal(normalizeUsernameStrict('https://example.com/not-a-user'), '');
+});
+
+test('parseRedditUsernameList normalizes usernames and reports invalid tokens', () => {
+  const parsed = parseRedditUsernameList(`
+    u/Test_User1,
+    test_user2
+    /user/Test_User3/
+    test_user1
+    bad token
+    https://example.com/nope
+  `);
+
+  assert.deepEqual(parsed, {
+    usernames: ['test_user1', 'test_user2', 'test_user3'],
+    invalidTokens: ['bad token', 'https://example.com/nope'],
+    canonicalValue: 'test_user1,test_user2,test_user3',
+  });
+});
+
+test('splitRedditUsernameListAcrossSettings chunks a canonical list by byte size', () => {
+  const chunked = splitRedditUsernameListAcrossSettings(['alpha', 'bravo', 'charlie'], {
+    maxChunks: 3,
+    maxBytesPerChunk: 13,
+  });
+
+  assert.deepEqual(chunked, {
+    chunks: ['alpha,bravo', 'charlie'],
+    overflow: false,
+    overflowedUsernamesCount: 0,
+  });
+});
+
+test('splitRedditUsernameListAcrossSettings reports overflow when the configured chunk count is exceeded', () => {
+  const chunked = splitRedditUsernameListAcrossSettings(['alpha', 'bravo', 'charlie'], {
+    maxChunks: 1,
+    maxBytesPerChunk: 13,
+  });
+
+  assert.deepEqual(chunked, {
+    chunks: ['alpha,bravo'],
+    overflow: true,
+    overflowedUsernamesCount: 1,
+  });
 });
 
 test('normalizeUsernameForLookup canonicalizes known user formats while preserving legacy malformed values', () => {
@@ -2502,6 +2553,137 @@ test('loadHubDashboard backfills userId pointers from legacy username pointers',
   assert.equal(
     hubContext.redisStore.get(userPendingByIdTestKey('t5_example', 't2_legacy')),
     record.id
+  );
+});
+
+test('loadHubDashboard applies global blocks and exposes the developer panel to authorized developers', async () => {
+  const record = buildRecord({
+    id: 'verification_global_blocked',
+    username: 'example_user',
+    userId: 't2_viewer',
+    status: 'approved',
+    reviewedAt: '2026-03-11T12:00:00.000Z',
+    submittedAt: '2026-03-11T12:00:00.000Z',
+  });
+  const hubContext = createHubDashboardContext({
+    userId: 't2_viewer',
+    currentUsername: 'example_user',
+    currentUserResponses: [
+      {
+        username: 'example_user',
+        id: 't2_viewer',
+      },
+    ],
+    record,
+    settingsValues: {
+      [GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME]: '2',
+      [GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[0]]: 'u/example_user',
+      [GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[1]]: 'Test_User2',
+      developer_ui_usernames: 'Example_User',
+    },
+  });
+  hubContext.redisStore.set(userLatestByIdTestKey('t5_example', 't2_viewer'), record.id);
+
+  const dashboard = await loadHubDashboard(hubContext.context as never);
+  const hubState = toHubState(dashboard);
+
+  assert.equal(dashboard.viewerBlocked?.scope, 'global');
+  assert.equal(dashboard.viewerBlocked?.reason, 'Blocked by developer');
+  assert.equal(dashboard.viewerShouldDisplayVerified, false);
+  assert.equal(dashboard.viewerAwaitingFlairPropagation, false);
+  assert.deepEqual(hubState.developerPanel, {
+    accessGranted: true,
+    currentUsernames: ['example_user', 'test_user2'],
+    invalidTokens: [],
+    canonicalValue: 'example_user,test_user2',
+  });
+});
+
+test('loadHubDashboard omits the developer panel for non-developers', async () => {
+  const hubContext = createHubDashboardContext({
+    userId: 't2_plain',
+    currentUsername: 'plain_user',
+    currentUserResponses: [
+      {
+        username: 'plain_user',
+        id: 't2_plain',
+      },
+    ],
+    settingsValues: {
+      [GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME]: '1',
+      [GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[0]]: 'blocked_user',
+      developer_ui_usernames: 'example_user',
+    },
+  });
+
+  const dashboard = await loadHubDashboard(hubContext.context as never);
+  const hubState = toHubState(dashboard);
+
+  assert.equal(dashboard.developerPanel, undefined);
+  assert.equal(hubState.developerPanel, undefined);
+});
+
+test('loadHubDashboard respects the active global blocklist chunk count and ignores stale later chunks', async () => {
+  const hubContext = createHubDashboardContext({
+    userId: 't2_plain',
+    currentUsername: 'stale_user',
+    currentUserResponses: [
+      {
+        username: 'stale_user',
+        id: 't2_plain',
+      },
+    ],
+    settingsValues: {
+      [GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME]: '1',
+      [GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[0]]: 'active_user',
+      [GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[1]]: 'stale_user',
+    },
+  });
+
+  const dashboard = await loadHubDashboard(hubContext.context as never);
+
+  assert.equal(dashboard.viewerBlocked, null);
+});
+
+test('submitVerification rejects globally blocked usernames', async () => {
+  await assert.rejects(
+    submitVerification(
+      {
+        is18Confirmed: true,
+        adultOnlySelfPhotosConfirmed: true,
+        termsAccepted: true,
+        photoOneUrl: 'https://i.redd.it/one.png',
+        photoTwoUrl: 'https://i.redd.it/two.png',
+        photoThreeUrl: '',
+      } as never,
+      {
+        subredditId: 't5_example',
+        subredditName: 'example',
+        userId: 't2_viewer',
+        reddit: {
+          async getCurrentUsername() {
+            return 'example_user';
+          },
+        },
+        settings: {
+          async get(key: string) {
+            if (key === GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME) {
+              return '1';
+            }
+            if (key === GLOBAL_BLOCKED_USERNAME_SETTING_NAMES[0]) {
+              return 'u/example_user';
+            }
+            return undefined;
+          },
+        },
+        redis: {
+          async hGetAll() {
+            return {};
+          },
+        },
+      } as never
+    ),
+    /You cannot submit a verification request\./
   );
 });
 

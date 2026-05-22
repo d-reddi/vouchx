@@ -9,6 +9,13 @@ import {
 import { EffectType } from '@devvit/protos/json/devvit/ui/effects/v1alpha/effect.js';
 import { WebViewImmersiveMode } from '@devvit/protos/json/devvit/ui/effects/web_view/v1alpha/immersive_mode.js';
 import { emitEffect } from '@devvit/shared-types/client/emit-effect.js';
+import {
+  GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME,
+  buildRedditUsernameListCanonicalValue,
+  GLOBAL_BLOCKED_USERNAME_SETTING_NAMES,
+  parseRedditUsernameList,
+  splitRedditUsernameListAcrossSettings,
+} from '../src/shared/global-usernames.ts';
 import brandLogoUrl from './logo.png';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
@@ -116,6 +123,71 @@ function createShell(root, inline) {
             <div data-el="action-row" class="row hub-action-dock"></div>
           </section>
 
+          <section data-el="developer-panel" class="hub-developer hidden">
+            <div class="hub-developer-copy">
+              <p class="hub-kicker">Developer Tools</p>
+              <h2>Global blocklist</h2>
+              <p class="meta">
+                This editor is read-only for app settings. Add or remove usernames here, then copy the updated value into the Devvit CLI.
+              </p>
+            </div>
+            <div class="hub-developer-stack">
+              <div>
+                <p class="hub-developer-label">Currently blocked</p>
+                <div data-el="developer-current-list" class="hub-developer-list"></div>
+                <p data-el="developer-empty" class="meta hidden">No usernames are currently blocked app-wide.</p>
+              </div>
+              <div>
+                <p class="hub-developer-label">Add one username</p>
+                <div class="hub-developer-input-row">
+                  <input
+                    data-el="developer-add-input"
+                    class="hub-developer-input"
+                    type="text"
+                    placeholder="u/example_user"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button data-el="developer-add-btn" class="btn-secondary" type="button">Add</button>
+                </div>
+              </div>
+              <div>
+                <p class="hub-developer-label">Add multiple usernames</p>
+                <textarea
+                  data-el="developer-bulk-input"
+                  class="hub-developer-textarea"
+                  rows="4"
+                  placeholder="u/test_user1&#10;test_user2, test_user3"
+                  spellcheck="false"
+                ></textarea>
+                <div class="row">
+                  <button data-el="developer-bulk-btn" class="btn-secondary" type="button">Add Pasted List</button>
+                  <button data-el="developer-reset-btn" class="btn-secondary" type="button">Reset to Current</button>
+                </div>
+              </div>
+              <div data-el="developer-invalid" class="hub-developer-warning hidden"></div>
+              <p data-el="developer-draft-status" class="hub-developer-status"></p>
+              <div>
+                <p class="hub-developer-label">Commands to paste into Devvit CLI</p>
+                <textarea
+                  data-el="developer-canonical-output"
+                  class="hub-developer-textarea hub-developer-output"
+                  rows="10"
+                  readonly
+                ></textarea>
+                <div class="row">
+                  <button data-el="developer-copy-btn" class="btn-primary" type="button">Copy Terminal Commands</button>
+                </div>
+              </div>
+              <div class="hub-developer-instructions">
+                <p class="hub-developer-label">Apply the change</p>
+                <p class="meta">1. Paste the copied commands into your terminal.</p>
+                <p class="meta">2. The populated blocklist chunks are updated first, and the final line updates the active chunk count.</p>
+                <p class="meta">3. Refresh the app to confirm the updated list.</p>
+              </div>
+            </div>
+          </section>
+
           <footer data-el="legal-links" class="legal-links hidden"></footer>
         </section>
       </div>
@@ -173,6 +245,18 @@ function createShell(root, inline) {
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
     actionRow: root.querySelector('[data-el="action-row"]'),
+    developerPanel: root.querySelector('[data-el="developer-panel"]'),
+    developerCurrentList: root.querySelector('[data-el="developer-current-list"]'),
+    developerEmpty: root.querySelector('[data-el="developer-empty"]'),
+    developerAddInput: root.querySelector('[data-el="developer-add-input"]'),
+    developerAddBtn: root.querySelector('[data-el="developer-add-btn"]'),
+    developerBulkInput: root.querySelector('[data-el="developer-bulk-input"]'),
+    developerBulkBtn: root.querySelector('[data-el="developer-bulk-btn"]'),
+    developerResetBtn: root.querySelector('[data-el="developer-reset-btn"]'),
+    developerInvalid: root.querySelector('[data-el="developer-invalid"]'),
+    developerDraftStatus: root.querySelector('[data-el="developer-draft-status"]'),
+    developerCanonicalOutput: root.querySelector('[data-el="developer-canonical-output"]'),
+    developerCopyBtn: root.querySelector('[data-el="developer-copy-btn"]'),
     legalLinks: root.querySelector('[data-el="legal-links"]'),
     submitWarningModal: root.querySelector('[data-el="submit-warning-modal"]'),
     submitWarningList: root.querySelector('[data-el="submit-warning-list"]'),
@@ -324,6 +408,33 @@ function createExternalLink(item, extraClassName = '') {
     navigateTo(item.url);
   });
   return link;
+}
+
+async function copyTextToClipboard(value) {
+  const text = String(value ?? '');
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', 'readonly');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  document.body.appendChild(input);
+  input.focus();
+  input.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(input);
+  if (!copied) {
+    throw new Error('Copy failed. Select the value manually and copy it.');
+  }
+}
+
+function escapeSingleQuotedShellArg(value) {
+  return String(value ?? '').replaceAll("'", "'\"'\"'");
 }
 
 function formatDenyReasonSlot(reasonId) {
@@ -509,6 +620,20 @@ function buildStatusTooltipHtml(content) {
 
 function getStatusTooltipHtml(state, options) {
   const isRestricted = Boolean(state?.viewerBlocked && !options.isVerified);
+  if (isRestricted) {
+    if (state?.viewerBlocked?.scope === 'global') {
+      return buildStatusTooltipHtml([
+        'Your access to the VouchX app is currently restricted.',
+        'Per the VouchX Terms and Conditions, the developer may restrict access for violations of the Terms and Conditions or at their discretion.',
+        'This restriction applies across every subreddit using VouchX.',
+      ]);
+    }
+    return buildStatusTooltipHtml([
+      "You're blocked from submitting verification in this subreddit right now.",
+      'This is a subreddit-specific restriction based on your verification history or moderator actions.',
+    ]);
+  }
+
   if (state?.userLatest?.status === 'pending') {
     return buildStatusTooltipHtml([
       "You're in the verification queue.",
@@ -521,13 +646,6 @@ function getStatusTooltipHtml(state, options) {
     return buildStatusTooltipHtml([
       "You're verified and recognized as a trusted member.",
       'You stand out with a verified flair and may have additional access where enabled.',
-    ]);
-  }
-
-  if (isRestricted) {
-    return buildStatusTooltipHtml([
-      "You're blocked from submitting verification in this subreddit right now.",
-      'This is a subreddit-specific restriction based on your verification history or moderator actions.',
     ]);
   }
 
@@ -641,6 +759,7 @@ export function mountHub(options = {}) {
   let flairPropagationRefreshTimerId = 0;
   let flairPropagationRefreshAttempts = 0;
   let flairPropagationRefreshKey = '';
+  let developerPanelDraft = null;
   let photoInstructionsOnlyHandled = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
@@ -1290,6 +1409,239 @@ export function mountHub(options = {}) {
     void requestPhotoInstructionsReview();
   }
 
+  function createDeveloperPanelDraft(panel) {
+    const currentUsernames = Array.isArray(panel?.currentUsernames)
+      ? panel.currentUsernames.filter((username) => typeof username === 'string' && username.trim())
+      : [];
+    return {
+      sourceCanonicalValue: String(panel?.canonicalValue || ''),
+      sourceInvalidTokens: Array.isArray(panel?.invalidTokens)
+        ? panel.invalidTokens.filter((token) => typeof token === 'string' && token.trim())
+        : [],
+      usernames: parseRedditUsernameList(buildRedditUsernameListCanonicalValue(currentUsernames)).usernames,
+      latestInvalidTokens: [],
+    };
+  }
+
+  function syncDeveloperPanelDraft() {
+    if (!hubState?.developerPanel) {
+      developerPanelDraft = null;
+      return;
+    }
+
+    const nextSourceCanonicalValue = String(hubState.developerPanel.canonicalValue || '');
+    if (!developerPanelDraft || developerPanelDraft.sourceCanonicalValue !== nextSourceCanonicalValue) {
+      developerPanelDraft = createDeveloperPanelDraft(hubState.developerPanel);
+      if (refs.developerAddInput) {
+        refs.developerAddInput.value = '';
+      }
+      if (refs.developerBulkInput) {
+        refs.developerBulkInput.value = '';
+      }
+      return;
+    }
+
+    developerPanelDraft.sourceInvalidTokens = Array.isArray(hubState.developerPanel.invalidTokens)
+      ? hubState.developerPanel.invalidTokens.filter((token) => typeof token === 'string' && token.trim())
+      : [];
+  }
+
+  function updateDeveloperPanelDraft(nextUsernames, invalidTokens = []) {
+    if (!developerPanelDraft) {
+      return;
+    }
+    const parsed = parseRedditUsernameList(buildRedditUsernameListCanonicalValue(nextUsernames));
+    developerPanelDraft.usernames = parsed.usernames;
+    developerPanelDraft.latestInvalidTokens = invalidTokens.filter((token) => typeof token === 'string' && token.trim());
+  }
+
+  function getDeveloperDraftCanonicalValue() {
+    return buildRedditUsernameListCanonicalValue(developerPanelDraft?.usernames ?? []);
+  }
+
+  function getDeveloperChunkPlan() {
+    return splitRedditUsernameListAcrossSettings(developerPanelDraft?.usernames ?? [], {
+      maxChunks: GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length,
+    });
+  }
+
+  function getDeveloperTerminalSnippet() {
+    const chunkPlan = getDeveloperChunkPlan();
+    if (chunkPlan.overflow) {
+      return '';
+    }
+    const activeChunkCount = chunkPlan.chunks.filter(Boolean).length;
+    const commands = [];
+    for (const [index, settingName] of GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.entries()) {
+      const chunkValue = chunkPlan.chunks[index] ?? '';
+      if (!chunkValue) {
+        continue;
+      }
+      commands.push(`printf '%s\\n' '${escapeSingleQuotedShellArg(chunkValue)}' | npx devvit settings set ${settingName}`);
+    }
+    commands.push(
+      `printf '%s\\n' '${escapeSingleQuotedShellArg(String(activeChunkCount))}' | npx devvit settings set ${GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME}`
+    );
+    return commands.join('\n');
+  }
+
+  function isDeveloperDraftDirty() {
+    return Boolean(developerPanelDraft) && getDeveloperDraftCanonicalValue() !== developerPanelDraft.sourceCanonicalValue;
+  }
+
+  function mergeDeveloperDraftUsernames(rawInput) {
+    if (!developerPanelDraft) {
+      return;
+    }
+    const parsedInput = parseRedditUsernameList(rawInput);
+    if (parsedInput.usernames.length === 0 && parsedInput.invalidTokens.length === 0) {
+      showToast('Enter at least one Reddit username first.', 'error');
+      return;
+    }
+    const merged = parseRedditUsernameList(
+      buildRedditUsernameListCanonicalValue([...developerPanelDraft.usernames, ...parsedInput.usernames])
+    );
+    updateDeveloperPanelDraft(merged.usernames, parsedInput.invalidTokens);
+    renderDeveloperPanel();
+  }
+
+  function renderDeveloperPanel() {
+    if (!refs.developerPanel) {
+      return;
+    }
+
+    const panel = hubState?.developerPanel;
+    refs.developerPanel.classList.toggle('hidden', !panel);
+    if (!panel) {
+      return;
+    }
+
+    syncDeveloperPanelDraft();
+
+    const usernames = developerPanelDraft?.usernames ?? [];
+    refs.developerCurrentList.innerHTML = '';
+    refs.developerEmpty.classList.toggle('hidden', usernames.length > 0);
+    for (const username of usernames) {
+      const row = document.createElement('div');
+      row.className = 'hub-developer-row';
+
+      const label = document.createElement('span');
+      label.className = 'hub-developer-chip';
+      label.textContent = `u/${username}`;
+
+      const removeButton = makeButton('Remove', 'btn-secondary hub-developer-remove', () => {
+        if (!developerPanelDraft) {
+          return;
+        }
+        updateDeveloperPanelDraft(
+          developerPanelDraft.usernames.filter((candidate) => candidate !== username),
+          []
+        );
+        renderDeveloperPanel();
+      });
+
+      row.appendChild(label);
+      row.appendChild(removeButton);
+      refs.developerCurrentList.appendChild(row);
+    }
+
+    const warningLines = [];
+    const chunkPlan = getDeveloperChunkPlan();
+    if ((developerPanelDraft?.sourceInvalidTokens?.length ?? 0) > 0) {
+      warningLines.push(
+        `Ignored in current blocklist settings: ${developerPanelDraft.sourceInvalidTokens.map((token) => `"${token}"`).join(', ')}`
+      );
+    }
+    if ((developerPanelDraft?.latestInvalidTokens?.length ?? 0) > 0) {
+      warningLines.push(
+        `Ignored in latest edit: ${developerPanelDraft.latestInvalidTokens.map((token) => `"${token}"`).join(', ')}`
+      );
+    }
+    if (chunkPlan.overflow) {
+      warningLines.push(
+        `This draft exceeds the ${GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length} configured global blocklist settings. Remove ${chunkPlan.overflowedUsernamesCount} username${chunkPlan.overflowedUsernamesCount === 1 ? '' : 's'} or add more setting chunks in the app config.`
+      );
+    }
+    refs.developerInvalid.innerHTML = warningLines.map((line) => `<p>${escapeHtml(line)}</p>`).join('');
+    refs.developerInvalid.classList.toggle('hidden', warningLines.length === 0);
+
+    const draftDirty = isDeveloperDraftDirty();
+    const nonEmptyChunkCount = chunkPlan.chunks.filter(Boolean).length;
+    refs.developerDraftStatus.textContent = draftDirty
+      ? chunkPlan.overflow
+        ? `Unsaved draft. This list does not fit within ${GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length} settings.`
+        : `Unsaved draft. This list will use ${nonEmptyChunkCount} of ${GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length} settings.`
+      : `Draft matches the current global setting and uses ${nonEmptyChunkCount} of ${GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length} settings.`;
+    refs.developerDraftStatus.classList.toggle('is-dirty', draftDirty);
+
+    refs.developerCanonicalOutput.value = chunkPlan.overflow
+      ? `This draft is too large for the ${GLOBAL_BLOCKED_USERNAME_SETTING_NAMES.length} configured global blocklist settings.`
+      : getDeveloperTerminalSnippet();
+    if (refs.developerCopyBtn) {
+      refs.developerCopyBtn.disabled = chunkPlan.overflow;
+    }
+  }
+
+  function resetDeveloperPanelDraft() {
+    if (!hubState?.developerPanel) {
+      return;
+    }
+    developerPanelDraft = createDeveloperPanelDraft(hubState.developerPanel);
+    if (refs.developerAddInput) {
+      refs.developerAddInput.value = '';
+    }
+    if (refs.developerBulkInput) {
+      refs.developerBulkInput.value = '';
+    }
+    renderDeveloperPanel();
+  }
+
+  if (refs.developerAddBtn) {
+    refs.developerAddBtn.addEventListener('click', () => {
+      mergeDeveloperDraftUsernames(refs.developerAddInput?.value ?? '');
+      if (refs.developerAddInput) {
+        refs.developerAddInput.value = '';
+      }
+    });
+  }
+
+  if (refs.developerAddInput) {
+    refs.developerAddInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+      event.preventDefault();
+      mergeDeveloperDraftUsernames(refs.developerAddInput?.value ?? '');
+      refs.developerAddInput.value = '';
+    });
+  }
+
+  if (refs.developerBulkBtn) {
+    refs.developerBulkBtn.addEventListener('click', () => {
+      mergeDeveloperDraftUsernames(refs.developerBulkInput?.value ?? '');
+      if (refs.developerBulkInput) {
+        refs.developerBulkInput.value = '';
+      }
+    });
+  }
+
+  if (refs.developerResetBtn) {
+    refs.developerResetBtn.addEventListener('click', () => {
+      resetDeveloperPanelDraft();
+    });
+  }
+
+  if (refs.developerCopyBtn) {
+    refs.developerCopyBtn.addEventListener('click', async () => {
+      try {
+        await copyTextToClipboard(getDeveloperTerminalSnippet());
+        showToast('Copied terminal commands.', 'success');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    });
+  }
+
   function renderState(state) {
     if (!state) {
       return;
@@ -1300,6 +1652,7 @@ export function mountHub(options = {}) {
     );
     const awaitingFlairPropagation = isAwaitingFlairPropagation(state) && !isVerified;
     const isRestricted = Boolean(state.viewerBlocked && !isVerified);
+    const isGlobalRestriction = state.viewerBlocked?.scope === 'global';
 
     applyTheme(state.resolvedTheme);
     refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
@@ -1315,7 +1668,7 @@ export function mountHub(options = {}) {
       statusText = 'Approved (Syncing)';
       statusClass = 'status-warning';
     } else if (isRestricted) {
-      statusText = 'Blocked';
+      statusText = isGlobalRestriction ? 'Restricted' : 'Blocked';
       statusClass = 'status-blocked';
     } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
       statusText = 'Pending Re-review';
@@ -1357,8 +1710,12 @@ export function mountHub(options = {}) {
         ? 'Your verification is being reviewed again by the moderators.'
         : 'Your verification is pending moderator review.';
     } else if (!isVerified && isRestricted) {
-      commandTitle = 'You are blocked from submitting verification on this subreddit.';
-      infoText = 'This restriction is only for this subreddit and is based on your activity or verification history.';
+      commandTitle = isGlobalRestriction
+        ? 'Your access to the VouchX app is restricted.'
+        : 'You are blocked from submitting verification on this subreddit.';
+      infoText = isGlobalRestriction
+        ? 'Per the Terms and Conditions of VouchX, the developer may restrict access for violations of the Terms and Conditions or at their discretion. This restriction applies across every subreddit using VouchX.'
+        : 'This restriction is only for this subreddit and is based on your activity or verification history.';
     } else if (isVerified) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
       if (state.userLatest?.reviewedAt) {
@@ -1391,6 +1748,7 @@ export function mountHub(options = {}) {
     refs.infoMsg.classList.toggle('hidden', !infoText);
 
     refs.actionRow.innerHTML = '';
+    renderDeveloperPanel();
     const submitLabel =
       state.userLatest && (state.userLatest.status === 'denied' || state.userLatest.status === 'removed')
         ? 'Resubmit Verification'
@@ -1424,7 +1782,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!isVerified && !isRestricted && state.userLatest?.status === 'pending') {
+    if (!isVerified && state.userLatest?.status === 'pending' && (!isRestricted || isGlobalRestriction)) {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw', {}, {
@@ -1436,7 +1794,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (isVerified) {
+    if (isVerified || (isGlobalRestriction && state.userLatest?.status === 'approved')) {
       refs.actionRow.appendChild(
         makeButton('Remove Verification', 'btn-danger', () => {
           void openDeleteForm();

@@ -103,6 +103,138 @@
         "label": "Latest release severity",
         "helpText": "Set to \"critical\" to force repeated reminders, or \"normal\" for the standard 7-day dismissal behavior. Leave blank for the standard behavior.",
         "defaultValue": ""
+      },
+      "global_blocked_usernames": {
+        "type": "string",
+        "label": "Global blocked usernames",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 1 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_2": {
+        "type": "string",
+        "label": "Global blocked usernames 2",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 2 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_3": {
+        "type": "string",
+        "label": "Global blocked usernames 3",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 3 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_4": {
+        "type": "string",
+        "label": "Global blocked usernames 4",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 4 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_5": {
+        "type": "string",
+        "label": "Global blocked usernames 5",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 5 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_6": {
+        "type": "string",
+        "label": "Global blocked usernames 6",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 6 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_7": {
+        "type": "string",
+        "label": "Global blocked usernames 7",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 7 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_8": {
+        "type": "string",
+        "label": "Global blocked usernames 8",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 8 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_9": {
+        "type": "string",
+        "label": "Global blocked usernames 9",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 9 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_10": {
+        "type": "string",
+        "label": "Global blocked usernames 10",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 10 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_11": {
+        "type": "string",
+        "label": "Global blocked usernames 11",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 11 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_12": {
+        "type": "string",
+        "label": "Global blocked usernames 12",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 12 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_13": {
+        "type": "string",
+        "label": "Global blocked usernames 13",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 13 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_14": {
+        "type": "string",
+        "label": "Global blocked usernames 14",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 14 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_15": {
+        "type": "string",
+        "label": "Global blocked usernames 15",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 15 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_16": {
+        "type": "string",
+        "label": "Global blocked usernames 16",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 16 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_17": {
+        "type": "string",
+        "label": "Global blocked usernames 17",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 17 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_18": {
+        "type": "string",
+        "label": "Global blocked usernames 18",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 18 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_19": {
+        "type": "string",
+        "label": "Global blocked usernames 19",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 19 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_20": {
+        "type": "string",
+        "label": "Global blocked usernames 20",
+        "helpText": "Secret comma-separated Reddit usernames blocked across every VouchX installation. This is chunk 20 of the global blocklist and is managed through the Devvit CLI.",
+        "isSecret": true
+      },
+      "global_blocked_usernames_chunk_count": {
+        "type": "string",
+        "label": "Global blocked usernames chunk count",
+        "helpText": "Number of active global blocklist chunks currently in use by the app-wide username restriction list.",
+        "isSecret": true
+      },
+      "developer_ui_usernames": {
+        "type": "string",
+        "label": "Developer UI usernames",
+        "helpText": "Secret comma-separated Reddit usernames allowed to view the developer-only global blocklist editor in the hub UI.",
+        "isSecret": true
       }
     },
     "subreddit": {
