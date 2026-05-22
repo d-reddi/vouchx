@@ -1,4 +1,13 @@
 import type { Devvit, FormOnSubmitEvent } from '@devvit/public-api';
+import {
+  GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME,
+  GLOBAL_BLOCKED_USERNAME_SETTING_NAMES,
+  mergeParsedRedditUsernameLists,
+  normalizeLooseRedditUsername,
+  normalizeStrictRedditUsername,
+  parseRedditUsernameList,
+  type ParsedRedditUsernameList,
+} from './shared/global-usernames.ts';
 
 type VerificationStatus = 'pending' | 'approved' | 'denied' | 'removed';
 type DenyReason = 'reason_1' | 'reason_2' | 'reason_3' | 'reason_4';
@@ -29,11 +38,21 @@ type DenyReasonSlotDefinition = {
   defaultTemplate: string;
 };
 
+type BlockScope = 'subreddit' | 'global';
+
 type BlockedUserEntry = {
   username: string;
   blockedAt: string;
   deniedCount: number;
   reason: string;
+  scope?: BlockScope;
+};
+
+type DeveloperPanelPayload = {
+  accessGranted: true;
+  currentUsernames: string[];
+  invalidTokens: string[];
+  canonicalValue: string;
 };
 
 type PendingAccountDetailsSnapshot = {
@@ -201,6 +220,7 @@ type DashboardData = {
   viewerCurrentFlairCssClass: string;
   userLatest: VerificationRecord | null;
   viewerBlocked: BlockedUserEntry | null;
+  developerPanel?: DeveloperPanelPayload;
   pendingCount: number;
   pending: VerificationRecord[];
   approved: ApprovedSearchPanelItem[];
@@ -591,6 +611,7 @@ type HubStatePayload = {
   viewerVerifiedByFlair: boolean;
   viewerFlairCheckSource: string;
   viewerBlocked: BlockedUserEntry | null;
+  developerPanel?: DeveloperPanelPayload;
   userLatest: VerificationRecord | null;
   pendingCount: number;
   resolvedTheme: ThemePalette;
@@ -644,6 +665,7 @@ const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
 const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
 const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
 const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
+const GLOBAL_SETTING_DEVELOPER_UI_USERNAMES = 'developer_ui_usernames';
 const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 const MAX_DENY_REASON_LABEL_LENGTH = 48;
 const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -1118,7 +1140,7 @@ function toPublicHubConfig(config: RuntimeConfig): PublicHubConfig {
 }
 
 function toHubState(dashboard: DashboardData): HubStatePayload {
-  return {
+  const state: HubStatePayload = {
     viewerUsername: dashboard.viewerUsername,
     subredditName: dashboard.subredditName,
     isModerator: dashboard.isModerator,
@@ -1135,6 +1157,10 @@ function toHubState(dashboard: DashboardData): HubStatePayload {
     resolvedTheme: resolveThemePalette(dashboard.config),
     themePresets: THEME_PRESETS,
   };
+  if (dashboard.developerPanel) {
+    state.developerPanel = dashboard.developerPanel;
+  }
+  return state;
 }
 
 function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
@@ -1252,6 +1278,45 @@ async function readLatestReleaseMetadata(context: Pick<Devvit.Context, 'settings
     title: normalizeUpdateNoticeText(rawTitle),
     notes: normalizeUpdateNoticeText(rawNotes),
     linkUrl: normalizeUpdateNoticeUrl(rawLink),
+  };
+}
+
+async function readGlobalUsernameSetting(
+  context: Pick<Devvit.Context, 'settings'>,
+  settingName: string
+): Promise<ParsedRedditUsernameList> {
+  return parseRedditUsernameList(await context.settings.get<string>(settingName));
+}
+
+async function readMergedGlobalUsernameSettings(
+  context: Pick<Devvit.Context, 'settings'>,
+  settingNames: readonly string[]
+): Promise<ParsedRedditUsernameList> {
+  const rawChunkCount = await context.settings.get<string>(GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME);
+  const parsedChunkCount = Number.parseInt(String(rawChunkCount ?? '').trim(), 10);
+  const activeSettingNames =
+    Number.isFinite(parsedChunkCount) && parsedChunkCount >= 0
+      ? settingNames.slice(0, Math.min(settingNames.length, parsedChunkCount))
+      : settingNames;
+  return mergeParsedRedditUsernameLists(
+    await Promise.all(activeSettingNames.map((settingName) => readGlobalUsernameSetting(context, settingName)))
+  );
+}
+
+function createGlobalBlockedUserEntry(
+  blockedUsernames: ParsedRedditUsernameList,
+  username: string
+): BlockedUserEntry | null {
+  const normalizedUsername = normalizeUsernameStrict(username);
+  if (!normalizedUsername || !blockedUsernames.usernames.includes(normalizedUsername)) {
+    return null;
+  }
+  return {
+    username: normalizedUsername,
+    blockedAt: '',
+    deniedCount: 0,
+    reason: 'Blocked by developer',
+    scope: 'global',
   };
 }
 
@@ -1552,6 +1617,10 @@ async function submitVerification(
   const config = await getRuntimeConfig(context, subredditId);
   if (!config.verificationsEnabled) {
     throw new Error(config.verificationsDisabledMessage);
+  }
+  const globalBlockedUsernames = await readMergedGlobalUsernameSettings(context, GLOBAL_BLOCKED_USERNAME_SETTING_NAMES);
+  if (createGlobalBlockedUserEntry(globalBlockedUsernames, username)) {
+    throw new Error(BLOCKED_SUBMISSION_MESSAGE);
   }
 
   const rawPhotoOneUrl = normalizePhotoInput((values as { photoOneUrl?: unknown }).photoOneUrl);
@@ -2912,10 +2981,11 @@ async function denyVerification(
     let manualBlockOutcome: ManualBlockOutcome | undefined;
     if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
       const blockedEntry: BlockedUserEntry = {
-        username: record.username,
+        username: normalizeUsernameForLookup(record.username),
         blockedAt: new Date().toISOString(),
         deniedCount: denialCount,
         reason: `Reached ${denialCount} denials`,
+        scope: 'subreddit',
       };
       const wasAlreadyBlocked = await isUserBlocked(context, subredditId, record.username);
       await setBlockedUser(context, subredditId, blockedEntry);
@@ -3717,15 +3787,31 @@ async function loadDashboardData(
     flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
   const requiresInitialSetup = !config.flairTemplateId.trim();
+  const [globalBlockedUsernames, developerUiUsernames] = await Promise.all([
+    readMergedGlobalUsernameSettings(context, GLOBAL_BLOCKED_USERNAME_SETTING_NAMES),
+    readGlobalUsernameSetting(context, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES),
+  ]);
 
   let userLatest = await getLatestRecordForCurrentViewer(context, subredditId, viewerIdentity);
   const viewerLookupUsername = viewerIdentity.username ?? userLatest?.username ?? null;
   if (viewerLookupUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerLookupUsername, userLatest);
   }
-  const viewerBlocked = viewerLookupUsername
-    ? await repairMissingAutoBlockForUser(context, subredditId, viewerLookupUsername, config)
-    : null;
+  const viewerNormalizedUsername = normalizeUsernameStrict(viewerIdentity.username ?? '');
+  const developerPanel =
+    viewerNormalizedUsername && developerUiUsernames.usernames.includes(viewerNormalizedUsername)
+      ? {
+          accessGranted: true as const,
+          currentUsernames: [...globalBlockedUsernames.usernames],
+          invalidTokens: [...globalBlockedUsernames.invalidTokens],
+          canonicalValue: globalBlockedUsernames.canonicalValue,
+        }
+      : undefined;
+  const viewerBlocked =
+    viewerLookupUsername
+      ? createGlobalBlockedUserEntry(globalBlockedUsernames, viewerLookupUsername) ??
+        (await repairMissingAutoBlockForUser(context, subredditId, viewerLookupUsername, config))
+      : null;
   const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
   const pendingCount = canReviewUser
     ? options.includeModData
@@ -3785,6 +3871,7 @@ async function loadDashboardData(
 
   if (
     config.autoFlairReconcileEnabled &&
+    viewerBlocked?.scope !== 'global' &&
     viewerLookupUsername &&
     userLatest &&
     isViewerFlairReconcileDue(userLatest, Date.now()) &&
@@ -3868,8 +3955,12 @@ async function loadDashboardData(
   const viewerVerifiedSuppressed = Boolean(
     viewerLookupUsername && (await shouldSuppressViewerVerifiedState(context, subredditId, viewerLookupUsername, userLatest))
   );
-  const viewerShouldDisplayVerified = shouldViewerDisplayVerifiedState(flairCheck, userLatest, viewerVerifiedSuppressed);
-  const viewerAwaitingFlairPropagation = isViewerAwaitingFlairPropagation(flairCheck, userLatest);
+  const viewerShouldDisplayVerified =
+    viewerBlocked?.scope === 'global'
+      ? false
+      : shouldViewerDisplayVerifiedState(flairCheck, userLatest, viewerVerifiedSuppressed);
+  const viewerAwaitingFlairPropagation =
+    viewerBlocked?.scope === 'global' ? false : isViewerAwaitingFlairPropagation(flairCheck, userLatest);
 
   return {
     viewerUsername: viewerLookupUsername,
@@ -3896,6 +3987,7 @@ async function loadDashboardData(
     viewerCurrentFlairCssClass: viewerFlairSnapshot.flairCssClass,
     userLatest,
     viewerBlocked,
+    developerPanel,
     pendingCount,
     pending,
     approved,
@@ -5432,6 +5524,7 @@ async function repairMissingAutoBlockForUser(
     blockedAt: new Date().toISOString(),
     deniedCount,
     reason: `Reached ${deniedCount} denials`,
+    scope: 'subreddit',
   };
   await setBlockedUser(context, subredditId, entry);
   return entry;
@@ -5553,6 +5646,7 @@ async function setManualBlockedUserEntry(
     blockedAt: new Date().toISOString(),
     deniedCount,
     reason: 'Blocked by moderator',
+    scope: 'subreddit',
   };
 
   if (syncDenialCountHash) {
@@ -7158,6 +7252,7 @@ function parseBlockedUserEntry(
           : deniedCount > 0
             ? `Reached ${deniedCount} denials`
             : 'Blocked by moderator',
+      scope: parsed.scope === 'global' ? 'global' : 'subreddit',
     };
   } catch {
     return null;
@@ -7409,41 +7504,11 @@ async function getCurrentSubredditNameCompat(
 }
 
 function normalizeUsername(input: string): string {
-  return input.trim().replace(/^u\//i, '').toLowerCase();
+  return normalizeLooseRedditUsername(input);
 }
 
 function normalizeUsernameStrict(input: string): string {
-  let normalized = input.trim();
-  if (!normalized) {
-    return '';
-  }
-
-  if (/^(?:https?:\/\/)?(?:www\.)?reddit\.com\//i.test(normalized)) {
-    normalized = normalized.replace(/^(?:https?:\/\/)?(?:www\.)?reddit\.com\//i, '/');
-  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) {
-    try {
-      const parsed = new URL(normalized);
-      const hostname = parsed.hostname.trim().toLowerCase();
-      if (hostname !== 'reddit.com' && hostname !== 'www.reddit.com') {
-        return '';
-      }
-      normalized = parsed.pathname;
-    } catch {
-      return '';
-    }
-  }
-
-  normalized = normalized.split(/[?#]/, 1)[0]?.trim() ?? '';
-  normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
-  if (normalized.includes('/')) {
-    if (!/^(?:u|user)\//i.test(normalized)) {
-      return '';
-    }
-    normalized = normalized.replace(/^(?:u|user)\//i, '');
-  }
-
-  const username = normalized.split('/').find((segment) => segment.trim())?.trim() ?? '';
-  return /^[A-Za-z0-9_-]+$/.test(username) ? username.toLowerCase() : '';
+  return normalizeStrictRedditUsername(input);
 }
 
 function normalizeUsernameForLookup(input: string): string {

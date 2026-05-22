@@ -481,6 +481,133 @@ button:not(:disabled):hover {
   white-space: pre-line;
 }
 
+.hub-developer {
+  position: relative;
+  z-index: 1;
+}
+
+.hub-developer-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hub-developer-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.hub-developer-label {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hub-developer-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hub-developer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 78%, var(--bg) 22%);
+}
+
+.hub-developer-chip {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.hub-developer-remove {
+  padding: 9px 12px;
+  min-height: 40px;
+  flex: 0 0 auto;
+}
+
+.hub-developer-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.hub-developer-input,
+.hub-developer-textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 84%, var(--bg) 16%);
+  color: var(--text);
+  font: inherit;
+  padding: 12px 13px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.hub-developer-input::placeholder,
+.hub-developer-textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+
+.hub-developer-textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.hub-developer-output {
+  min-height: 110px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84rem;
+}
+
+.hub-developer-warning {
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line) 62%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card) 90%);
+  color: color-mix(in srgb, var(--accent) 72%, var(--text) 28%);
+}
+
+.hub-developer-warning p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.hub-developer-warning p + p {
+  margin-top: 8px;
+}
+
+.hub-developer-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.hub-developer-status.is-dirty {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text) 18%);
+  font-weight: 700;
+}
+
+.hub-developer-instructions code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: color-mix(in srgb, var(--card) 76%, var(--bg) 24%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
 .hub-action-dock {
   margin-top: 16px;
   padding: 0;
@@ -561,6 +688,19 @@ button:not(:disabled):hover {
 
   .hub-action-dock button {
     min-height: 44px;
+  }
+
+  .hub-developer-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-developer-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hub-developer-remove {
+    width: 100%;
   }
 }
 
