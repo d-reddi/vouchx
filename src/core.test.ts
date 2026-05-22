@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   assertCanReview,
   approveVerification,
+  archivePendingVerificationModmailReply,
   buildModeratorUpdateNotice,
   checkVerificationFlair,
   clearExpiredPendingClaim,
@@ -1159,6 +1160,10 @@ function modmailThreadKey(subredditId: string, usernameField: string): string {
   return `subreddit:${subredditId.toLowerCase()}:modmail:thread-by-user:${normalizeUsername(usernameField)}`;
 }
 
+function pendingModmailConversationTestKey(subredditId: string, conversationId: string): string {
+  return `subreddit:${subredditId.toLowerCase()}:modmail:pending-conversation:${normalizeModmailConversationId(conversationId)}`;
+}
+
 function subredditPrefixKey(subredditId: string): string {
   return `subreddit:${subredditId.toLowerCase()}`;
 }
@@ -1371,8 +1376,10 @@ function createReviewActionContext(options?: {
   addModNoteResponses?: Array<true | Error>;
   createConversationResponses?: Array<{ conversation: { id: string } } | Error>;
   archiveConversationResponses?: Array<true | Error>;
+  getConversationResponses?: Array<Record<string, unknown> | Error>;
   maxDenialsBeforeBlock?: number | string;
   multipleApprovalFlairsEnabled?: boolean | string;
+  pendingModmailAutoArchiveEnabled?: boolean | string;
   initialRedis?: Record<string, string>;
   initialHashes?: Record<string, Record<string, string>>;
 }) {
@@ -1402,6 +1409,17 @@ function createReviewActionContext(options?: {
   const addModNoteResponses = options?.addModNoteResponses ?? [true];
   const createConversationResponses = options?.createConversationResponses ?? [{ conversation: { id: '39to20' } }];
   const archiveConversationResponses = options?.archiveConversationResponses ?? [true];
+  const getConversationResponses = options?.getConversationResponses ?? [
+    {
+      conversation: {
+        conversationType: 'sr_user',
+        subreddit: { id: subredditId, displayName: subredditName },
+        participant: { id: 't2_target', name: record.username },
+        messages: {},
+      },
+      user: { id: 't2_target', name: record.username },
+    },
+  ];
   let validationResponseIndex = 0;
   let bannedResponseIndex = 0;
   let unbanResponseIndex = 0;
@@ -1409,6 +1427,7 @@ function createReviewActionContext(options?: {
   let addModNoteResponseIndex = 0;
   let createConversationResponseIndex = 0;
   let archiveConversationResponseIndex = 0;
+  let getConversationResponseIndex = 0;
 
   const ensureHash = (key: string) => {
     let hash = hashStore.get(key);
@@ -1539,6 +1558,14 @@ function createReviewActionContext(options?: {
           }
         },
         modMail: {
+          async getConversation() {
+            const response = pickResponse(getConversationResponses, getConversationResponseIndex);
+            getConversationResponseIndex += 1;
+            if (response instanceof Error) {
+              throw response;
+            }
+            return response;
+          },
           async unarchiveConversation() {},
           async reply(args: Record<string, unknown>) {
             replyCalls.push(args);
@@ -1569,6 +1596,9 @@ function createReviewActionContext(options?: {
           }
           if (key === 'multiple_approval_flairs_enabled') {
             return options?.multipleApprovalFlairsEnabled;
+          }
+          if (key === 'auto_archive_pending_modmail_enabled') {
+            return options?.pendingModmailAutoArchiveEnabled;
           }
           return undefined;
         },
@@ -1806,6 +1836,8 @@ test('normalizeModmailConversationId preserves non-numeric Devvit conversation I
   assert.equal(normalizeModmailConversationId('39to20'), '39to20');
   assert.equal(normalizeModmailConversationId('39t18m'), '39t18m');
   assert.equal(normalizeModmailConversationId('abcdef'), 'abcdef');
+  assert.equal(normalizeModmailConversationId('ModmailConversation_3a4i16'), '3a4i16');
+  assert.equal(normalizeModmailConversationId('ModmailConversation:3a4i16'), '3a4i16');
 });
 
 test('normalizeModmailConversationId rejects blank and whitespace values', () => {
@@ -3476,6 +3508,29 @@ test('sendUserModmailWithFallback replies using a legacy cached thread alias', a
   assert.deepEqual(modmailContext.archiveCalls, ['39to20']);
 });
 
+test('sendUserModmailWithFallback can leave a pending-status modmail conversation unarchived', async () => {
+  const modmailContext = createModmailContext({
+    createConversationResponses: [{ conversation: { id: '39to20' } }],
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Pending',
+    body: 'Body',
+    username: 'Example_User',
+    eventId: 'pending:verification_123',
+    archiveAfterSend: false,
+  });
+
+  assert.deepEqual(result, {
+    status: 'created',
+    conversationId: '39to20',
+  });
+  assert.equal(modmailContext.createConversationCalls.length, 1);
+  assert.equal(modmailContext.archiveCalls.length, 0);
+});
+
 test('sendUserModmailWithFallback clears stale thread keys and falls back to create when reply fails', async () => {
   const threadKeys = Array.from(
     new Set(usernameLookupFields('Example_User').map((field) => modmailThreadKey('t5_example', field)))
@@ -3629,6 +3684,185 @@ test('sendUserModmailWithFallback retries createConversation with u-prefixed rec
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('archivePendingVerificationModmailReply archives participant replies while the verification is pending', async () => {
+  const reviewContext = createReviewActionContext({
+    initialRedis: {
+      [modmailThreadKey('t5_example', 'Example_User')]: '39to20',
+    },
+  });
+
+  const result = await archivePendingVerificationModmailReply(reviewContext.context as never, {
+    messageAuthor: { id: 't2_target', name: 'Example_User' },
+    messageAuthorType: 'participant_user',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: '39to20',
+    messageId: 'abc123',
+  });
+
+  assert.deepEqual(result, {
+    archived: true,
+    conversationId: '39to20',
+    username: 'example_user',
+    verificationId: reviewContext.record.id,
+  });
+  assert.deepEqual(reviewContext.archiveCalls, ['39to20']);
+  assert.equal(
+    reviewContext.redisStore.get(pendingModmailConversationTestKey('t5_example', '39to20')),
+    reviewContext.record.id
+  );
+});
+
+test('archivePendingVerificationModmailReply matches Devvit-prefixed trigger conversation IDs to cached threads', async () => {
+  const reviewContext = createReviewActionContext({
+    initialRedis: {
+      [modmailThreadKey('t5_example', 'Example_User')]: '3a4i16',
+    },
+  });
+
+  const result = await archivePendingVerificationModmailReply(reviewContext.context as never, {
+    messageAuthor: { id: 't2_target', name: 'Example_User' },
+    messageAuthorType: 'participant_user',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: 'ModmailConversation_3a4i16',
+  });
+
+  assert.deepEqual(result, {
+    archived: true,
+    conversationId: '3a4i16',
+    username: 'example_user',
+    verificationId: reviewContext.record.id,
+  });
+  assert.deepEqual(reviewContext.archiveCalls, ['3a4i16']);
+});
+
+test('archivePendingVerificationModmailReply skips all reply archives when the install setting is disabled', async () => {
+  const reviewContext = createReviewActionContext({
+    pendingModmailAutoArchiveEnabled: false,
+    initialRedis: {
+      [modmailThreadKey('t5_example', 'Example_User')]: '3a4i16',
+    },
+  });
+
+  const result = await archivePendingVerificationModmailReply(reviewContext.context as never, {
+    messageAuthor: { id: 't2_target', name: 'Example_User' },
+    messageAuthorType: 'participant_user',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: 'ModmailConversation_3a4i16',
+  });
+
+  assert.deepEqual(result, {
+    archived: false,
+    reason: 'pending modmail auto-archive disabled',
+  });
+  assert.equal(reviewContext.archiveCalls.length, 0);
+});
+
+test('archivePendingVerificationModmailReply resolves sparse trigger payloads from the conversation', async () => {
+  const reviewContext = createReviewActionContext({
+    initialRedis: {
+      [modmailThreadKey('t5_example', 'Example_User')]: '39to22',
+    },
+    getConversationResponses: [
+      {
+        conversation: {
+          conversationType: 'sr_user',
+          subreddit: { id: 'bare_subreddit_id', displayName: 'ExampleSub' },
+          participant: { id: 't2_target', name: 'Example_User' },
+          messages: {
+            m_1: {
+              id: 'm_1',
+              date: '2026-03-11T12:01:00.000Z',
+              author: { id: 't2_target', name: 'Example_User', isMod: false, isAdmin: false },
+              participatingAs: 'participant_user',
+            },
+          },
+        },
+        user: { id: 't2_target', name: 'Example_User' },
+      },
+    ],
+  });
+
+  const result = await archivePendingVerificationModmailReply(reviewContext.context as never, {
+    conversation_id: '39to22',
+    message_id: 'm_1',
+  });
+
+  assert.equal(result.archived, true);
+  assert.deepEqual(reviewContext.archiveCalls, ['39to22']);
+});
+
+test('archivePendingVerificationModmailReply falls back from stale withdrawn mappings to the current pending record', async () => {
+  const reviewContext = createReviewActionContext({
+    initialRedis: {
+      [pendingModmailConversationTestKey('t5_example', '39to23')]: 'withdrawn_old_record',
+      [modmailThreadKey('t5_example', 'Example_User')]: '39to23',
+    },
+  });
+
+  const result = await archivePendingVerificationModmailReply(reviewContext.context as never, {
+    messageAuthor: { id: 't2_target', name: 'Example_User' },
+    messageAuthorType: 'participant_user',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: '39to23',
+  });
+
+  assert.deepEqual(result, {
+    archived: true,
+    conversationId: '39to23',
+    username: 'example_user',
+    verificationId: reviewContext.record.id,
+  });
+  assert.equal(
+    reviewContext.redisStore.get(pendingModmailConversationTestKey('t5_example', '39to23')),
+    reviewContext.record.id
+  );
+  assert.deepEqual(reviewContext.archiveCalls, ['39to23']);
+});
+
+test('archivePendingVerificationModmailReply ignores moderator messages and non-pending records', async () => {
+  const approvedContext = createReviewActionContext({
+    recordOverrides: { status: 'approved' },
+    initialRedis: {
+      [pendingModmailConversationTestKey('t5_example', '39to20')]: 'verification_123',
+    },
+  });
+
+  const approvedResult = await archivePendingVerificationModmailReply(approvedContext.context as never, {
+    messageAuthor: { id: 't2_target', name: 'Example_User' },
+    messageAuthorType: 'participant_user',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: '39to20',
+  });
+
+  assert.equal(approvedResult.archived, false);
+  assert.equal(approvedResult.reason, 'verification is no longer pending');
+  assert.equal(approvedContext.archiveCalls.length, 0);
+  assert.equal(approvedContext.redisStore.get(pendingModmailConversationTestKey('t5_example', '39to20')), undefined);
+
+  const moderatorContext = createReviewActionContext({
+    initialRedis: {
+      [modmailThreadKey('t5_example', 'Example_User')]: '39to21',
+    },
+  });
+
+  const moderatorResult = await archivePendingVerificationModmailReply(moderatorContext.context as never, {
+    messageAuthor: { id: 't2_mod', name: 'Mod_One' },
+    messageAuthorType: 'moderator',
+    conversationType: 'sr_user',
+    conversationSubreddit: { id: 't5_example', name: 'ExampleSub' },
+    conversationId: '39to21',
+  });
+
+  assert.equal(moderatorResult.archived, false);
+  assert.equal(moderatorResult.reason, 'not a participant user reply');
+  assert.equal(moderatorContext.archiveCalls.length, 0);
 });
 
 test('getModeratorStats returns empty recent activity while preserving current verified totals', async () => {
