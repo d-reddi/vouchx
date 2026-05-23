@@ -404,6 +404,47 @@ type ActionResult = {
   manualBlockOutcome?: ManualBlockOutcome;
 };
 
+const MAX_BATCH_REVIEW_ITEMS = 25;
+const BATCH_REVIEW_CONCURRENCY = 3;
+
+type BatchReviewAction = 'approve' | 'deny';
+type BatchReviewItemStatus =
+  | 'completed'
+  | 'failed'
+  | 'validation_retry'
+  | 'invalid_account_removed'
+  | 'banned_confirmation_required';
+
+type NormalizedBatchReviewIds = {
+  ids: string[];
+  duplicateOrEmptyCount: number;
+  truncatedCount: number;
+};
+
+type BatchReviewItemResult = {
+  verificationId: string;
+  status: BatchReviewItemStatus;
+  terminal: boolean;
+  username?: string;
+  message?: string;
+};
+
+type BatchReviewResult = {
+  action: BatchReviewAction;
+  requestedCount: number;
+  acceptedCount: number;
+  duplicateOrEmptyCount: number;
+  truncatedCount: number;
+  terminalVerificationIds: string[];
+  counts: Record<BatchReviewItemStatus, number>;
+  items: BatchReviewItemResult[];
+};
+
+type BatchReviewToast = {
+  text: string;
+  tone: 'success' | 'error' | 'info';
+};
+
 type DeleteDataResult = {
   deletedCount: number;
   flairRemovedFrom: string[];
@@ -3114,6 +3155,205 @@ async function denyVerification(
       manualBlockOutcome,
     };
   });
+}
+
+function normalizeBatchReviewVerificationIds(
+  values: unknown,
+  maxItems = MAX_BATCH_REVIEW_ITEMS
+): NormalizedBatchReviewIds {
+  const rawValues = Array.isArray(values) ? values : [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  let duplicateOrEmptyCount = 0;
+
+  for (const value of rawValues) {
+    const id = String(value ?? '').trim();
+    if (!id || seen.has(id)) {
+      duplicateOrEmptyCount += 1;
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+
+  const limit = Math.max(0, Math.floor(maxItems));
+  return {
+    ids: ids.slice(0, limit),
+    duplicateOrEmptyCount,
+    truncatedCount: Math.max(0, ids.length - limit),
+  };
+}
+
+function emptyBatchReviewCounts(): Record<BatchReviewItemStatus, number> {
+  return {
+    completed: 0,
+    failed: 0,
+    validation_retry: 0,
+    invalid_account_removed: 0,
+    banned_confirmation_required: 0,
+  };
+}
+
+function classifyBatchReviewItem(action: BatchReviewAction, verificationId: string, result: ActionResult): BatchReviewItemResult {
+  if (result.outcome === 'validation_retry') {
+    return {
+      verificationId,
+      status: 'validation_retry',
+      terminal: false,
+      username: result.username,
+      message: result.outcomeReason,
+    };
+  }
+  if (result.outcome === 'banned_confirmation_required') {
+    return {
+      verificationId,
+      status: 'banned_confirmation_required',
+      terminal: false,
+      username: result.username,
+      message: 'Approval requires individual banned-user confirmation.',
+    };
+  }
+  if (result.outcome === 'invalid_account_removed') {
+    return {
+      verificationId,
+      status: 'invalid_account_removed',
+      terminal: true,
+      username: result.username,
+      message: result.outcomeReason,
+    };
+  }
+
+  const failedApproval =
+    action === 'approve' &&
+    (!result.applied || result.flair.status === 'failed' || result.modmail.status === 'failed' || result.modNote.status === 'failed');
+  const failedDenial = action === 'deny' && (result.modmail.status === 'failed' || result.modNote.status === 'failed');
+  if (failedApproval || failedDenial) {
+    return {
+      verificationId,
+      status: 'failed',
+      terminal: result.applied,
+      username: result.username,
+      message:
+        result.flair.reason ??
+        result.modmail.reason ??
+        result.modNote.reason ??
+        (action === 'approve' ? 'Approval did not complete.' : 'Denial completed with issues.'),
+    };
+  }
+
+  return {
+    verificationId,
+    status: 'completed',
+    terminal: true,
+    username: result.username,
+  };
+}
+
+async function batchReviewVerifications(
+  context: Devvit.Context,
+  input: {
+    action: BatchReviewAction;
+    verificationIds: unknown;
+    selectedFlairTemplateId?: string;
+    reason?: DenyReason | null;
+    moderatorNotes?: string;
+  }
+): Promise<BatchReviewResult> {
+  const normalized = normalizeBatchReviewVerificationIds(input.verificationIds);
+  if (normalized.ids.length === 0) {
+    throw new Error('Select at least one verification to review.');
+  }
+  if (input.action !== 'approve' && input.action !== 'deny') {
+    throw new Error('Select a valid batch action.');
+  }
+  if (input.action === 'deny' && !input.reason) {
+    throw new Error('Select a valid denial reason.');
+  }
+
+  const counts = emptyBatchReviewCounts();
+  const items: BatchReviewItemResult[] = new Array(normalized.ids.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= normalized.ids.length) {
+        return;
+      }
+
+      const verificationId = normalized.ids[index]!;
+      try {
+        const result =
+          input.action === 'approve'
+            ? await approveVerification(context, verificationId, false, input.selectedFlairTemplateId)
+            : await denyVerification(context, verificationId, input.reason!, input.moderatorNotes ?? '');
+        items[index] = classifyBatchReviewItem(input.action, verificationId, result);
+      } catch (error) {
+        items[index] = {
+          verificationId,
+          status: 'failed',
+          terminal: false,
+          message: errorText(error),
+        };
+      }
+    }
+  }
+
+  const workerCount = Math.min(BATCH_REVIEW_CONCURRENCY, normalized.ids.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  const completedItems = items.filter(Boolean);
+  for (const item of completedItems) {
+    counts[item.status] += 1;
+  }
+
+  return {
+    action: input.action,
+    requestedCount: Array.isArray(input.verificationIds) ? input.verificationIds.length : 0,
+    acceptedCount: normalized.ids.length,
+    duplicateOrEmptyCount: normalized.duplicateOrEmptyCount,
+    truncatedCount: normalized.truncatedCount,
+    terminalVerificationIds: completedItems.filter((item) => item.terminal).map((item) => item.verificationId),
+    counts,
+    items: completedItems,
+  };
+}
+
+function pluralizeBatchCount(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function buildBatchReviewToast(result: BatchReviewResult): BatchReviewToast {
+  const parts: string[] = [];
+  const actionLabel = result.action === 'approve' ? 'Approved' : 'Denied';
+  if (result.counts.completed > 0) {
+    parts.push(`${actionLabel} ${result.counts.completed}`);
+  }
+  if (result.counts.invalid_account_removed > 0) {
+    parts.push(`${pluralizeBatchCount(result.counts.invalid_account_removed, 'invalid account')} removed`);
+  }
+  if (result.counts.banned_confirmation_required > 0) {
+    parts.push(
+      `${result.counts.banned_confirmation_required} ${
+        result.counts.banned_confirmation_required === 1 ? 'needs' : 'need'
+      } individual banned-user confirmation`
+    );
+  }
+  if (result.counts.validation_retry > 0) {
+    parts.push(`${result.counts.validation_retry} need retry`);
+  }
+  if (result.counts.failed > 0) {
+    parts.push(`${result.counts.failed} failed`);
+  }
+  const skipped = result.duplicateOrEmptyCount + result.truncatedCount;
+  if (skipped > 0) {
+    parts.push(`${skipped} skipped`);
+  }
+
+  const text = parts.length > 0 ? parts.join('; ') + '.' : 'No selected verifications were changed.';
+  const tone = result.counts.failed > 0 || result.counts.validation_retry > 0 ? 'error' : result.counts.completed > 0 ? 'success' : 'info';
+  return { text, tone };
 }
 
 async function reopenDeniedVerification(
@@ -9328,6 +9568,7 @@ export {
   THEME_PRESETS,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
+  MAX_BATCH_REVIEW_ITEMS,
   buildSubmitVerificationForm,
   deleteVerificationDataFormDefinition,
   toModPanelState,
@@ -9338,6 +9579,9 @@ export {
   deleteCurrentUserVerificationData,
   approveVerification,
   denyVerification,
+  batchReviewVerifications,
+  buildBatchReviewToast,
+  normalizeBatchReviewVerificationIds,
   setPendingClaimState,
   reopenDeniedVerification,
   cancelReopenedVerification,
