@@ -98,6 +98,30 @@
               </div>
             </div>
             <div class="content-card queue-list-card">
+              <div id="batch-review-toolbar" class="batch-review-toolbar hidden" aria-live="polite">
+                <div class="batch-review-summary">
+                  <div>
+                    <p class="group-kicker batch-review-kicker">Batch actions</p>
+                    <span id="batch-selected-count" class="batch-selected-count">0 selected</span>
+                  </div>
+                </div>
+                <div class="batch-review-actions">
+                  <div id="batch-approval-flair-wrap" class="field-stack batch-approval-flair-wrap hidden">
+                    <label class="field-label" for="batch-approval-flair">Approval flair</label>
+                    <select id="batch-approval-flair" class="field-select"></select>
+                  </div>
+                  <button id="batch-approve-btn" class="btn btn-success" type="button">Approve selected</button>
+                  <div class="field-stack batch-deny-field">
+                    <label class="field-label" for="batch-deny-reason">Denial reason</label>
+                    <select id="batch-deny-reason" class="field-select"></select>
+                  </div>
+                  <div class="field-stack batch-deny-field batch-deny-notes-stack">
+                    <label class="field-label" for="batch-deny-notes">Denial notes</label>
+                    <textarea id="batch-deny-notes" class="field-textarea" rows="2" placeholder="Optional shared notes"></textarea>
+                  </div>
+                  <button id="batch-deny-btn" class="btn btn-danger" type="button">Deny selected</button>
+                </div>
+              </div>
               <div id="pending-list" class="stack"></div>
             </div>
           </div>
@@ -476,7 +500,7 @@
 
               <p class="instructions-settings-note muted small">
                 We recommend using
-                <a href="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a>
+                <a href="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a> or <a href="https://www.deepl.com/translator" target="_blank" rel="noopener noreferrer">DeepL Translator</a>
                 to help provide instructions in multiple languages for non-native speakers.
               </p>
 
