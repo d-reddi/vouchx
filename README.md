@@ -111,15 +111,26 @@ Full changelog:
 
 ### v1.4.0
 
-- Photo Intructions panel now supports English, Spanish, French (set up langages in mod panel)
-- History & Audit includes links to view submitted hpotos on approved records
-- Batch queue actions added
-- Auto-Archive modmail replies for pending users added, setting in install settings
+#### New Features
+- Photo Instructions now support multiple languages: English, Spanish and French (configured Mod Panel > Photo Instructions)
 
-Back-end changes:
-- Performance improvements for flair and mod lookup
-- Updated to devvit 0.12.18
-- Global blocklist added per terms and conditions
+- History & Audit records now include links to view submitted photos for approved verifications
+- Added batch queue actions for moderators
+- Added optional auto-archive support for pending-user modmail replies (Configurable in Install Settings)
+
+- Added Markdown helper controls and placeholder insertion menus to:
+  - Photo Instructions
+  - Modmail template inputs
+
+#### Photo Instructions Improvements
+- Added support for instruction-specific placeholders and Markdown helpers
+- Added `{{username}}` placeholder to display the viewing user as `u/username`
+- Added “Caps” helper button to transform selected text to ALL CAPS
+
+#### Back-End / Technical Changes
+- Performance improvements for flair and moderator lookups
+- Updated to Devvit 0.12.18
+- Added global blocklist support
 
 ### v1.3.9
 

@@ -119,6 +119,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     photoInstructions: 'Follow the instructions.',
     photoInstructionsEs: 'Sigue las instrucciones.',
     photoInstructionsFr: 'Suivez les instructions.',
+    photoInstructionsPtBr: 'Siga as instruções.',
     photoInstructionsDefaultLanguage: 'en',
     showPhotoInstructionsBeforeSubmit: true,
     denyReasons: [
@@ -2066,6 +2067,7 @@ test('onSaveFlairTemplateValues saves translated photo instructions with the pri
       photoInstructions: '  Follow the instructions.  ',
       photoInstructionsEs: '  Sigue las instrucciones.  ',
       photoInstructionsFr: '  Suivez les instructions.  ',
+      photoInstructionsPtBr: '  Siga as instruções.  ',
     },
     saveContext.context as never
   );
@@ -2073,6 +2075,7 @@ test('onSaveFlairTemplateValues saves translated photo instructions with the pri
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions'), 'Follow the instructions.');
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_es'), 'Sigue las instrucciones.');
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_fr'), 'Suivez les instructions.');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_pt_br'), 'Siga as instruções.');
   assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('photo_instructions_default_language'), 'fr');
 });
 
@@ -2082,7 +2085,8 @@ test('getRuntimeConfig reads translated photo instructions from stored settings'
       photo_instructions: 'Follow the instructions.',
       photo_instructions_es: 'Sigue las instrucciones.',
       photo_instructions_fr: '  Suivez les instructions.  ',
-      photo_instructions_default_language: 'fr',
+      photo_instructions_pt_br: '  Siga as instruções.  ',
+      photo_instructions_default_language: 'pt-br',
     },
   });
 
@@ -2091,7 +2095,8 @@ test('getRuntimeConfig reads translated photo instructions from stored settings'
   assert.equal(runtimeConfig.photoInstructions, 'Follow the instructions.');
   assert.equal(runtimeConfig.photoInstructionsEs, 'Sigue las instrucciones.');
   assert.equal(runtimeConfig.photoInstructionsFr, 'Suivez les instructions.');
-  assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'fr');
+  assert.equal(runtimeConfig.photoInstructionsPtBr, 'Siga as instruções.');
+  assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'pt-br');
 });
 
 test('getRuntimeConfig defaults translated photo instructions to empty strings and english default language when unset', async () => {
@@ -2105,6 +2110,7 @@ test('getRuntimeConfig defaults translated photo instructions to empty strings a
 
   assert.equal(runtimeConfig.photoInstructionsEs, '');
   assert.equal(runtimeConfig.photoInstructionsFr, '');
+  assert.equal(runtimeConfig.photoInstructionsPtBr, '');
   assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'en');
 });
 
@@ -4813,6 +4819,7 @@ test('toPublicHubConfig omits moderator-only template content', () => {
     photoInstructions: 'Follow the instructions.',
     photoInstructionsEs: 'Sigue las instrucciones.',
     photoInstructionsFr: 'Suivez les instructions.',
+    photoInstructionsPtBr: 'Siga as instruções.',
     photoInstructionsDefaultLanguage: 'en',
     showPhotoInstructionsBeforeSubmit: true,
     pendingTurnaroundDays: 3,

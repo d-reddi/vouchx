@@ -822,6 +822,59 @@ textarea {
   line-height: 1.45;
 }
 
+.textarea-helper-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.textarea-helper-btn {
+  min-width: 34px;
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 64%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 84%, black 16%);
+  color: color-mix(in srgb, var(--text) 88%, var(--muted) 12%);
+  padding: 0 9px;
+  font-size: 0.76rem;
+  font-weight: 680;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.textarea-helper-btn:hover {
+  border-color: color-mix(in srgb, var(--primary) 46%, var(--panel-border-strong) 54%);
+  background: color-mix(in srgb, var(--primary-soft) 34%, var(--panel-surface-soft) 66%);
+  color: var(--text);
+}
+
+.textarea-helper-btn:focus-visible,
+.textarea-helper-select:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--primary) 64%, var(--panel-border) 36%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-soft) 54%, transparent);
+}
+
+.textarea-helper-btn-italic {
+  font-style: italic;
+}
+
+.textarea-helper-select {
+  flex: 1 1 180px;
+  max-width: 260px;
+  min-height: 32px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 0.78rem;
+}
+
 .field-input:hover,
 .field-select:hover,
 .field-textarea:hover {
