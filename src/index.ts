@@ -4,6 +4,7 @@ import { context, createServer, getServerPort, realtime, reddit, redis, schedule
 
 import {
   assertCanReview,
+  archivePendingVerificationModmailReply,
   batchReviewVerifications,
   blockUserForModerator,
   buildBatchReviewToast,
@@ -45,6 +46,7 @@ import {
   validateFlairTemplateIdForSubreddit,
   validateMaxDenialsBeforeBlockSetting,
   parseDenyReason,
+  type PendingModmailReplyEvent,
   type SubmitVerificationValues,
 } from './core.js';
 import {
@@ -373,6 +375,15 @@ app.post('/internal/settings/validate/verifications-disabled-message', (req, res
 app.post('/internal/settings/validate/deny-reason-label', (req, res) => {
   const body = (req.body ?? {}) as Partial<SettingsValidationRequest<string>>;
   res.json(toSettingsValidationResponse(validateDenyReasonLabel(body.value)));
+});
+
+app.post('/internal/on-modmail', async (req, res) => {
+  try {
+    await archivePendingVerificationModmailReply(currentContext(), (req.body ?? {}) as PendingModmailReplyEvent);
+  } catch (error) {
+    void error;
+  }
+  res.json({ status: 'ok' });
 });
 
 app.post('/api/mod/settings/flair/validate', async (req, res) => {

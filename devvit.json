@@ -27,6 +27,9 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
+  "triggers": {
+    "onModMail": "/internal/on-modmail"
+  },
   "blocks": {
     "entry": "src/main.tsx",
     "settings": {
@@ -256,6 +259,12 @@
         "type": "boolean",
         "label": "Automatically repair verification flair",
         "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
+        "defaultValue": true
+      },
+      "auto_archive_pending_modmail_enabled": {
+        "type": "boolean",
+        "label": "Auto-archive pending verification modmail",
+        "helpText": "When enabled the app archives pending verification modmail conversations and user replies before a moderator approval or denial is made.",
         "defaultValue": true
       },
       "multiple_approval_flairs_enabled": {
