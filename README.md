@@ -112,10 +112,14 @@ Full changelog:
 ### v1.4.0
 
 - Photo Intructions panel now supports English, Spanish, French (set up langages in mod panel)
+- History & Audit includes links to view submitted hpotos on approved records
+- Batch queue actions added
+- Auto-Archive modmail replies for pending users added, setting in install settings
 
 Back-end changes:
 - Performance improvements for flair and mod lookup
 - Updated to devvit 0.12.18
+- Global blocklist added per terms and conditions
 
 ### v1.3.9
 
