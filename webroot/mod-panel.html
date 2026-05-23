@@ -500,7 +500,7 @@
 
               <p class="instructions-settings-note muted small">
                 We recommend using
-                <a href="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a> or <a href="https://www.deepl.com/translator" target="_blank" rel="noopener noreferrer">DeepL Translator</a>
+                <a href="https://translate.google.com/" data-open-external-url="https://translate.google.com/" target="_blank" rel="noopener noreferrer">Google Translate</a> or <a href="https://www.deepl.com/translator" data-open-external-url="https://www.deepl.com/translator" target="_blank" rel="noopener noreferrer">DeepL Translator</a>
                 to help provide instructions in multiple languages for non-native speakers.
               </p>
 
@@ -510,6 +510,7 @@
                   <option value="en">English</option>
                   <option value="es">Spanish</option>
                   <option value="fr">French</option>
+                  <option value="pt-br">Portuguese (Brazil)</option>
                 </select>
                 <p class="muted small field-help">If the selected language is empty, VouchX falls back to the next available instruction language.</p>
               </div>
@@ -522,14 +523,17 @@
                     <p><strong>Markdown and placeholders</strong></p>
                     <p><strong>Bold:</strong> <code>**text**</code></p>
                     <p><em>Italic:</em> <code>*text*</code></p>
+                    <p><strong><em>Bold italic:</em></strong> <code>***text***</code></p>
                     <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
                     <p><strong>Inline code:</strong> <code>`text`</code></p>
+                    <p><strong>Caps helper:</strong> converts selected text to uppercase. Selected placeholders become <code>{{caps:name}}</code>.</p>
                     <p><strong>Heading:</strong> <code>## Heading</code></p>
                     <p><strong>Line break:</strong> press Enter twice</p>
                     <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
                     <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
-                    <p><strong>Placeholders:</strong> <code>{{subreddit}}</code>, <code>{{days}}</code></p>
+                    <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{days}}</code>, <code>{{today}}</code></p>
                     <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                    <p><code>{{today}}</code> uses the viewer's local date, for example <code>May 23, 2026</code>.</p>
                     <p>What you type is what users will see in the Photo Requirements popup or Android instructions page.</p>
                   </div>
                 </details>
@@ -539,24 +543,35 @@
                 <button class="settings-language-tab-btn settings-language-tab-btn-active" data-instruction-language="en" type="button">English</button>
                 <button class="settings-language-tab-btn" data-instruction-language="es" type="button">Spanish</button>
                 <button class="settings-language-tab-btn" data-instruction-language="fr" type="button">French</button>
+                <button class="settings-language-tab-btn" data-instruction-language="pt-br" type="button">Portuguese (Brazil)</button>
               </nav>
 
               <div id="instruction-language-panel-en" class="settings-language-panel">
                 <label class="field-label" for="photo-instructions">English instructions</label>
                 <p class="muted small field-help">Used when the default language is English, and also as a fallback when other languages are unavailable.</p>
+                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions" aria-label="English instructions formatting helpers"></div>
                 <textarea id="photo-instructions" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-es" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-es">Spanish instructions</label>
                 <p class="muted small field-help">Adds `es` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
+                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-es" aria-label="Spanish instructions formatting helpers"></div>
                 <textarea id="photo-instructions-es" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-fr" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-fr">French instructions</label>
                 <p class="muted small field-help">Adds `fr` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
+                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-fr" aria-label="French instructions formatting helpers"></div>
                 <textarea id="photo-instructions-fr" class="field-textarea" rows="10"></textarea>
+              </div>
+
+              <div id="instruction-language-panel-pt-br" class="settings-language-panel hidden">
+                <label class="field-label" for="photo-instructions-pt-br">Portuguese (Brazil) instructions</label>
+                <p class="muted small field-help">Adds `pt-BR` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
+                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-pt-br" aria-label="Portuguese (Brazil) instructions formatting helpers"></div>
+                <textarea id="photo-instructions-pt-br" class="field-textarea" rows="10"></textarea>
               </div>
             </div>
 
@@ -608,6 +623,7 @@
                     </div>
                   </details>
                 </div>
+                <div class="textarea-helper-toolbar" data-textarea-helper="pending-body" aria-label="Pending body template helpers"></div>
                 <textarea id="pending-body" class="field-textarea" rows="5"></textarea>
               </div>
 
@@ -642,6 +658,7 @@
                     </div>
                   </details>
                 </div>
+                <div class="textarea-helper-toolbar" data-textarea-helper="approve-body" aria-label="Approval body template helpers"></div>
                 <textarea id="approve-body" class="field-textarea" rows="5"></textarea>
               </div>
 
@@ -694,6 +711,7 @@
                       </div>
                     </details>
                   </div>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-1" aria-label="Denial body reason 1 template helpers"></div>
                   <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
                 </div>
 
@@ -708,6 +726,7 @@
                       </div>
                     </details>
                   </div>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-2" aria-label="Denial body reason 2 template helpers"></div>
                   <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
                 </div>
 
@@ -722,6 +741,7 @@
                       </div>
                     </details>
                   </div>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-3" aria-label="Denial body reason 3 template helpers"></div>
                   <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
                 </div>
 
@@ -736,6 +756,7 @@
                       </div>
                     </details>
                   </div>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-4" aria-label="Denial body reason 4 template helpers"></div>
                   <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
                 </div>
               </div>
@@ -762,6 +783,7 @@
                   <input id="remove-header" class="field-input" type="text" />
                 </div>
                 <label class="field-label" for="remove-body">Revoked verification body</label>
+                <div class="textarea-helper-toolbar" data-textarea-helper="remove-body" aria-label="Revoked verification body template helpers"></div>
                 <textarea id="remove-body" class="field-textarea" rows="4"></textarea>
               </div>
             </div>

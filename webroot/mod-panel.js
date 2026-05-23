@@ -141,11 +141,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const photoInstructionsInput = document.getElementById('photo-instructions');
   const photoInstructionsEsInput = document.getElementById('photo-instructions-es');
   const photoInstructionsFrInput = document.getElementById('photo-instructions-fr');
+  const photoInstructionsPtBrInput = document.getElementById('photo-instructions-pt-br');
   const instructionLanguageTabButtons = Array.from(document.querySelectorAll('.settings-language-tab-btn'));
   const instructionLanguagePanels = {
     en: document.getElementById('instruction-language-panel-en'),
     es: document.getElementById('instruction-language-panel-es'),
     fr: document.getElementById('instruction-language-panel-fr'),
+    'pt-br': document.getElementById('instruction-language-panel-pt-br'),
   };
 
   const pendingTurnaroundDaysInput = document.getElementById('pending-turnaround-days');
@@ -215,6 +217,100 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const approveBannedCancelBtn = document.getElementById('approve-banned-cancel-btn');
   const approveBannedConfirmBtn = document.getElementById('approve-banned-confirm-btn');
   const bugReportLink = document.getElementById('bug-report-link');
+  const externalNavigationLinks = Array.from(document.querySelectorAll('[data-open-external-url]'));
+
+  const PHOTO_TEXTAREA_ACTIONS = [
+    'bold',
+    'italic',
+    'link',
+    'code',
+    'caps',
+    'heading',
+    'line-break',
+    'bullet-list',
+    'numbered-list',
+  ];
+  const MODMAIL_TEXTAREA_ACTIONS = ['link'];
+  const PHOTO_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{days}}', '{{today}}'];
+  const PENDING_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{date submitted}}', '{{days}}'];
+  const APPROVAL_TEXTAREA_PLACEHOLDERS = [
+    '{{username}}',
+    '{{mod}}',
+    '{{subreddit}}',
+    '{{date submitted}}',
+    '{{days}}',
+  ];
+  const DENIAL_TEXTAREA_PLACEHOLDERS = [...APPROVAL_TEXTAREA_PLACEHOLDERS, '{{denial_notes}}'];
+  const REMOVAL_TEXTAREA_PLACEHOLDERS = [...APPROVAL_TEXTAREA_PLACEHOLDERS, '{{reason}}'];
+  const TEXTAREA_HELPER_ACTION_LABELS = {
+    bold: { label: 'B', ariaLabel: 'Insert bold Markdown', title: 'Bold' },
+    italic: { label: 'I', ariaLabel: 'Insert italic Markdown', title: 'Italic', className: 'textarea-helper-btn-italic' },
+    link: { label: 'Link', ariaLabel: 'Insert Markdown link', title: 'Link' },
+    code: { label: 'Code', ariaLabel: 'Insert inline code Markdown', title: 'Inline code' },
+    caps: { label: 'Caps', ariaLabel: 'Convert selected text to uppercase', title: 'Uppercase selected text' },
+    heading: { label: 'H2', ariaLabel: 'Insert heading Markdown', title: 'Heading' },
+    'line-break': { label: 'Break', ariaLabel: 'Insert paragraph break', title: 'Line break' },
+    'bullet-list': { label: 'List', ariaLabel: 'Insert bullet list Markdown', title: 'Bullet list' },
+    'numbered-list': { label: '1. List', ariaLabel: 'Insert numbered list Markdown', title: 'Numbered list' },
+  };
+  const TEXTAREA_HELPER_CONFIGS = {
+    'photo-instructions': {
+      actions: PHOTO_TEXTAREA_ACTIONS,
+      placeholders: PHOTO_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into English instructions',
+    },
+    'photo-instructions-es': {
+      actions: PHOTO_TEXTAREA_ACTIONS,
+      placeholders: PHOTO_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into Spanish instructions',
+    },
+    'photo-instructions-fr': {
+      actions: PHOTO_TEXTAREA_ACTIONS,
+      placeholders: PHOTO_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into French instructions',
+    },
+    'photo-instructions-pt-br': {
+      actions: PHOTO_TEXTAREA_ACTIONS,
+      placeholders: PHOTO_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into Portuguese (Brazil) instructions',
+    },
+    'pending-body': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: PENDING_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into pending body',
+    },
+    'approve-body': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: APPROVAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into approval body',
+    },
+    'deny-body-reason-1': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: DENIAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into denial body',
+    },
+    'deny-body-reason-2': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: DENIAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into denial body',
+    },
+    'deny-body-reason-3': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: DENIAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into denial body',
+    },
+    'deny-body-reason-4': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: DENIAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into denial body',
+    },
+    'remove-body': {
+      actions: MODMAIL_TEXTAREA_ACTIONS,
+      placeholders: REMOVAL_TEXTAREA_PLACEHOLDERS,
+      placeholderLabel: 'Insert placeholder into revoked verification body',
+    },
+  };
+  const textareaHelperSelections = new WeakMap();
 
   let state = null;
   let stateInitialized = false;
@@ -333,6 +429,362 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
     } catch {
       return '';
+    }
+  }
+
+  function openExternalUrl(value, missingMessage = 'External URL is not configured.') {
+    const url = normalizeExternalUrl(value);
+    if (!url) {
+      showToast(missingMessage, 'error');
+      return;
+    }
+    post({ type: 'openExternalUrl', url });
+  }
+
+  function bindExternalNavigationLink(link, getUrl, missingMessage) {
+    if (!link) {
+      return;
+    }
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const url = typeof getUrl === 'function' ? getUrl(link) : getUrl;
+      openExternalUrl(url, missingMessage);
+    });
+  }
+
+  function getTextareaHelperTarget(toolbar) {
+    const targetId = toolbar && toolbar.dataset ? String(toolbar.dataset.textareaHelper || '') : '';
+    const target = targetId ? document.getElementById(targetId) : null;
+    return target instanceof HTMLTextAreaElement ? target : null;
+  }
+
+  function createTextareaHelperButton(action) {
+    const config = TEXTAREA_HELPER_ACTION_LABELS[action];
+    if (!config) {
+      return null;
+    }
+    const button = document.createElement('button');
+    button.className = `textarea-helper-btn${config.className ? ` ${config.className}` : ''}`;
+    button.type = 'button';
+    button.dataset.helperAction = action;
+    button.setAttribute('aria-label', config.ariaLabel);
+    button.title = config.title;
+    button.textContent = config.label;
+    return button;
+  }
+
+  function createTextareaPlaceholderSelect(config) {
+    const select = document.createElement('select');
+    select.className = 'textarea-helper-select field-select';
+    select.dataset.helperPlaceholder = 'true';
+    select.setAttribute('aria-label', config.placeholderLabel);
+
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = 'Insert placeholder...';
+    select.appendChild(placeholderOption);
+
+    for (const placeholder of config.placeholders) {
+      const option = document.createElement('option');
+      option.value = placeholder;
+      option.textContent = placeholder;
+      select.appendChild(option);
+    }
+
+    return select;
+  }
+
+  function renderTextareaHelperToolbar(toolbar, config) {
+    toolbar.textContent = '';
+    for (const action of config.actions) {
+      const button = createTextareaHelperButton(action);
+      if (button) {
+        toolbar.appendChild(button);
+      }
+    }
+    if (config.placeholders.length) {
+      toolbar.appendChild(createTextareaPlaceholderSelect(config));
+    }
+  }
+
+  function getScrollableAncestors(element) {
+    const ancestors = [];
+    let current = element.parentElement;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      const canScroll =
+        /(auto|scroll|overlay)/.test(style.overflowY) && current.scrollHeight > current.clientHeight;
+      if (canScroll) {
+        ancestors.push(current);
+      }
+      current = current.parentElement;
+    }
+    return ancestors;
+  }
+
+  function captureTextareaScrollState(textarea) {
+    const scrollingElement = document.scrollingElement;
+    return {
+      textareaScrollTop: textarea.scrollTop,
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+      documentScrollTop: scrollingElement ? scrollingElement.scrollTop : 0,
+      ancestors: getScrollableAncestors(textarea).map((element) => ({
+        element,
+        scrollTop: element.scrollTop,
+      })),
+    };
+  }
+
+  function restoreTextareaScrollState(textarea, state) {
+    textarea.scrollTop = state.textareaScrollTop;
+    for (const item of state.ancestors) {
+      item.element.scrollTop = item.scrollTop;
+    }
+    if (document.scrollingElement) {
+      document.scrollingElement.scrollTop = state.documentScrollTop;
+    }
+    window.scrollTo(state.windowX, state.windowY);
+  }
+
+  function getTextareaSelectionRange(textarea, options = {}) {
+    const fallback = String(textarea.value || '').length;
+    const shouldUseRemembered = options.useRemembered !== false;
+    if (shouldUseRemembered && document.activeElement !== textarea) {
+      const remembered = textareaHelperSelections.get(textarea);
+      if (remembered) {
+        return {
+          start: Math.max(0, Math.min(remembered.start, fallback)),
+          end: Math.max(0, Math.min(remembered.end, fallback)),
+        };
+      }
+    }
+    try {
+      const start = Number(textarea.selectionStart);
+      const end = Number(textarea.selectionEnd);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        return {
+          start: Math.max(0, Math.min(start, fallback)),
+          end: Math.max(0, Math.min(end, fallback)),
+        };
+      }
+    } catch {
+      // Some older embedded browsers do not expose textarea selection APIs.
+    }
+    return { start: fallback, end: fallback };
+  }
+
+  function rememberTextareaSelection(textarea) {
+    const range = getTextareaSelectionRange(textarea, { useRemembered: false });
+    textareaHelperSelections.set(textarea, range);
+    return range;
+  }
+
+  function replaceTextareaSelection(textarea, replacement, selectionStartOffset, selectionEndOffset) {
+    const value = String(textarea.value || '');
+    const scrollState = captureTextareaScrollState(textarea);
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+    textarea.value = nextValue;
+    textarea.focus();
+
+    const cursorStart = start + selectionStartOffset;
+    const cursorEnd = start + selectionEndOffset;
+    try {
+      textarea.setSelectionRange(cursorStart, cursorEnd);
+    } catch {
+      // Leave focus in the field if precise cursor placement is unavailable.
+    }
+    restoreTextareaScrollState(textarea, scrollState);
+    window.requestAnimationFrame(() => {
+      restoreTextareaScrollState(textarea, scrollState);
+    });
+    rememberTextareaSelection(textarea);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function wrapTextareaSelection(textarea, prefix, suffix, fallbackText) {
+    const value = String(textarea.value || '');
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    const selectedText = value.slice(start, end);
+    const body = selectedText || fallbackText;
+    const replacement = `${prefix}${body}${suffix}`;
+    const bodyStart = prefix.length;
+    const bodyEnd = prefix.length + body.length;
+    replaceTextareaSelection(
+      textarea,
+      replacement,
+      selectedText ? replacement.length : bodyStart,
+      selectedText ? replacement.length : bodyEnd
+    );
+  }
+
+  function selectedTextareaText(textarea) {
+    const value = String(textarea.value || '');
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    return value.slice(start, end);
+  }
+
+  function formatCapsPlaceholderSelection(value) {
+    const match = String(value || '').match(/^\{\{\s*(?:(caps)\s*:\s*)?([^{}]+?)\s*\}\}$/i);
+    if (!match) {
+      return '';
+    }
+    const placeholderName = String(match[2] || '').trim();
+    return placeholderName ? `{{caps:${placeholderName}}}` : '';
+  }
+
+  function withBlockBoundaries(textarea, blockText) {
+    const value = String(textarea.value || '');
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    const leading = before && !before.endsWith('\n') ? '\n\n' : before.endsWith('\n\n') || !before ? '' : '\n';
+    const trailing = after && !after.startsWith('\n') ? '\n\n' : '';
+    return {
+      text: `${leading}${blockText}${trailing}`,
+      offset: leading.length,
+    };
+  }
+
+  function insertTextareaBlock(textarea, fallbackText, formatLine) {
+    const selectedText = selectedTextareaText(textarea);
+    const source = selectedText || fallbackText;
+    const blockText = source
+      .split('\n')
+      .map((line) => (line.trim() ? formatLine(line) : line))
+      .join('\n');
+    const bounded = withBlockBoundaries(textarea, blockText);
+    const selectStart = bounded.offset + (selectedText ? bounded.text.length - bounded.offset : 0);
+    const selectEnd = selectedText ? selectStart : bounded.offset + blockText.length;
+    replaceTextareaSelection(textarea, bounded.text, selectStart, selectEnd);
+  }
+
+  function insertTextareaLineBreak(textarea) {
+    const value = String(textarea.value || '');
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const before = value.slice(0, start);
+    const breakText = before && !before.endsWith('\n') ? '\n\n' : '\n';
+    replaceTextareaSelection(textarea, breakText, breakText.length, breakText.length);
+  }
+
+  function insertTextareaHelperAction(textarea, action) {
+    if (action === 'bold') {
+      wrapTextareaSelection(textarea, '**', '**', 'text');
+      return;
+    }
+    if (action === 'italic') {
+      wrapTextareaSelection(textarea, '*', '*', 'text');
+      return;
+    }
+    if (action === 'code') {
+      wrapTextareaSelection(textarea, '`', '`', 'text');
+      return;
+    }
+    if (action === 'caps') {
+      const selectedText = selectedTextareaText(textarea);
+      if (!selectedText) {
+        replaceTextareaSelection(textarea, 'TEXT', 0, 4);
+        return;
+      }
+      const capsPlaceholder = formatCapsPlaceholderSelection(selectedText);
+      if (capsPlaceholder) {
+        replaceTextareaSelection(textarea, capsPlaceholder, capsPlaceholder.length, capsPlaceholder.length);
+        return;
+      }
+      const replacement = selectedText.toLocaleUpperCase();
+      replaceTextareaSelection(textarea, replacement, replacement.length, replacement.length);
+      return;
+    }
+    if (action === 'link') {
+      const selectedText = selectedTextareaText(textarea);
+      const label = selectedText || 'text';
+      const replacement = `[${label}](https://example.com)`;
+      const labelStart = 1;
+      const labelEnd = 1 + label.length;
+      replaceTextareaSelection(
+        textarea,
+        replacement,
+        selectedText ? replacement.length : labelStart,
+        selectedText ? replacement.length : labelEnd
+      );
+      return;
+    }
+    if (action === 'heading') {
+      insertTextareaBlock(textarea, 'Heading', (line) => `## ${line}`);
+      return;
+    }
+    if (action === 'line-break') {
+      insertTextareaLineBreak(textarea);
+      return;
+    }
+    if (action === 'bullet-list') {
+      insertTextareaBlock(textarea, 'Item\nItem', (line) => `- ${line}`);
+      return;
+    }
+    if (action === 'numbered-list') {
+      let index = 0;
+      insertTextareaBlock(textarea, 'Item\nItem', (line) => {
+        index += 1;
+        return `${index}. ${line}`;
+      });
+    }
+  }
+
+  function bindTextareaHelperToolbar(toolbar) {
+    const textarea = getTextareaHelperTarget(toolbar);
+    if (!textarea) {
+      return;
+    }
+    const config = TEXTAREA_HELPER_CONFIGS[textarea.id];
+    if (!config) {
+      return;
+    }
+    renderTextareaHelperToolbar(toolbar, config);
+    ['focus', 'click', 'keyup', 'select', 'mouseup', 'touchend', 'input'].forEach((eventName) => {
+      textarea.addEventListener(eventName, () => {
+        rememberTextareaSelection(textarea);
+      });
+    });
+    toolbar.addEventListener('pointerdown', (event) => {
+      if (event.target instanceof Element && event.target.closest('[data-helper-action]')) {
+        rememberTextareaSelection(textarea);
+        event.preventDefault();
+      }
+    });
+    toolbar.addEventListener('click', (event) => {
+      const button = event.target instanceof Element ? event.target.closest('[data-helper-action]') : null;
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+      event.preventDefault();
+      insertTextareaHelperAction(textarea, String(button.dataset.helperAction || ''));
+    });
+    const placeholderSelect = toolbar.querySelector('[data-helper-placeholder]');
+    if (placeholderSelect instanceof HTMLSelectElement) {
+      placeholderSelect.addEventListener('pointerdown', () => {
+        rememberTextareaSelection(textarea);
+      });
+      placeholderSelect.addEventListener('focus', () => {
+        rememberTextareaSelection(textarea);
+      });
+      placeholderSelect.addEventListener('change', () => {
+        const placeholder = placeholderSelect.value;
+        if (!placeholder) {
+          return;
+        }
+        replaceTextareaSelection(textarea, placeholder, placeholder.length, placeholder.length);
+        placeholderSelect.value = '';
+      });
     }
   }
 
@@ -1237,6 +1689,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           photoInstructions: photoInstructionsInput ? photoInstructionsInput.value : '',
           photoInstructionsEs: photoInstructionsEsInput ? photoInstructionsEsInput.value : '',
           photoInstructionsFr: photoInstructionsFrInput ? photoInstructionsFrInput.value : '',
+          photoInstructionsPtBr: photoInstructionsPtBrInput ? photoInstructionsPtBrInput.value : '',
         };
         const savedVerificationsEnabled = state ? state.config.verificationsEnabled !== false : true;
         if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
@@ -1320,6 +1773,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       photoInstructions: stringInputValue(photoInstructionsInput),
       photoInstructionsEs: stringInputValue(photoInstructionsEsInput),
       photoInstructionsFr: stringInputValue(photoInstructionsFrInput),
+      photoInstructionsPtBr: stringInputValue(photoInstructionsPtBrInput),
     };
     const savedRequiredPhotoCount = `${Number(state.config.requiredPhotoCount || 2)}`;
     const dirty =
@@ -1334,8 +1788,23 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       draft.photoInstructionsDefaultLanguage !== String(state.config.photoInstructionsDefaultLanguage || 'en') ||
       draft.photoInstructions !== String(state.config.photoInstructions || '') ||
       draft.photoInstructionsEs !== String(state.config.photoInstructionsEs || '') ||
-      draft.photoInstructionsFr !== String(state.config.photoInstructionsFr || '');
+      draft.photoInstructionsFr !== String(state.config.photoInstructionsFr || '') ||
+      draft.photoInstructionsPtBr !== String(state.config.photoInstructionsPtBr || '');
     return dirty ? draft : null;
+  }
+
+  function hasInstructionSettingsChanges() {
+    if (!state) {
+      return false;
+    }
+    return (
+      (stringInputValue(photoInstructionsDefaultLanguageInput) || 'en') !==
+        String(state.config.photoInstructionsDefaultLanguage || 'en') ||
+      stringInputValue(photoInstructionsInput) !== String(state.config.photoInstructions || '') ||
+      stringInputValue(photoInstructionsEsInput) !== String(state.config.photoInstructionsEs || '') ||
+      stringInputValue(photoInstructionsFrInput) !== String(state.config.photoInstructionsFr || '') ||
+      stringInputValue(photoInstructionsPtBrInput) !== String(state.config.photoInstructionsPtBr || '')
+    );
   }
 
   function captureTemplatesDraft() {
@@ -1473,10 +1942,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (photoInstructionsFrInput) {
       photoInstructionsFrInput.value = draft.photoInstructionsFr || '';
     }
+    if (photoInstructionsPtBrInput) {
+      photoInstructionsPtBrInput.value = draft.photoInstructionsPtBr || '';
+    }
     additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairSecond || '');
     additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(draft.additionalApprovalFlairThird || '');
     renderApprovalFlairPicker();
     setInstructionsLanguage(activeInstructionLanguage);
+    syncSaveFlairButtonState();
   }
 
   function restoreTemplatesDraft(draft) {
@@ -1773,11 +2246,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function syncSaveFlairButtonState() {
-    for (const button of [saveFlairBtn, saveInstructionsBtn]) {
-      if (!button) {
-        continue;
-      }
-      button.disabled = isBusy || isSavingFlairSettings;
+    if (saveFlairBtn) {
+      saveFlairBtn.disabled = isBusy || isSavingFlairSettings;
+    }
+    if (saveInstructionsBtn) {
+      saveInstructionsBtn.disabled = isBusy || isSavingFlairSettings || !hasInstructionSettingsChanges();
     }
   }
 
@@ -2016,7 +2489,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function setInstructionsLanguage(language) {
-    activeInstructionLanguage = language === 'es' || language === 'fr' ? language : 'en';
+    activeInstructionLanguage = language === 'es' || language === 'fr' || language === 'pt-br' ? language : 'en';
     for (const [name, panel] of Object.entries(instructionLanguagePanels)) {
       if (!panel) {
         continue;
@@ -3419,9 +3892,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (photoInstructionsFrInput) {
       photoInstructionsFrInput.value = state.config.photoInstructionsFr || '';
     }
+    if (photoInstructionsPtBrInput) {
+      photoInstructionsPtBrInput.value = state.config.photoInstructionsPtBr || '';
+    }
     renderApprovalFlairPicker();
     renderFlairTemplateValidationFeedback();
     setInstructionsLanguage(activeInstructionLanguage);
+    syncSaveFlairButtonState();
   }
 
   function renderTemplates() {
@@ -4686,15 +5163,36 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
   }
 
-  if (bugReportLink) {
-    bugReportLink.addEventListener('click', (event) => {
-      event.preventDefault();
-      const url = normalizeExternalUrl(BUG_REPORT_URL);
-      if (!url) {
-        showToast('Bug report URL is not configured.', 'error');
-        return;
-      }
-      post({ type: 'openExternalUrl', url });
+  externalNavigationLinks.forEach((link) => {
+    bindExternalNavigationLink(
+      link,
+      (currentLink) => currentLink.dataset.openExternalUrl || currentLink.getAttribute('href') || '',
+    );
+  });
+
+  bindExternalNavigationLink(bugReportLink, () => BUG_REPORT_URL, 'Bug report URL is not configured.');
+
+  document.querySelectorAll('.textarea-helper-toolbar').forEach((toolbar) => {
+    bindTextareaHelperToolbar(toolbar);
+  });
+
+  [
+    photoInstructionsInput,
+    photoInstructionsEsInput,
+    photoInstructionsFrInput,
+    photoInstructionsPtBrInput,
+  ].forEach((input) => {
+    if (!input) {
+      return;
+    }
+    input.addEventListener('input', () => {
+      syncSaveFlairButtonState();
+    });
+  });
+
+  if (photoInstructionsDefaultLanguageInput) {
+    photoInstructionsDefaultLanguageInput.addEventListener('change', () => {
+      syncSaveFlairButtonState();
     });
   }
 

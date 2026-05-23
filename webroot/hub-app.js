@@ -48,6 +48,7 @@ const PHOTO_INSTRUCTION_LANGUAGE_OPTIONS = Object.freeze([
   { id: 'en', label: 'en', configField: 'photoInstructions' },
   { id: 'es', label: 'es', configField: 'photoInstructionsEs' },
   { id: 'fr', label: 'fr', configField: 'photoInstructionsFr' },
+  { id: 'pt-br', label: 'pt-BR', configField: 'photoInstructionsPtBr' },
 ]);
 const PHOTO_INSTRUCTION_LANGUAGE_COPY = Object.freeze({
   en: {
@@ -64,6 +65,11 @@ const PHOTO_INSTRUCTION_LANGUAGE_COPY = Object.freeze({
     title: 'Exigences relatives aux photos',
     subtitle: 'Veuillez lire attentivement ces instructions avant de soumettre vos photos.',
     scrollHint: 'Défilez vers le bas ↓',
+  },
+  'pt-br': {
+    title: 'Requisitos das fotos',
+    subtitle: 'Leia estas instruções com atenção antes de enviar suas fotos.',
+    scrollHint: 'Role para baixo ↓',
   },
 });
 
@@ -472,6 +478,7 @@ function renderInlineMarkdown(value) {
   });
 
   let html = escapeHtml(source);
+  html = html.replace(/\*\*\*([^*][\s\S]*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*([^*][\s\S]*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/(^|[\s(])\*([^*\n][\s\S]*?)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
   html = html.replace(/(^|[\s(])_([^_\n][\s\S]*?)_(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
@@ -563,18 +570,37 @@ function formatPendingTurnaroundDays(days) {
   return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
 }
 
+function formatRedditUsernameDisplay(username) {
+  const normalizedUsername = String(username || '').trim();
+  return normalizedUsername ? `u/${normalizedUsername}` : '';
+}
+
+function formatLocalTodayDisplay() {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date());
+}
+
 function renderInstructionTemplate(value, state) {
   const replacements = {
+    username: formatRedditUsernameDisplay(state?.viewerUsername),
     subreddit: String(state?.subredditName || '').trim(),
     days: formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays),
+    today: formatLocalTodayDisplay(),
   };
 
   return String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey) => {
-    const normalizedKey = String(rawKey || '')
+    const rawPlaceholderKey = String(rawKey || '').trim();
+    const capsMatch = rawPlaceholderKey.match(/^caps\s*:\s*(.+)$/i);
+    const shouldUppercase = Boolean(capsMatch);
+    const normalizedKey = String(capsMatch ? capsMatch[1] : rawPlaceholderKey)
       .trim()
       .toLowerCase()
       .replace(/\s+/g, '_');
-    return replacements[normalizedKey] ?? '';
+    const replacement = replacements[normalizedKey] ?? '';
+    return shouldUppercase ? replacement.toLocaleUpperCase() : replacement;
   });
 }
 
@@ -1655,7 +1681,9 @@ export function mountHub(options = {}) {
     const isGlobalRestriction = state.viewerBlocked?.scope === 'global';
 
     applyTheme(state.resolvedTheme);
-    refs.metaUsername.textContent = state.viewerUsername ? `Username: u/${state.viewerUsername}` : 'Username: not signed in';
+    refs.metaUsername.textContent = state.viewerUsername
+      ? `Username: ${formatRedditUsernameDisplay(state.viewerUsername)}`
+      : 'Username: not signed in';
     refs.metaSubreddit.textContent = state.subredditName ? `Subreddit: r/${state.subredditName}` : '';
 
     refs.metaStatus.className = 'status-line';
@@ -1714,7 +1742,7 @@ export function mountHub(options = {}) {
         ? 'Your access to the VouchX app is restricted.'
         : 'You are blocked from submitting verification on this subreddit.';
       infoText = isGlobalRestriction
-        ? 'Per the Terms and Conditions of VouchX, the developer may restrict access for violations of the Terms and Conditions or at their discretion. This restriction applies across every subreddit using VouchX.'
+        ? 'As outlined in VouchX Terms and Conditions, the developer may restrict access to this app. This restriction applies across every subreddit using VouchX.'
         : 'This restriction is only for this subreddit and is based on your activity or verification history.';
     } else if (isVerified) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';

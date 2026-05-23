@@ -120,6 +120,7 @@ type RuntimeConfig = {
   photoInstructions: string;
   photoInstructionsEs: string;
   photoInstructionsFr: string;
+  photoInstructionsPtBr: string;
   photoInstructionsDefaultLanguage: string;
   showPhotoInstructionsBeforeSubmit: boolean;
   denyReasons: DenyReasonConfig[];
@@ -468,6 +469,7 @@ type FlairTemplateFormValues = {
   photoInstructions?: string;
   photoInstructionsEs?: string;
   photoInstructionsFr?: string;
+  photoInstructionsPtBr?: string;
   photoInstructionsDefaultLanguage?: string;
   flairTemplateId?: string;
   flairCssClass?: string;
@@ -681,6 +683,7 @@ type PublicHubConfig = {
   photoInstructions: string;
   photoInstructionsEs: string;
   photoInstructionsFr: string;
+  photoInstructionsPtBr: string;
   photoInstructionsDefaultLanguage: string;
   showPhotoInstructionsBeforeSubmit: boolean;
   pendingTurnaroundDays: number;
@@ -1041,6 +1044,7 @@ const CONFIG_FIELD = {
   photoInstructions: 'photo_instructions',
   photoInstructionsEs: 'photo_instructions_es',
   photoInstructionsFr: 'photo_instructions_fr',
+  photoInstructionsPtBr: 'photo_instructions_pt_br',
   photoInstructionsDefaultLanguage: 'photo_instructions_default_language',
   pendingTurnaroundDays: 'pending_turnaround_days',
   modmailSubject: 'modmail_subject',
@@ -1217,6 +1221,7 @@ function toPublicHubConfig(config: RuntimeConfig): PublicHubConfig {
     photoInstructions: config.photoInstructions,
     photoInstructionsEs: config.photoInstructionsEs,
     photoInstructionsFr: config.photoInstructionsFr,
+    photoInstructionsPtBr: config.photoInstructionsPtBr,
     photoInstructionsDefaultLanguage: config.photoInstructionsDefaultLanguage,
     showPhotoInstructionsBeforeSubmit: config.showPhotoInstructionsBeforeSubmit,
     pendingTurnaroundDays: config.pendingTurnaroundDays,
@@ -7306,6 +7311,10 @@ async function onSaveFlairTemplateValues(
     values.photoInstructionsEs === undefined ? existingConfig.photoInstructionsEs : values.photoInstructionsEs.trim();
   const photoInstructionsFr =
     values.photoInstructionsFr === undefined ? existingConfig.photoInstructionsFr : values.photoInstructionsFr.trim();
+  const photoInstructionsPtBr =
+    values.photoInstructionsPtBr === undefined
+      ? existingConfig.photoInstructionsPtBr
+      : values.photoInstructionsPtBr.trim();
   const photoInstructionsDefaultLanguage = normalizePhotoInstructionLanguage(
     values.photoInstructionsDefaultLanguage ?? existingConfig.photoInstructionsDefaultLanguage
   );
@@ -7366,6 +7375,7 @@ async function onSaveFlairTemplateValues(
     [CONFIG_FIELD.photoInstructions]: photoInstructions,
     [CONFIG_FIELD.photoInstructionsEs]: photoInstructionsEs,
     [CONFIG_FIELD.photoInstructionsFr]: photoInstructionsFr,
+    [CONFIG_FIELD.photoInstructionsPtBr]: photoInstructionsPtBr,
     [CONFIG_FIELD.photoInstructionsDefaultLanguage]: photoInstructionsDefaultLanguage,
     [CONFIG_FIELD.flairTemplateId]: flairTemplateId,
     [CONFIG_FIELD.flairCssClass]: values.flairCssClass?.trim() ?? '',
@@ -7380,6 +7390,7 @@ async function onSaveFlairTemplateValues(
     photoInstructions,
     photoInstructionsEs,
     photoInstructionsFr,
+    photoInstructionsPtBr,
     photoInstructionsDefaultLanguage,
     flairTemplateId,
     flairCssClass: values.flairCssClass?.trim() ?? '',
@@ -7534,6 +7545,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
       : parseBooleanString(rawShowPhotoInstructionsBeforeSubmit, false);
   const photoInstructionsEs = normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructionsEs]);
   const photoInstructionsFr = normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructionsFr]);
+  const photoInstructionsPtBr = normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructionsPtBr]);
   const photoInstructionsDefaultLanguage = normalizePhotoInstructionLanguage(
     stored[CONFIG_FIELD.photoInstructionsDefaultLanguage]
   );
@@ -7562,6 +7574,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     photoInstructions: normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructions]),
     photoInstructionsEs,
     photoInstructionsFr,
+    photoInstructionsPtBr,
     photoInstructionsDefaultLanguage,
     showPhotoInstructionsBeforeSubmit,
     denyReasons,
@@ -9024,7 +9037,7 @@ function normalizePhotoInstructionLanguage(value: string | undefined | null): st
   const normalized = String(value ?? '')
     .trim()
     .toLowerCase();
-  return normalized === 'es' || normalized === 'fr' ? normalized : 'en';
+  return normalized === 'es' || normalized === 'fr' || normalized === 'pt-br' ? normalized : 'en';
 }
 
 function formatPendingTurnaroundDays(days: number): string {
