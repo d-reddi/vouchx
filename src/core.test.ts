@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   assertCanReview,
   approveVerification,
+  batchReviewVerifications,
+  buildBatchReviewToast,
   buildModeratorUpdateNotice,
   checkVerificationFlair,
   clearExpiredPendingClaim,
@@ -27,6 +29,7 @@ import {
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
+  normalizeBatchReviewVerificationIds,
   normalizeModmailConversationId,
   normalizeMaxDenialsBeforeBlockSetting,
   normalizeSubmittedPhotoUrl,
@@ -4148,6 +4151,138 @@ test('denyVerification leaves the record pending when user validation has a tran
   assert.equal(reviewContext.createConversationCalls.length, 0);
   assert.equal(reviewContext.addModNoteCalls.length, 0);
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.size ?? 0, 0);
+});
+
+test('normalizeBatchReviewVerificationIds dedupes, drops empty IDs, and caps accepted IDs', () => {
+  const normalized = normalizeBatchReviewVerificationIds(['one', ' ', 'one', 'two', null, 'three'], 2);
+
+  assert.deepEqual(normalized.ids, ['one', 'two']);
+  assert.equal(normalized.duplicateOrEmptyCount, 3);
+  assert.equal(normalized.truncatedCount, 1);
+});
+
+test('buildBatchReviewToast summarizes partial batch outcomes', () => {
+  const toast = buildBatchReviewToast({
+    action: 'approve',
+    requestedCount: 11,
+    acceptedCount: 10,
+    duplicateOrEmptyCount: 1,
+    truncatedCount: 0,
+    terminalVerificationIds: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+    counts: {
+      completed: 8,
+      failed: 1,
+      validation_retry: 0,
+      invalid_account_removed: 0,
+      banned_confirmation_required: 1,
+    },
+    items: [],
+  });
+
+  assert.equal(toast.text, 'Approved 8; 1 needs individual banned-user confirmation; 1 failed; 1 skipped.');
+  assert.equal(toast.tone, 'error');
+});
+
+test('batchReviewVerifications approves selected records with one shared approval flair', async () => {
+  const reviewContext = createReviewActionContext({
+    multipleApprovalFlairsEnabled: true,
+    initialHashes: {
+      [subredditConfigTestKey('t5_example')]: {
+        additional_approval_flairs_json: JSON.stringify([
+          { templateId: 'def-456', label: 'Trusted', text: 'Trusted Verified' },
+          { templateId: 'ghi-789', label: 'VIP', text: 'VIP Verified' },
+        ]),
+      },
+    },
+  });
+  const secondRecord = buildRecord({
+    id: 'verification_pending_2',
+    username: 'second_user',
+    userId: 't2_second',
+    subredditId: reviewContext.subredditId,
+    subredditName: reviewContext.record.subredditName,
+    submittedAt: '2026-03-11T16:00:00.000Z',
+  });
+  reviewContext.redisStore.set(
+    verificationRecordTestKey(reviewContext.subredditId, secondRecord.id),
+    JSON.stringify(secondRecord)
+  );
+  reviewContext.redisStore.set(userPendingTestKey(reviewContext.subredditId, secondRecord.username), secondRecord.id);
+  reviewContext.redisStore.set(userLatestTestKey(reviewContext.subredditId, secondRecord.username), secondRecord.id);
+  ensureTestZSet(reviewContext.zsetStore, pendingIndexTestKey(reviewContext.subredditId)).set(
+    secondRecord.id,
+    new Date(secondRecord.submittedAt).getTime()
+  );
+
+  const result = await batchReviewVerifications(reviewContext.context as never, {
+    action: 'approve',
+    verificationIds: [reviewContext.record.id, secondRecord.id],
+    selectedFlairTemplateId: 'ghi-789',
+  });
+
+  assert.equal(result.counts.completed, 2);
+  assert.deepEqual(result.terminalVerificationIds.sort(), [reviewContext.record.id, secondRecord.id].sort());
+  assert.equal(reviewContext.getParsedRecord(reviewContext.record.id)?.status, 'approved');
+  assert.equal(reviewContext.getParsedRecord(secondRecord.id)?.status, 'approved');
+  assert.equal(reviewContext.setUserFlairCalls.length, 2);
+  assert.deepEqual(
+    reviewContext.setUserFlairCalls.map((call) => call.flairTemplateId),
+    ['ghi-789', 'ghi-789']
+  );
+});
+
+test('batchReviewVerifications denies selected records with one shared reason and notes', async () => {
+  const reviewContext = createReviewActionContext();
+  const secondRecord = buildRecord({
+    id: 'verification_pending_2',
+    username: 'second_user',
+    userId: 't2_second',
+    subredditId: reviewContext.subredditId,
+    subredditName: reviewContext.record.subredditName,
+    submittedAt: '2026-03-11T16:00:00.000Z',
+  });
+  reviewContext.redisStore.set(
+    verificationRecordTestKey(reviewContext.subredditId, secondRecord.id),
+    JSON.stringify(secondRecord)
+  );
+  reviewContext.redisStore.set(userPendingTestKey(reviewContext.subredditId, secondRecord.username), secondRecord.id);
+  reviewContext.redisStore.set(userLatestTestKey(reviewContext.subredditId, secondRecord.username), secondRecord.id);
+  ensureTestZSet(reviewContext.zsetStore, pendingIndexTestKey(reviewContext.subredditId)).set(
+    secondRecord.id,
+    new Date(secondRecord.submittedAt).getTime()
+  );
+
+  const result = await batchReviewVerifications(reviewContext.context as never, {
+    action: 'deny',
+    verificationIds: [reviewContext.record.id, secondRecord.id],
+    reason: 'reason_2',
+    moderatorNotes: 'Shared denial note',
+  });
+
+  assert.equal(result.counts.completed, 2);
+  assert.deepEqual(result.terminalVerificationIds.sort(), [reviewContext.record.id, secondRecord.id].sort());
+  assert.equal(reviewContext.getParsedRecord(reviewContext.record.id)?.denyReason, 'reason_2');
+  assert.equal(reviewContext.getParsedRecord(secondRecord.id)?.denyReason, 'reason_2');
+  assert.equal(reviewContext.getParsedRecord(reviewContext.record.id)?.denyNotes, 'Shared denial note');
+  assert.equal(reviewContext.getParsedRecord(secondRecord.id)?.denyNotes, 'Shared denial note');
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('second_user'), '1');
+});
+
+test('batchReviewVerifications removes terminal denials even when side effects fail', async () => {
+  const reviewContext = createReviewActionContext({
+    createConversationResponses: [new Error('modmail unavailable')],
+  });
+
+  const result = await batchReviewVerifications(reviewContext.context as never, {
+    action: 'deny',
+    verificationIds: [reviewContext.record.id],
+    reason: 'reason_1',
+  });
+
+  assert.equal(result.counts.failed, 1);
+  assert.deepEqual(result.terminalVerificationIds, [reviewContext.record.id]);
+  assert.equal(reviewContext.getParsedRecord()?.status, 'denied');
 });
 
 test('approveVerification clears reopened metadata when an invalid reopened review is removed', async () => {

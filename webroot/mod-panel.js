@@ -46,6 +46,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSearchHint = document.getElementById('pending-search-hint');
   const pendingSlaButtons = Array.from(document.querySelectorAll('.pending-sla-btn'));
+  const batchReviewToolbar = document.getElementById('batch-review-toolbar');
+  const batchSelectedCount = document.getElementById('batch-selected-count');
+  const batchApprovalFlairWrap = document.getElementById('batch-approval-flair-wrap');
+  const batchApprovalFlairSelect = document.getElementById('batch-approval-flair');
+  const batchApproveBtn = document.getElementById('batch-approve-btn');
+  const batchDenyReasonSelect = document.getElementById('batch-deny-reason');
+  const batchDenyNotesInput = document.getElementById('batch-deny-notes');
+  const batchDenyBtn = document.getElementById('batch-deny-btn');
   const historyViewButtons = Array.from(document.querySelectorAll('.history-view-btn'));
   const historyPanelRecords = document.getElementById('history-panel-records');
   const historyPanelApproved = document.getElementById('history-panel-approved');
@@ -216,6 +224,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   let isSavingFlairSettings = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
+  let selectedPendingIds = new Set();
+  let batchApprovalFlairDraft = '';
+  let batchApprovalOptionsExpanded = false;
+  let batchDenyReasonDraft = '';
+  let batchDenyNotesDraft = '';
+  let batchDenyOptionsExpanded = false;
   let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
@@ -279,6 +293,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
+  const MAX_BATCH_REVIEW_ITEMS = 25;
   const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
   const LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS = 2500;
   const STATS_AUTO_REFRESH_INTERVAL_MS = 20 * 1000;
@@ -407,15 +422,24 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       return;
     }
 
-    if (mutation.type === 'removePending') {
-      const verificationId = String(mutation.verificationId || '').trim();
-      if (!verificationId || !Array.isArray(state.pending)) {
+    if (mutation.type === 'removePending' || mutation.type === 'removePendingMany') {
+      const verificationIds =
+        mutation.type === 'removePendingMany'
+          ? Array.isArray(mutation.verificationIds)
+            ? mutation.verificationIds.map((id) => String(id || '').trim()).filter(Boolean)
+            : []
+          : [String(mutation.verificationId || '').trim()].filter(Boolean);
+      const idsToRemove = new Set(verificationIds);
+      if (idsToRemove.size === 0 || !Array.isArray(state.pending)) {
         return;
       }
-      const nextPending = state.pending.filter((item) => String(item && item.id || '') !== verificationId);
+      const nextPending = state.pending.filter((item) => !idsToRemove.has(String(item && item.id || '')));
       const removedCount = state.pending.length - nextPending.length;
       if (removedCount <= 0) {
         return;
+      }
+      for (const id of idsToRemove) {
+        selectedPendingIds.delete(id);
       }
       const currentPendingCount = Number.isFinite(Number(state.pendingCount)) ? Number(state.pendingCount) : state.pending.length;
       state = {
@@ -741,6 +765,10 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       templateId: option.templateId,
       label: option.label || (index === 0 ? 'Default approval flair' : option.templateId),
     }));
+  }
+
+  function shouldBatchApprovalAskForFlair(approvalFlairChoices = getConfiguredApprovalFlairChoices()) {
+    return Boolean(state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1);
   }
 
   function getSavedFlairTemplateValidation() {
@@ -1616,6 +1644,18 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         return;
       }
 
+      if (message.type === 'batchReview') {
+        const payload = await requestJson('/api/mod/batch-review', {
+          action: message.action,
+          verificationIds: message.verificationIds,
+          selectedFlairTemplateId: message.selectedFlairTemplateId,
+          reason: message.reason,
+          moderatorNotes: message.moderatorNotes,
+        });
+        applyMutationApiState(payload);
+        return;
+      }
+
       if (message.type === 'claimPending') {
         applyMutationApiState(await requestJson('/api/mod/claim', { verificationId: message.verificationId }));
         return;
@@ -2205,6 +2245,188 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
   }
 
+  function getFilteredPendingItems() {
+    if (!state || !Array.isArray(state.pending)) {
+      return [];
+    }
+    return state.pending.filter(matchesPendingFilters).sort((left, right) => getPendingSortScore(left) - getPendingSortScore(right));
+  }
+
+  function isPendingItemClaimedByOther(item) {
+    const viewerUsername = normalizeUsernameForCompare(state ? state.viewerUsername : '');
+    const claimedByNormalized = normalizeUsernameForCompare(item && item.claimedBy);
+    return Boolean(claimedByNormalized && (!viewerUsername || claimedByNormalized !== viewerUsername));
+  }
+
+  function isPendingItemDenyEligible(item) {
+    return Boolean(item && !item.parentVerificationId && !isPendingItemClaimedByOther(item));
+  }
+
+  function pruneSelectedPendingIds() {
+    if (!state || !Array.isArray(state.pending)) {
+      selectedPendingIds.clear();
+      return;
+    }
+    const selectableIds = new Set(
+      state.pending
+        .filter((item) => item && item.id && !isPendingItemClaimedByOther(item))
+        .map((item) => String(item.id))
+    );
+    for (const id of Array.from(selectedPendingIds)) {
+      if (!selectableIds.has(id)) {
+        selectedPendingIds.delete(id);
+      }
+    }
+  }
+
+  function getSelectedPendingItems() {
+    if (!state || !Array.isArray(state.pending) || selectedPendingIds.size === 0) {
+      return [];
+    }
+    return state.pending.filter((item) => selectedPendingIds.has(String(item && item.id || '')) && !isPendingItemClaimedByOther(item));
+  }
+
+  function syncPendingSelectionCheckboxes() {
+    const atSelectionLimit = selectedPendingIds.size >= MAX_BATCH_REVIEW_ITEMS;
+    for (const checkbox of document.querySelectorAll('input[data-role="pending-select"]')) {
+      const id = String(checkbox.value || '').trim();
+      const checked = selectedPendingIds.has(id);
+      checkbox.checked = checked;
+      checkbox.disabled = !checked && atSelectionLimit;
+      checkbox.title = checkbox.disabled ? `Batch actions are limited to ${MAX_BATCH_REVIEW_ITEMS} requests.` : '';
+    }
+  }
+
+  function replaceSelectOptions(select, options, placeholderText) {
+    if (!select) {
+      return '';
+    }
+    const previousValue = String(select.value || '');
+    select.innerHTML = '';
+    if (placeholderText) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = placeholderText;
+      select.appendChild(placeholder);
+    }
+    for (const optionValue of options) {
+      const option = document.createElement('option');
+      option.value = optionValue.value;
+      option.textContent = optionValue.label;
+      select.appendChild(option);
+    }
+    if (previousValue && options.some((option) => option.value === previousValue)) {
+      select.value = previousValue;
+      return previousValue;
+    }
+    return '';
+  }
+
+  function syncBatchToolbarState() {
+    pruneSelectedPendingIds();
+    const selectedItems = getSelectedPendingItems();
+    const selectedCount = selectedItems.length;
+    const denyEligibleCount = selectedItems.filter(isPendingItemDenyEligible).length;
+    const approvalsAllowed = canApprovePendingItems();
+    const enabledReasons = getEnabledDenyReasons();
+    const approvalFlairChoices = getConfiguredApprovalFlairChoices();
+    const approvalFlairRequired = shouldBatchApprovalAskForFlair(approvalFlairChoices);
+    const showBatchToolbar = selectedCount >= 2;
+    if (!showBatchToolbar) {
+      batchApprovalOptionsExpanded = false;
+      batchDenyOptionsExpanded = false;
+    } else if (!approvalFlairRequired) {
+      batchApprovalOptionsExpanded = false;
+    }
+
+    if (batchReviewToolbar) {
+      batchReviewToolbar.classList.toggle('hidden', !showBatchToolbar);
+      batchReviewToolbar.classList.toggle('batch-approve-expanded', batchApprovalOptionsExpanded);
+      batchReviewToolbar.classList.toggle('batch-deny-expanded', batchDenyOptionsExpanded);
+    }
+    document.body.classList.toggle('batch-review-floating-active', showBatchToolbar);
+    document.body.classList.toggle('batch-review-approve-expanded', showBatchToolbar && batchApprovalOptionsExpanded);
+    document.body.classList.toggle('batch-review-deny-expanded', showBatchToolbar && batchDenyOptionsExpanded);
+    if (batchSelectedCount) {
+      batchSelectedCount.textContent = `${selectedCount} selected`;
+    }
+    if (batchApprovalFlairWrap && batchApprovalFlairSelect) {
+      batchApprovalFlairWrap.classList.toggle('hidden', !approvalFlairRequired);
+      if (approvalFlairRequired) {
+        const selected = replaceSelectOptions(
+          batchApprovalFlairSelect,
+          approvalFlairChoices.map((choice) => ({ value: choice.templateId, label: choice.label })),
+          ''
+        );
+        if (batchApprovalFlairDraft && approvalFlairChoices.some((choice) => choice.templateId === batchApprovalFlairDraft)) {
+          batchApprovalFlairSelect.value = batchApprovalFlairDraft;
+        } else if (!selected && approvalFlairChoices[0]) {
+          batchApprovalFlairSelect.value = approvalFlairChoices[0].templateId;
+          batchApprovalFlairDraft = batchApprovalFlairSelect.value;
+        }
+      }
+    }
+
+    if (batchDenyReasonSelect) {
+      replaceSelectOptions(
+        batchDenyReasonSelect,
+        enabledReasons.map((reason) => ({ value: reason.id, label: reason.label })),
+        enabledReasons.length ? '-- Select denial reason --' : '-- No denial reasons configured --'
+      );
+      if (batchDenyReasonDraft && enabledReasons.some((reason) => reason.id === batchDenyReasonDraft)) {
+        batchDenyReasonSelect.value = batchDenyReasonDraft;
+      } else {
+        batchDenyReasonSelect.value = '';
+        batchDenyReasonDraft = '';
+      }
+      batchDenyReasonSelect.disabled = enabledReasons.length === 0;
+    }
+    if (batchDenyNotesInput && batchDenyNotesInput.value !== batchDenyNotesDraft) {
+      batchDenyNotesInput.value = batchDenyNotesDraft;
+    }
+
+    if (batchApproveBtn) {
+      batchApproveBtn.disabled = batchDenyOptionsExpanded
+        ? false
+        : selectedCount < 2 || !approvalsAllowed || (batchApprovalOptionsExpanded && approvalFlairRequired && !batchApprovalFlairDraft);
+      batchApproveBtn.title = !batchDenyOptionsExpanded && !approvalsAllowed ? buildApproveBlockedMessage() : '';
+      batchApproveBtn.textContent = batchDenyOptionsExpanded ? 'Back' : batchApprovalOptionsExpanded ? 'Confirm approval' : 'Approve';
+      batchApproveBtn.classList.toggle('btn-success', !batchDenyOptionsExpanded);
+      batchApproveBtn.classList.toggle('btn-secondary', batchDenyOptionsExpanded);
+    }
+    if (batchDenyBtn) {
+      batchDenyBtn.disabled = batchApprovalOptionsExpanded
+        ? false
+        : denyEligibleCount < 2 || enabledReasons.length === 0 || (batchDenyOptionsExpanded && !batchDenyReasonDraft);
+      batchDenyBtn.textContent = batchApprovalOptionsExpanded ? 'Back' : batchDenyOptionsExpanded ? 'Confirm denial' : 'Deny';
+      batchDenyBtn.title =
+        !batchApprovalOptionsExpanded && selectedCount >= 2 && denyEligibleCount < 2
+          ? 'Select at least two non-reopened requests to deny in batch.'
+          : '';
+      batchDenyBtn.classList.toggle('btn-danger', !batchApprovalOptionsExpanded);
+      batchDenyBtn.classList.toggle('btn-secondary', batchApprovalOptionsExpanded);
+    }
+    syncPendingSelectionCheckboxes();
+  }
+
+  function togglePendingSelection(verificationId, selected) {
+    const id = String(verificationId || '').trim();
+    if (!id) {
+      return;
+    }
+    if (selected) {
+      if (selectedPendingIds.size >= MAX_BATCH_REVIEW_ITEMS && !selectedPendingIds.has(id)) {
+        showToast(`Batch actions are limited to ${MAX_BATCH_REVIEW_ITEMS} requests.`, 'error');
+        syncPendingSelectionCheckboxes();
+        return;
+      }
+      selectedPendingIds.add(id);
+    } else {
+      selectedPendingIds.delete(id);
+    }
+    syncBatchToolbarState();
+  }
+
   function createPendingAgeBadge(submittedAt) {
     const ageHours = getPendingAgeHours(submittedAt);
     if (ageHours === null) {
@@ -2269,14 +2491,31 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     const isReReview = Boolean(item.parentVerificationId);
     const isResubmission = Boolean(item.isResubmission);
 
-    const viewerUsername = normalizeUsernameForCompare(state ? state.viewerUsername : '');
     const claimedByNormalized = normalizeUsernameForCompare(item.claimedBy);
     const isClaimed = Boolean(claimedByNormalized);
-    const isClaimedByOther = isClaimed && (!viewerUsername || claimedByNormalized !== viewerUsername);
+    const isClaimedByOther = isPendingItemClaimedByOther(item);
 
     const titleRow = document.createElement('div');
     titleRow.className = 'pending-title-row';
-    titleRow.appendChild(createPendingTitlePrimary(item));
+    const titleLeft = document.createElement('div');
+    titleLeft.className = 'pending-title-left';
+    if (!isClaimedByOther) {
+      const selectLabel = document.createElement('label');
+      selectLabel.className = 'pending-select-toggle';
+      const selectCheckbox = document.createElement('input');
+      selectCheckbox.type = 'checkbox';
+      selectCheckbox.value = String(item.id || '');
+      selectCheckbox.dataset.role = 'pending-select';
+      selectCheckbox.checked = selectedPendingIds.has(String(item.id || ''));
+      selectCheckbox.setAttribute('aria-label', `Select u/${item.username} for batch review`);
+      selectCheckbox.addEventListener('change', () => {
+        togglePendingSelection(item.id, selectCheckbox.checked);
+      });
+      selectLabel.appendChild(selectCheckbox);
+      titleLeft.appendChild(selectLabel);
+    }
+    titleLeft.appendChild(createPendingTitlePrimary(item));
+    titleRow.appendChild(titleLeft);
     const badgeRow = document.createElement('div');
     badgeRow.className = 'pending-badge-row';
     const accountDetails = normalizePendingAccountDetails(item);
@@ -2547,16 +2786,19 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     updatePendingSlaButtonStyles();
     setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
+    pruneSelectedPendingIds();
     const hasPendingItems = Boolean(state && Array.isArray(state.pending) && state.pending.length > 0);
     if (pendingLayout) {
       pendingLayout.dataset.mobilePriority = hasPendingItems ? 'list' : 'filters';
     }
     if (!hasPendingItems) {
+      syncBatchToolbarState();
       renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
       return;
     }
 
-    const filtered = state.pending.filter(matchesPendingFilters).sort((left, right) => getPendingSortScore(left) - getPendingSortScore(right));
+    const filtered = getFilteredPendingItems();
+    syncBatchToolbarState();
     if (filtered.length === 0) {
       renderEmptyState(pendingList, 'No matching requests', 'Try adjusting the username filter or queue age range.');
       return;
@@ -2565,6 +2807,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     for (const item of filtered) {
       pendingList.appendChild(buildPendingCard(item));
     }
+    syncPendingSelectionCheckboxes();
   }
 
   function renderBlocked() {
@@ -4365,6 +4608,84 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
   }
 
+  function submitBatchApproval() {
+    if (batchDenyOptionsExpanded) {
+      batchDenyOptionsExpanded = false;
+      syncBatchToolbarState();
+      return;
+    }
+    const selectedItems = getSelectedPendingItems();
+    if (selectedItems.length < 2) {
+      showToast('Select at least two requests to approve in batch.', 'error');
+      return;
+    }
+    if (!canApprovePendingItems()) {
+      showToast(buildApproveBlockedMessage(), 'error');
+      return;
+    }
+    const approvalFlairChoices = getConfiguredApprovalFlairChoices();
+    const approvalFlairRequired = shouldBatchApprovalAskForFlair(approvalFlairChoices);
+    if (approvalFlairRequired && !batchApprovalOptionsExpanded) {
+      batchApprovalOptionsExpanded = true;
+      batchDenyOptionsExpanded = false;
+      syncBatchToolbarState();
+      if (batchApprovalFlairSelect) {
+        window.setTimeout(() => batchApprovalFlairSelect.focus(), 0);
+      }
+      return;
+    }
+    const selectedFlairTemplateId = approvalFlairRequired
+      ? batchApprovalFlairDraft || (batchApprovalFlairSelect ? batchApprovalFlairSelect.value : '') || approvalFlairChoices[0]?.templateId || ''
+      : '';
+    if (approvalFlairRequired && !selectedFlairTemplateId) {
+      showToast('Select an approval flair before approving selected requests.', 'error');
+      return;
+    }
+    postWithBusy({
+      type: 'batchReview',
+      action: 'approve',
+      verificationIds: selectedItems.map((item) => item.id),
+      selectedFlairTemplateId,
+    });
+  }
+
+  function submitBatchDenial() {
+    if (batchApprovalOptionsExpanded) {
+      batchApprovalOptionsExpanded = false;
+      syncBatchToolbarState();
+      return;
+    }
+    const selectedItems = getSelectedPendingItems().filter(isPendingItemDenyEligible);
+    if (selectedItems.length < 2) {
+      showToast('Select at least two non-reopened requests to deny in batch.', 'error');
+      return;
+    }
+    if (!getEnabledDenyReasons().length) {
+      showToast('No denial reasons are enabled in install settings.', 'error');
+      return;
+    }
+    if (!batchDenyOptionsExpanded) {
+      batchApprovalOptionsExpanded = false;
+      batchDenyOptionsExpanded = true;
+      syncBatchToolbarState();
+      if (batchDenyReasonSelect) {
+        window.setTimeout(() => batchDenyReasonSelect.focus(), 0);
+      }
+      return;
+    }
+    if (!batchDenyReasonDraft) {
+      showToast('Select a denial reason before denying selected requests.', 'error');
+      return;
+    }
+    postWithBusy({
+      type: 'batchReview',
+      action: 'deny',
+      verificationIds: selectedItems.map((item) => item.id),
+      reason: batchDenyReasonDraft,
+      moderatorNotes: batchDenyNotesDraft,
+    });
+  }
+
   if (bugReportLink) {
     bugReportLink.addEventListener('click', (event) => {
       event.preventDefault();
@@ -4412,6 +4733,34 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         renderPending();
       });
     }
+  }
+
+  if (batchApprovalFlairSelect) {
+    batchApprovalFlairSelect.addEventListener('change', () => {
+      batchApprovalFlairDraft = batchApprovalFlairSelect.value;
+      syncBatchToolbarState();
+    });
+  }
+
+  if (batchApproveBtn) {
+    batchApproveBtn.addEventListener('click', submitBatchApproval);
+  }
+
+  if (batchDenyReasonSelect) {
+    batchDenyReasonSelect.addEventListener('change', () => {
+      batchDenyReasonDraft = batchDenyReasonSelect.value;
+      syncBatchToolbarState();
+    });
+  }
+
+  if (batchDenyNotesInput) {
+    batchDenyNotesInput.addEventListener('input', () => {
+      batchDenyNotesDraft = batchDenyNotesInput.value;
+    });
+  }
+
+  if (batchDenyBtn) {
+    batchDenyBtn.addEventListener('click', submitBatchDenial);
   }
 
   if (historyViewButtons.length) {
