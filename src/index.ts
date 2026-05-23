@@ -4,7 +4,9 @@ import { context, createServer, getServerPort, realtime, reddit, redis, schedule
 
 import {
   assertCanReview,
+  batchReviewVerifications,
   blockUserForModerator,
+  buildBatchReviewToast,
   buildModeratorUpdateNotice,
   buildSubmitVerificationForm,
   cancelReopenedVerification,
@@ -622,6 +624,40 @@ app.post('/api/mod/deny', async (req, res) => {
         type: 'removePending',
         verificationId,
       },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/batch-review', async (req, res) => {
+  try {
+    const action = String(req.body?.action ?? '').trim();
+    const appContext = currentContext();
+    if (action !== 'approve' && action !== 'deny') {
+      throw httpError(400, 'Select a valid batch action.');
+    }
+    const reason = action === 'deny' ? parseDenyReason(String(req.body?.reason ?? '').trim()) : null;
+    if (action === 'deny' && !reason) {
+      throw httpError(400, 'Select a valid denial reason.');
+    }
+    const result = await batchReviewVerifications(appContext, {
+      action,
+      verificationIds: req.body?.verificationIds,
+      selectedFlairTemplateId: String(req.body?.selectedFlairTemplateId ?? '').trim(),
+      reason,
+      moderatorNotes: String(req.body?.moderatorNotes ?? '').trim(),
+    });
+    const mutation =
+      result.terminalVerificationIds.length > 0
+        ? {
+            type: 'removePendingMany',
+            verificationIds: result.terminalVerificationIds,
+          }
+        : undefined;
+    sendFastModRefreshResponse(res, appContext, buildBatchReviewToast(result), {
+      batchReview: result,
+      ...(mutation ? { mutation } : {}),
     });
   } catch (error) {
     sendError(res, error);
