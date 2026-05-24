@@ -129,70 +129,75 @@ function createShell(root, inline) {
             <div data-el="action-row" class="row hub-action-dock"></div>
           </section>
 
-          <section data-el="developer-panel" class="hub-developer hidden">
-            <div class="hub-developer-copy">
-              <p class="hub-kicker">Developer Tools</p>
-              <h2>Global blocklist</h2>
-              <p class="meta">
-                This editor is read-only for app settings. Add or remove usernames here, then copy the updated value into the Devvit CLI.
-              </p>
-            </div>
-            <div class="hub-developer-stack">
-              <div>
-                <p class="hub-developer-label">Currently blocked</p>
-                <div data-el="developer-current-list" class="hub-developer-list"></div>
-                <p data-el="developer-empty" class="meta hidden">No usernames are currently blocked app-wide.</p>
+          <details data-el="developer-panel" class="hub-developer hidden">
+            <summary class="hub-developer-summary">
+              <span class="hub-kicker">Developer Tools</span>
+              <span class="hub-developer-summary-icon" aria-hidden="true"></span>
+            </summary>
+            <section class="hub-developer-content">
+              <div class="hub-developer-copy">
+                <h2>Global blocklist</h2>
+                <p class="meta">
+                  This editor is read-only for app settings. Add or remove usernames here, then copy the updated value into the Devvit CLI.
+                </p>
               </div>
-              <div>
-                <p class="hub-developer-label">Add one username</p>
-                <div class="hub-developer-input-row">
-                  <input
-                    data-el="developer-add-input"
-                    class="hub-developer-input"
-                    type="text"
-                    placeholder="u/example_user"
-                    autocomplete="off"
+              <div class="hub-developer-stack">
+                <div>
+                  <p class="hub-developer-label">Currently blocked</p>
+                  <div data-el="developer-current-list" class="hub-developer-list"></div>
+                  <p data-el="developer-empty" class="meta hidden">No usernames are currently blocked app-wide.</p>
+                </div>
+                <div>
+                  <p class="hub-developer-label">Add one username</p>
+                  <div class="hub-developer-input-row">
+                    <input
+                      data-el="developer-add-input"
+                      class="hub-developer-input"
+                      type="text"
+                      placeholder="u/example_user"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button data-el="developer-add-btn" class="btn-secondary" type="button">Add</button>
+                  </div>
+                </div>
+                <div>
+                  <p class="hub-developer-label">Add multiple usernames</p>
+                  <textarea
+                    data-el="developer-bulk-input"
+                    class="hub-developer-textarea"
+                    rows="4"
+                    placeholder="u/test_user1&#10;test_user2, test_user3"
                     spellcheck="false"
-                  />
-                  <button data-el="developer-add-btn" class="btn-secondary" type="button">Add</button>
+                  ></textarea>
+                  <div class="row">
+                    <button data-el="developer-bulk-btn" class="btn-secondary" type="button">Add Pasted List</button>
+                    <button data-el="developer-reset-btn" class="btn-secondary" type="button">Reset to Current</button>
+                  </div>
+                </div>
+                <div data-el="developer-invalid" class="hub-developer-warning hidden"></div>
+                <p data-el="developer-draft-status" class="hub-developer-status"></p>
+                <div>
+                  <p class="hub-developer-label">Commands to paste into Devvit CLI</p>
+                  <textarea
+                    data-el="developer-canonical-output"
+                    class="hub-developer-textarea hub-developer-output"
+                    rows="10"
+                    readonly
+                  ></textarea>
+                  <div class="row">
+                    <button data-el="developer-copy-btn" class="btn-primary" type="button">Copy Terminal Commands</button>
+                  </div>
+                </div>
+                <div class="hub-developer-instructions">
+                  <p class="hub-developer-label">Apply the change</p>
+                  <p class="meta">1. Paste the copied commands into your terminal.</p>
+                  <p class="meta">2. The populated blocklist chunks are updated first, and the final line updates the active chunk count.</p>
+                  <p class="meta">3. Refresh the app to confirm the updated list.</p>
                 </div>
               </div>
-              <div>
-                <p class="hub-developer-label">Add multiple usernames</p>
-                <textarea
-                  data-el="developer-bulk-input"
-                  class="hub-developer-textarea"
-                  rows="4"
-                  placeholder="u/test_user1&#10;test_user2, test_user3"
-                  spellcheck="false"
-                ></textarea>
-                <div class="row">
-                  <button data-el="developer-bulk-btn" class="btn-secondary" type="button">Add Pasted List</button>
-                  <button data-el="developer-reset-btn" class="btn-secondary" type="button">Reset to Current</button>
-                </div>
-              </div>
-              <div data-el="developer-invalid" class="hub-developer-warning hidden"></div>
-              <p data-el="developer-draft-status" class="hub-developer-status"></p>
-              <div>
-                <p class="hub-developer-label">Commands to paste into Devvit CLI</p>
-                <textarea
-                  data-el="developer-canonical-output"
-                  class="hub-developer-textarea hub-developer-output"
-                  rows="10"
-                  readonly
-                ></textarea>
-                <div class="row">
-                  <button data-el="developer-copy-btn" class="btn-primary" type="button">Copy Terminal Commands</button>
-                </div>
-              </div>
-              <div class="hub-developer-instructions">
-                <p class="hub-developer-label">Apply the change</p>
-                <p class="meta">1. Paste the copied commands into your terminal.</p>
-                <p class="meta">2. The populated blocklist chunks are updated first, and the final line updates the active chunk count.</p>
-                <p class="meta">3. Refresh the app to confirm the updated list.</p>
-              </div>
-            </div>
-          </section>
+            </section>
+          </details>
 
           <footer data-el="legal-links" class="legal-links hidden"></footer>
         </section>
@@ -527,6 +532,14 @@ function renderMarkdown(value) {
       closeList();
       const level = Math.min(6, headingMatch[1].length + 2);
       html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      closeList();
+      html.push(`<blockquote><p>${renderInlineMarkdown(quoteMatch[1])}</p></blockquote>`);
       continue;
     }
 
@@ -928,19 +941,17 @@ export function mountHub(options = {}) {
     if (!refs.photoInstructionsBody || !refs.photoInstructionsScrollShell) {
       return;
     }
-    if (shouldUseAndroidPhotoInstructionsStep()) {
-      refs.photoInstructionsScrollShell.dataset.scrollOverflow = 'false';
-      refs.photoInstructionsScrollShell.dataset.scrollBottom = 'true';
-      if (refs.photoInstructionsScrollHint) {
-        refs.photoInstructionsScrollHint.classList.add('hidden');
-      }
+    const scrollTarget = shouldUseAndroidPhotoInstructionsStep()
+      ? refs.photoInstructionsModal
+      : refs.photoInstructionsBody;
+    if (!scrollTarget) {
       return;
     }
-    const overflow = refs.photoInstructionsBody.scrollHeight - refs.photoInstructionsBody.clientHeight > 8;
+    const overflow = scrollTarget.scrollHeight - scrollTarget.clientHeight > 8;
     const atBottom =
-      refs.photoInstructionsBody.scrollTop + refs.photoInstructionsBody.clientHeight >=
-      refs.photoInstructionsBody.scrollHeight - 6;
-    const nearTop = refs.photoInstructionsBody.scrollTop <= 10;
+      scrollTarget.scrollTop + scrollTarget.clientHeight >=
+      scrollTarget.scrollHeight - 6;
+    const nearTop = scrollTarget.scrollTop <= 10;
     refs.photoInstructionsScrollShell.dataset.scrollOverflow = overflow ? 'true' : 'false';
     refs.photoInstructionsScrollShell.dataset.scrollBottom = atBottom ? 'true' : 'false';
     if (refs.photoInstructionsScrollHint) {
@@ -989,6 +1000,12 @@ export function mountHub(options = {}) {
 
   if (refs.photoInstructionsBody) {
     refs.photoInstructionsBody.addEventListener('scroll', () => {
+      updatePhotoInstructionsScrollAffordance();
+    });
+  }
+
+  if (refs.photoInstructionsModal) {
+    refs.photoInstructionsModal.addEventListener('scroll', () => {
       updatePhotoInstructionsScrollAffordance();
     });
   }

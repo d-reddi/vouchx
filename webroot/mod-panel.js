@@ -216,6 +216,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const approveBannedModal = document.getElementById('approve-banned-modal');
   const approveBannedCancelBtn = document.getElementById('approve-banned-cancel-btn');
   const approveBannedConfirmBtn = document.getElementById('approve-banned-confirm-btn');
+  const textareaLinkModal = document.getElementById('textarea-link-modal');
+  const textareaLinkTextInput = document.getElementById('textarea-link-text');
+  const textareaLinkUrlInput = document.getElementById('textarea-link-url');
+  const textareaLinkCancelBtn = document.getElementById('textarea-link-cancel-btn');
+  const textareaLinkInsertBtn = document.getElementById('textarea-link-insert-btn');
   const bugReportLink = document.getElementById('bug-report-link');
   const externalNavigationLinks = Array.from(document.querySelectorAll('[data-open-external-url]'));
 
@@ -223,10 +228,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     'bold',
     'italic',
     'link',
-    'code',
+    'quote',
     'caps',
-    'heading',
-    'line-break',
+    'heading-1',
+    'heading-2',
+    'heading-3',
     'bullet-list',
     'numbered-list',
   ];
@@ -244,14 +250,22 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const REMOVAL_TEXTAREA_PLACEHOLDERS = [...APPROVAL_TEXTAREA_PLACEHOLDERS, '{{reason}}'];
   const TEXTAREA_HELPER_ACTION_LABELS = {
     bold: { label: 'B', ariaLabel: 'Insert bold Markdown', title: 'Bold' },
-    italic: { label: 'I', ariaLabel: 'Insert italic Markdown', title: 'Italic', className: 'textarea-helper-btn-italic' },
+    italic: { label: 'i', ariaLabel: 'Insert italic Markdown', title: 'Italic', className: 'textarea-helper-btn-italic' },
     link: { label: 'Link', ariaLabel: 'Insert Markdown link', title: 'Link' },
-    code: { label: 'Code', ariaLabel: 'Insert inline code Markdown', title: 'Inline code' },
+    quote: { label: 'Quote', ariaLabel: 'Insert quote Markdown', title: 'Quote' },
     caps: { label: 'Caps', ariaLabel: 'Convert selected text to uppercase', title: 'Uppercase selected text' },
-    heading: { label: 'H2', ariaLabel: 'Insert heading Markdown', title: 'Heading' },
-    'line-break': { label: 'Break', ariaLabel: 'Insert paragraph break', title: 'Line break' },
+    'heading-1': { label: 'H1', ariaLabel: 'Insert H1 Markdown heading', title: 'Heading 1' },
+    'heading-2': { label: 'H2', ariaLabel: 'Insert H2 Markdown heading', title: 'Heading 2' },
+    'heading-3': { label: 'H3', ariaLabel: 'Insert H3 Markdown heading', title: 'Heading 3' },
     'bullet-list': { label: 'List', ariaLabel: 'Insert bullet list Markdown', title: 'Bullet list' },
     'numbered-list': { label: '1. List', ariaLabel: 'Insert numbered list Markdown', title: 'Numbered list' },
+  };
+  const TEXTAREA_HELPER_TIP =
+    'Press a button to insert formatting. To format text that is already there, select the text first, then press the button.';
+  const TEXTAREA_HEADING_MARKERS = {
+    'heading-1': '#',
+    'heading-2': '##',
+    'heading-3': '###',
   };
   const TEXTAREA_HELPER_CONFIGS = {
     'photo-instructions': {
@@ -311,6 +325,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     },
   };
   const textareaHelperSelections = new WeakMap();
+  let textareaLinkTarget = null;
 
   let state = null;
   let stateInitialized = false;
@@ -494,6 +509,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return select;
   }
 
+  function createTextareaHelperTip() {
+    const tip = document.createElement('span');
+    tip.className = 'textarea-helper-tip';
+    tip.tabIndex = 0;
+    tip.dataset.tooltip = TEXTAREA_HELPER_TIP;
+    tip.setAttribute('aria-label', TEXTAREA_HELPER_TIP);
+    tip.title = TEXTAREA_HELPER_TIP;
+    tip.textContent = '?';
+    return tip;
+  }
+
   function renderTextareaHelperToolbar(toolbar, config) {
     toolbar.textContent = '';
     for (const action of config.actions) {
@@ -502,6 +528,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         toolbar.appendChild(button);
       }
     }
+    toolbar.appendChild(createTextareaHelperTip());
     if (config.placeholders.length) {
       toolbar.appendChild(createTextareaPlaceholderSelect(config));
     }
@@ -580,18 +607,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return range;
   }
 
-  function replaceTextareaSelection(textarea, replacement, selectionStartOffset, selectionEndOffset) {
+  function replaceTextareaRange(textarea, start, end, replacement, selectionStartOffset, selectionEndOffset) {
     const value = String(textarea.value || '');
     const scrollState = captureTextareaScrollState(textarea);
-    const range = getTextareaSelectionRange(textarea);
-    const start = Math.min(range.start, range.end);
-    const end = Math.max(range.start, range.end);
-    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+    const boundedStart = Math.max(0, Math.min(start, value.length));
+    const boundedEnd = Math.max(boundedStart, Math.min(end, value.length));
+    const nextValue = `${value.slice(0, boundedStart)}${replacement}${value.slice(boundedEnd)}`;
     textarea.value = nextValue;
     textarea.focus();
 
-    const cursorStart = start + selectionStartOffset;
-    const cursorEnd = start + selectionEndOffset;
+    const cursorStart = boundedStart + selectionStartOffset;
+    const cursorEnd = boundedStart + selectionEndOffset;
     try {
       textarea.setSelectionRange(cursorStart, cursorEnd);
     } catch {
@@ -603,6 +629,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
     rememberTextareaSelection(textarea);
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function replaceTextareaSelection(textarea, replacement, selectionStartOffset, selectionEndOffset) {
+    const range = getTextareaSelectionRange(textarea);
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    replaceTextareaRange(textarea, start, end, replacement, selectionStartOffset, selectionEndOffset);
   }
 
   function wrapTextareaSelection(textarea, prefix, suffix, fallbackText) {
@@ -668,13 +701,119 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     replaceTextareaSelection(textarea, bounded.text, selectStart, selectEnd);
   }
 
-  function insertTextareaLineBreak(textarea) {
+  function insertTextareaQuote(textarea) {
+    insertTextareaLinePrefix(textarea, '> ', 'Quote', (line) => (
+      line.startsWith('>') ? line : `> ${line}`
+    ));
+  }
+
+  function insertTextareaLinePrefix(textarea, prefix, fallbackText, formatLine) {
     const value = String(textarea.value || '');
+    if (!value) {
+      const replacement = `${prefix}${fallbackText}`;
+      replaceTextareaSelection(textarea, replacement, prefix.length, replacement.length);
+      return;
+    }
+
     const range = getTextareaSelectionRange(textarea);
-    const start = Math.min(range.start, range.end);
-    const before = value.slice(0, start);
-    const breakText = before && !before.endsWith('\n') ? '\n\n' : '\n';
-    replaceTextareaSelection(textarea, breakText, breakText.length, breakText.length);
+    const selectionStart = Math.min(range.start, range.end);
+    const selectionEnd = Math.max(range.start, range.end);
+    const startLineSearchIndex = Math.max(0, selectionStart - 1);
+    const lineStart = value.lastIndexOf('\n', startLineSearchIndex) + 1;
+    const endLineSearchIndex = selectionEnd > selectionStart
+      ? Math.max(selectionStart, selectionEnd - 1)
+      : selectionEnd;
+    const nextLineBreakIndex = value.indexOf('\n', endLineSearchIndex);
+    const lineEnd = nextLineBreakIndex === -1 ? value.length : nextLineBreakIndex;
+    const selectedLines = value.slice(lineStart, lineEnd);
+    const nextLines = selectedLines
+      ? selectedLines
+        .split('\n')
+        .map((line) => (line ? formatLine(line) : line))
+        .join('\n')
+      : `${prefix}${fallbackText}`;
+    const firstLine = selectedLines.split('\n')[0] || '';
+    const formattedFirstLine = firstLine ? formatLine(firstLine) : `${prefix}${fallbackText}`;
+    const prefixOffset = Math.max(0, formattedFirstLine.length - firstLine.length);
+    const hasSelection = selectionEnd > selectionStart;
+    const cursorOffset = selectedLines
+      ? (hasSelection ? nextLines.length : selectionStart - lineStart + prefixOffset)
+      : prefix.length;
+    const selectionEndOffset = selectedLines ? cursorOffset : nextLines.length;
+    replaceTextareaRange(textarea, lineStart, lineEnd, nextLines, cursorOffset, selectionEndOffset);
+  }
+
+  function insertTextareaHeading(textarea, marker) {
+    insertTextareaLinePrefix(textarea, `${marker} `, 'Heading', (line) => {
+      const unheadedLine = line.replace(/^#{1,3}\s+/, '');
+      return `${marker} ${unheadedLine}`;
+    });
+  }
+
+  function normalizeTextareaLinkUrl(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) {
+      return '';
+    }
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const parsed = new URL(candidate);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function openTextareaLinkDialog(textarea) {
+    if (
+      !textareaLinkModal ||
+      !textareaLinkTextInput ||
+      !textareaLinkUrlInput ||
+      !textareaLinkInsertBtn
+    ) {
+      const selectedText = selectedTextareaText(textarea);
+      const label = selectedText || 'text';
+      const replacement = `[${label}](https://example.com)`;
+      replaceTextareaSelection(textarea, replacement, replacement.length, replacement.length);
+      return;
+    }
+    textareaLinkTarget = textarea;
+    const selectedText = selectedTextareaText(textarea).replace(/\s+/g, ' ').trim();
+    textareaLinkTextInput.value = selectedText;
+    textareaLinkUrlInput.value = '';
+    textareaLinkModal.classList.remove('hidden');
+    window.requestAnimationFrame(() => {
+      (selectedText ? textareaLinkUrlInput : textareaLinkTextInput).focus();
+    });
+  }
+
+  function closeTextareaLinkDialog() {
+    if (textareaLinkModal) {
+      textareaLinkModal.classList.add('hidden');
+    }
+    textareaLinkTarget = null;
+  }
+
+  function insertTextareaLinkFromDialog() {
+    if (!textareaLinkTarget || !textareaLinkTextInput || !textareaLinkUrlInput) {
+      closeTextareaLinkDialog();
+      return;
+    }
+    const label = String(textareaLinkTextInput.value || '').trim();
+    const url = normalizeTextareaLinkUrl(textareaLinkUrlInput.value);
+    if (!label) {
+      showToast('Enter link text before inserting the link.', 'error');
+      textareaLinkTextInput.focus();
+      return;
+    }
+    if (!url) {
+      showToast('Enter a valid http or https URL.', 'error');
+      textareaLinkUrlInput.focus();
+      return;
+    }
+    const replacement = `[${label.replaceAll('[', '\\[').replaceAll(']', '\\]')}](${url})`;
+    replaceTextareaSelection(textareaLinkTarget, replacement, replacement.length, replacement.length);
+    closeTextareaLinkDialog();
   }
 
   function insertTextareaHelperAction(textarea, action) {
@@ -686,8 +825,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       wrapTextareaSelection(textarea, '*', '*', 'text');
       return;
     }
-    if (action === 'code') {
-      wrapTextareaSelection(textarea, '`', '`', 'text');
+    if (action === 'quote') {
+      insertTextareaQuote(textarea);
       return;
     }
     if (action === 'caps') {
@@ -706,25 +845,11 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       return;
     }
     if (action === 'link') {
-      const selectedText = selectedTextareaText(textarea);
-      const label = selectedText || 'text';
-      const replacement = `[${label}](https://example.com)`;
-      const labelStart = 1;
-      const labelEnd = 1 + label.length;
-      replaceTextareaSelection(
-        textarea,
-        replacement,
-        selectedText ? replacement.length : labelStart,
-        selectedText ? replacement.length : labelEnd
-      );
+      openTextareaLinkDialog(textarea);
       return;
     }
-    if (action === 'heading') {
-      insertTextareaBlock(textarea, 'Heading', (line) => `## ${line}`);
-      return;
-    }
-    if (action === 'line-break') {
-      insertTextareaLineBreak(textarea);
+    if (action === 'heading-1' || action === 'heading-2' || action === 'heading-3') {
+      insertTextareaHeading(textarea, TEXTAREA_HEADING_MARKERS[action]);
       return;
     }
     if (action === 'bullet-list') {
@@ -5674,6 +5799,33 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       }
     });
   }
+  if (textareaLinkCancelBtn) {
+    textareaLinkCancelBtn.addEventListener('click', closeTextareaLinkDialog);
+  }
+  if (textareaLinkInsertBtn) {
+    textareaLinkInsertBtn.addEventListener('click', insertTextareaLinkFromDialog);
+  }
+  if (textareaLinkModal) {
+    textareaLinkModal.addEventListener('click', (event) => {
+      if (event.target === textareaLinkModal) {
+        closeTextareaLinkDialog();
+      }
+    });
+  }
+  [textareaLinkTextInput, textareaLinkUrlInput].forEach((input) => {
+    if (!input) {
+      return;
+    }
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        insertTextareaLinkFromDialog();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeTextareaLinkDialog();
+      }
+    });
+  });
 
   for (const btn of settingsTabButtons) {
     btn.addEventListener('click', () => {
