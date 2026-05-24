@@ -486,6 +486,57 @@ button:not(:disabled):hover {
   z-index: 1;
 }
 
+.hub-developer-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 78%, var(--bg) 22%);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.hub-developer-summary::-webkit-details-marker {
+  display: none;
+}
+
+.hub-developer-summary:hover,
+.hub-developer-summary:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--line) 68%);
+}
+
+.hub-developer-summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 42%, transparent);
+  outline-offset: 3px;
+}
+
+.hub-developer-summary .hub-kicker {
+  margin: 0;
+}
+
+.hub-developer-summary-icon {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  color: color-mix(in srgb, var(--muted) 74%, var(--text) 26%);
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.hub-developer[open] .hub-developer-summary-icon {
+  transform: rotate(225deg);
+}
+
+.hub-developer-content {
+  margin-top: 14px;
+}
+
 .hub-developer-copy {
   display: flex;
   flex-direction: column;
@@ -770,9 +821,13 @@ button:not(:disabled):hover {
 }
 
 [data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell::before,
-[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell::after,
-[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-hint {
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-shell::after {
   display: none;
+}
+
+[data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-scroll-hint {
+  position: fixed;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
 }
 
 [data-el="photo-instructions-modal"].hub-photo-instructions-step .hub-modal-copy {
@@ -894,10 +949,15 @@ button:not(:disabled):hover {
 
 .hub-scroll-hint {
   position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   left: 50%;
   bottom: 6px;
   z-index: 2;
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 48px);
   padding: 5px 10px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--primary) 44%, var(--line) 56%);
@@ -905,8 +965,11 @@ button:not(:disabled):hover {
   color: color-mix(in srgb, var(--primary) 78%, var(--text) 22%);
   font-size: 0.74rem;
   font-weight: 800;
+  line-height: 1.25;
   letter-spacing: 0.1em;
+  text-align: center;
   text-transform: uppercase;
+  white-space: nowrap;
   pointer-events: none;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--card) 84%, transparent),
@@ -944,7 +1007,8 @@ button:not(:disabled):hover {
 
 .markdown-body p,
 .markdown-body ul,
-.markdown-body ol {
+.markdown-body ol,
+.markdown-body blockquote {
   margin: 0 0 12px;
 }
 
@@ -955,6 +1019,18 @@ button:not(:disabled):hover {
 
 .markdown-body li + li {
   margin-top: 6px;
+}
+
+.markdown-body blockquote {
+  padding: 8px 12px;
+  border-left: 3px solid color-mix(in srgb, var(--primary) 58%, var(--line) 42%);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: color-mix(in srgb, var(--text) 88%, var(--muted) 12%);
+}
+
+.markdown-body blockquote p {
+  margin: 0;
 }
 
 .markdown-body code {

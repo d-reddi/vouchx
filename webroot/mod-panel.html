@@ -525,9 +525,9 @@
                     <p><em>Italic:</em> <code>*text*</code></p>
                     <p><strong><em>Bold italic:</em></strong> <code>***text***</code></p>
                     <p><strong>Link:</strong> <code>[text](https://example.com)</code></p>
-                    <p><strong>Inline code:</strong> <code>`text`</code></p>
+                    <p><strong>Quote:</strong> <code>&gt; text</code></p>
                     <p><strong>Caps helper:</strong> converts selected text to uppercase. Selected placeholders become <code>{{caps:name}}</code>.</p>
-                    <p><strong>Heading:</strong> <code>## Heading</code></p>
+                    <p><strong>Headings:</strong> <code># Heading</code>, <code>## Heading</code>, <code>### Heading</code></p>
                     <p><strong>Line break:</strong> press Enter twice</p>
                     <p><strong>Bullet list:</strong><br><code>- Item</code><br><code>- Item</code></p>
                     <p><strong>Numbered list:</strong><br><code>1. Item</code><br><code>2. Item</code></p>
@@ -967,6 +967,24 @@
         <div class="row">
           <button id="approve-banned-cancel-btn" class="btn btn-secondary" type="button">No</button>
           <button id="approve-banned-confirm-btn" class="btn btn-primary" type="button">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="textarea-link-modal" class="dialog-modal hidden">
+      <div class="dialog-card">
+        <h3>Insert link</h3>
+        <div class="field-stack">
+          <label class="field-label" for="textarea-link-text">Link text</label>
+          <input id="textarea-link-text" class="field-input" type="text" placeholder="Link text" />
+        </div>
+        <div class="field-stack">
+          <label class="field-label" for="textarea-link-url">URL</label>
+          <input id="textarea-link-url" class="field-input" type="url" placeholder="https://example.com" />
+        </div>
+        <div class="row">
+          <button id="textarea-link-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
+          <button id="textarea-link-insert-btn" class="btn btn-primary" type="button">Insert Link</button>
         </div>
       </div>
     </div>
