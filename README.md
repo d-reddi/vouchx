@@ -127,7 +127,7 @@ Full changelog:
 #### Back-End / Technical Changes
 
 - Improved performance for flair and moderator lookups
-- Updated to Devvit 0.12.18
+- Updated to Devvit 0.12.24
 - Added global blocklist support
 - Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied
 
