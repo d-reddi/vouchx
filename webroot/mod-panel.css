@@ -59,7 +59,7 @@ body.mod-panel-page {
 }
 
 body.mod-panel-page.batch-review-floating-active {
-  padding-bottom: 112px;
+  padding-bottom: 64px;
 }
 
 body.mod-panel-page.batch-review-approve-expanded,
@@ -1132,6 +1132,11 @@ textarea {
   background: color-mix(in srgb, var(--panel-surface) 94%, black 6%);
   box-shadow: 0 18px 50px color-mix(in srgb, #000 30%, transparent);
   backdrop-filter: blur(16px);
+}
+
+.batch-review-toolbar:not(.batch-approve-expanded):not(.batch-deny-expanded) {
+  grid-template-columns: 1fr auto;
+  align-items: center;
 }
 
 .batch-review-toolbar .batch-approval-flair-wrap,
@@ -2323,6 +2328,26 @@ textarea {
 
   .team-stats-breakdown-item {
     padding: 12px 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  #pending-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+
+  #pending-list .item {
+    padding: 14px;
+    border-top: 0;
+    border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--panel-surface-soft) 88%, black 12%);
+  }
+
+  #pending-list .empty-state {
+    grid-column: 1 / -1;
   }
 }
 
