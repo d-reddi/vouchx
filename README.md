@@ -113,22 +113,16 @@ Full changelog:
 
 #### New Features
 
-- Photo Instructions now support multiple languages: English, Spanish, and French  
-  - Configured in **Mod Panel > Photo Instructions**
+- Photo Instructions now support multiple languages: English, Spanish, and French, Configured in **Mod Panel > Photo Instructions**
 - History & Audit records now include links to view submitted photos for approved verifications
 - Added batch queue actions for moderators
-- Added optional auto-archive support for pending-user modmail replies  
-  - Configurable in **Install Settings**
+- Added optional auto-archive support for pending-user modmail replies, Configurable in **Install Settings**
 - Added Markdown helper controls and placeholder insertion menus to:
   - Photo Instructions
+    - Added `{{username}}` placeholder to display the viewing user as `u/username`
+    - Added Android-specific “scroll down” pill message to help users find the full instructions
+    - Added “Caps” helper button to transform selected text to ALL CAPS
   - Modmail template inputs
-
-#### Photo Instructions Improvements
-
-- Added support for instruction-specific placeholders and Markdown helpers
-- Added `{{username}}` placeholder to display the viewing user as `u/username`
-- Added “Caps” helper button to transform selected text to ALL CAPS
-- Added Android-specific “scroll down” pill message to help users find the full instructions
 
 #### Back-End / Technical Changes
 
@@ -136,6 +130,8 @@ Full changelog:
 - Updated to Devvit 0.12.18
 - Added global blocklist support
 - Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied
+
+---
 
 ### v1.3.9
 
@@ -146,24 +142,3 @@ Updates/Performance Improvements:
 - Adding the Verification hub now auto pins the post
 - Additional Tooltips added for user guidence
 - Updated to devvit 0.12.17
-
----
-
-### v1.3.4
-
-- Multiple approval flairs (optional — enable in Install Settings)
-- Banned member indicator in the pending queue
-- Automatically unban users on approval (useful for previously banned applicants)
-- Option to block users directly on denial
-- Total subreddit karma added to the "Stats" popup
-- New Stats page with status totals and current verified user count
-- Tooltips added across settings and templates for better guidance
-- Initial Hub Create now pins app.
-- Fixed error when approving deleted or suspended users
-- Fixed potential moderator lookup issue affecting permissions
-- Improved Modmail handling reliability
-- Improved flair application and consistency
-- Improved mod panel refresh behavior
-- Improved contrast for the young account badge
-- Increased user retention to 90 days to allow time away before removal for verified records (privacy policy updated)
-- Backend: improved error handling and logging
