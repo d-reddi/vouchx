@@ -85,7 +85,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const auditSearchResults = document.getElementById('audit-search-results');
   const auditLoadMoreBtn = document.getElementById('audit-load-more-btn');
   const teamStatsRangeButtons = Array.from(document.querySelectorAll('.team-stats-range-btn'));
-  const teamStatsHelpPopovers = Array.from(document.querySelectorAll('.team-stats-help'));
+  const initialHelpPopovers = Array.from(document.querySelectorAll('.team-stats-help'));
   const teamStatsFeedback = document.getElementById('team-stats-feedback');
   const teamStatsCurrentlyVerified = document.getElementById('team-stats-currently-verified');
   const teamStatsApprovals = document.getElementById('team-stats-approvals');
@@ -236,7 +236,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     'bullet-list',
     'numbered-list',
   ];
-  const MODMAIL_TEXTAREA_ACTIONS = ['link'];
+  const MODMAIL_TEXTAREA_ACTIONS = [
+    'bold',
+    'italic',
+    'link',
+    'quote',
+    'heading-1',
+    'heading-2',
+    'heading-3',
+    'bullet-list',
+    'numbered-list',
+  ];
   const PHOTO_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{days}}', '{{today}}'];
   const PENDING_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{date submitted}}', '{{days}}'];
   const APPROVAL_TEXTAREA_PLACEHOLDERS = [
@@ -510,14 +520,26 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function createTextareaHelperTip() {
-    const tip = document.createElement('span');
-    tip.className = 'textarea-helper-tip';
-    tip.tabIndex = 0;
-    tip.dataset.tooltip = TEXTAREA_HELPER_TIP;
-    tip.setAttribute('aria-label', TEXTAREA_HELPER_TIP);
-    tip.title = TEXTAREA_HELPER_TIP;
-    tip.textContent = '?';
-    return tip;
+    const details = document.createElement('details');
+    details.className = 'team-stats-help textarea-helper-help';
+
+    const summary = document.createElement('summary');
+    summary.className = 'team-stats-help-button';
+    summary.setAttribute('aria-label', 'Explain textarea formatting helpers');
+    summary.textContent = '?';
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'team-stats-help-tooltip';
+    tooltip.setAttribute('role', 'note');
+
+    const paragraph = document.createElement('p');
+    paragraph.textContent = TEXTAREA_HELPER_TIP;
+
+    tooltip.appendChild(paragraph);
+    details.appendChild(summary);
+    details.appendChild(tooltip);
+    bindHelpPopover(details);
+    return details;
   }
 
   function renderTextareaHelperToolbar(toolbar, config) {
@@ -3600,11 +3622,20 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   }
 
   function closeOpenHelpPopovers(exceptPopover) {
-    for (const popover of teamStatsHelpPopovers) {
+    const popovers = Array.from(document.querySelectorAll('.team-stats-help'));
+    for (const popover of popovers) {
       if (popover !== exceptPopover && popover.open) {
         popover.open = false;
       }
     }
+  }
+
+  function bindHelpPopover(popover) {
+    popover.addEventListener('toggle', () => {
+      if (popover.open) {
+        closeOpenHelpPopovers(popover);
+      }
+    });
   }
 
   function renderStatsBreakdownToggle(totalRows) {
@@ -5612,13 +5643,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     });
   }
 
-  if (teamStatsHelpPopovers.length) {
-    for (const popover of teamStatsHelpPopovers) {
-      popover.addEventListener('toggle', () => {
-        if (popover.open) {
-          closeOpenHelpPopovers(popover);
-        }
-      });
+  if (initialHelpPopovers.length) {
+    for (const popover of initialHelpPopovers) {
+      bindHelpPopover(popover);
     }
 
     document.addEventListener('pointerdown', (event) => {
