@@ -112,25 +112,30 @@ Full changelog:
 ### v1.4.0
 
 #### New Features
-- Photo Instructions now support multiple languages: English, Spanish and French (configured Mod Panel > Photo Instructions)
 
+- Photo Instructions now support multiple languages: English, Spanish, and French  
+  - Configured in **Mod Panel > Photo Instructions**
 - History & Audit records now include links to view submitted photos for approved verifications
 - Added batch queue actions for moderators
-- Added optional auto-archive support for pending-user modmail replies (Configurable in Install Settings)
-
+- Added optional auto-archive support for pending-user modmail replies  
+  - Configurable in **Install Settings**
 - Added Markdown helper controls and placeholder insertion menus to:
   - Photo Instructions
   - Modmail template inputs
 
 #### Photo Instructions Improvements
+
 - Added support for instruction-specific placeholders and Markdown helpers
 - Added `{{username}}` placeholder to display the viewing user as `u/username`
 - Added “Caps” helper button to transform selected text to ALL CAPS
+- Added Android-specific “scroll down” pill message to help users find the full instructions
 
 #### Back-End / Technical Changes
-- Performance improvements for flair and moderator lookups
+
+- Improved performance for flair and moderator lookups
 - Updated to Devvit 0.12.18
 - Added global blocklist support
+- Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied
 
 ### v1.3.9
 
