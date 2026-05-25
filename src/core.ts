@@ -55,6 +55,14 @@ type DeveloperPanelPayload = {
   canonicalValue: string;
 };
 
+type UserGrade = 'trusted' | 'normal' | 'low_engagement' | 'spam_risk';
+
+type UserGradeResult = {
+  grade: UserGrade;
+  score: number;
+  reasons: string[];
+};
+
 type PendingAccountDetailsSnapshot = {
   capturedAt: string;
   accountCreatedAt: string | null;
@@ -62,6 +70,13 @@ type PendingAccountDetailsSnapshot = {
   subredditKarma: number | null;
   previousDeniedAttempts: number;
   banStatus: 'banned' | 'not_banned' | 'unknown';
+  hasVerifiedEmail: boolean | null;
+  hasRedditPremium: boolean | null;
+  isShadowBanned: boolean | null;
+  recentActivityCount: number | null;
+  socialLinkCount: number;
+  isContentCreator: boolean;
+  creatorLinkTypes: string[];
 };
 
 type VerificationRecord = {
@@ -115,6 +130,7 @@ type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
   autoFlairReconcileEnabled: boolean;
+  autoDenyShadowbannedEnabled: boolean;
   maxDenialsBeforeBlock: number;
   requiredPhotoCount: number;
   photoInstructions: string;
@@ -327,10 +343,16 @@ type FlairStepResult = {
   reason?: string;
 };
 
+type ModmailUserSignals = {
+  isShadowBanned: boolean | null;
+  recentActivityCount: number | null;
+};
+
 type ModmailStepResult = {
   status: 'created' | 'replied' | 'failed' | 'skipped';
   reason?: string;
   conversationId?: string;
+  userData?: ModmailUserSignals;
 };
 
 type PendingModmailReplyEvent = {
@@ -550,8 +572,12 @@ type PendingPanelItem = {
   claimedAt?: string | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
-  accountDetails?: PendingAccountDetailsSnapshot | null;
+  accountDetails?: PendingAccountDetailsDisplay | null;
 };
+
+// Persisted snapshot plus the advisory grade computed on display. The grade is derived
+// (never stored in Redis) so it always reflects the current scoring logic.
+type PendingAccountDetailsDisplay = PendingAccountDetailsSnapshot & UserGradeResult;
 
 type SearchPhotoLinkFields = {
   photoOneUrl?: string;
@@ -748,6 +774,7 @@ const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
 const INSTALL_SETTING_AUTO_ARCHIVE_PENDING_MODMAIL_ENABLED = 'auto_archive_pending_modmail_enabled';
+const INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED = 'auto_deny_shadowbanned_enabled';
 const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flairs_enabled';
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
@@ -1271,7 +1298,9 @@ function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
     claimedAt: normalizedRecord.claimedAt ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
-    accountDetails: normalizedRecord.accountDetails ?? null,
+    accountDetails: normalizedRecord.accountDetails
+      ? { ...normalizedRecord.accountDetails, ...computeUserGrade(normalizedRecord.accountDetails) }
+      : null,
   };
 }
 
@@ -1509,6 +1538,13 @@ function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetai
     subredditKarma?: unknown;
     previousDeniedAttempts?: unknown;
     banStatus?: unknown;
+    hasVerifiedEmail?: unknown;
+    hasRedditPremium?: unknown;
+    isShadowBanned?: unknown;
+    recentActivityCount?: unknown;
+    socialLinkCount?: unknown;
+    isContentCreator?: unknown;
+    creatorLinkTypes?: unknown;
   };
 
   const capturedAt = normalizeOptionalIsoTimestamp(parsed.capturedAt);
@@ -1523,6 +1559,197 @@ function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetai
     subredditKarma: normalizeOptionalWholeNumber(parsed.subredditKarma),
     previousDeniedAttempts: normalizeNonNegativeWholeNumber(parsed.previousDeniedAttempts),
     banStatus: normalizePendingBanStatus(parsed.banStatus),
+    hasVerifiedEmail: normalizeOptionalBoolean(parsed.hasVerifiedEmail),
+    hasRedditPremium: normalizeOptionalBoolean(parsed.hasRedditPremium),
+    isShadowBanned: normalizeOptionalBoolean(parsed.isShadowBanned),
+    recentActivityCount: normalizeOptionalWholeNumber(parsed.recentActivityCount),
+    socialLinkCount: normalizeNonNegativeWholeNumber(parsed.socialLinkCount),
+    isContentCreator: parsed.isContentCreator === true,
+    creatorLinkTypes: normalizeCreatorLinkTypeList(parsed.creatorLinkTypes),
+  };
+}
+
+function normalizeOptionalBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function normalizeCreatorLinkTypeList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry === 'string' && entry.trim()) {
+      seen.add(entry.trim());
+    }
+  }
+  return Array.from(seen);
+}
+
+// Advisory user-scoring weights. Developer-tunable constants (not moderator-configurable),
+// consistent with the other VouchX retention/threshold constants.
+//
+// Prior denied attempts are intentionally NOT part of the grade: a denial reflects submission
+// quality (e.g. a bad photo), already drives the separate auto-block counter, and is shown to
+// moderators as its own stat. Folding it in double-counted it and mislabeled aged/verified
+// accounts as low-history. Shadowban / subreddit-ban are hard-risk overrides that classify as
+// Spam Risk regardless of positive signals, so good history cannot dilute a genuine risk signal.
+const SCORE_HARD_RISK = 100;
+const SCORE_ACCOUNT_UNDER_7_DAYS = 20;
+const SCORE_ACCOUNT_UNDER_30_DAYS = 10;
+const SCORE_ACCOUNT_OVER_1_YEAR = -10;
+const SCORE_ZERO_TOTAL_KARMA = 15;
+const SCORE_ZERO_SUBREDDIT_KARMA = 5;
+const SCORE_NO_RECENT_ACTIVITY = 15;
+const SCORE_LOW_RECENT_ACTIVITY = 5;
+const SCORE_VERIFIED_EMAIL = -5;
+const SCORE_REDDIT_PREMIUM = -10;
+const GRADE_LOW_ENGAGEMENT_THRESHOLD = 20;
+const GRADE_TRUSTED_THRESHOLD = 0;
+
+function accountAgeDaysFromSnapshot(snapshot: PendingAccountDetailsSnapshot): number | null {
+  if (!snapshot.accountCreatedAt) {
+    return null;
+  }
+  const createdMs = new Date(snapshot.accountCreatedAt).getTime();
+  const referenceMs = new Date(snapshot.capturedAt).getTime();
+  if (!Number.isFinite(createdMs) || !Number.isFinite(referenceMs)) {
+    return null;
+  }
+  return (referenceMs - createdMs) / MILLIS_PER_DAY;
+}
+
+// Pure, deterministic advisory grade. Two intentional exclusions:
+//   - Content-creator status: surfaces as a separate informational badge, never affects the grade.
+//   - Prior denied attempts: shown as its own stat, never affects the grade (see weight comments).
+// Hard-risk signals (shadowban, subreddit ban) short-circuit to Spam Risk so that positive
+// history signals can never offset a genuine risk signal.
+function computeUserGrade(snapshot: PendingAccountDetailsSnapshot): UserGradeResult {
+  const riskReasons: string[] = [];
+  if (snapshot.isShadowBanned === true) {
+    riskReasons.push('Account is shadowbanned');
+  }
+  if (snapshot.banStatus === 'banned') {
+    riskReasons.push('Currently banned in this subreddit');
+  }
+  if (riskReasons.length > 0) {
+    return { grade: 'spam_risk', score: SCORE_HARD_RISK, reasons: riskReasons };
+  }
+
+  let score = 0;
+  const reasons: string[] = [];
+
+  const ageDays = accountAgeDaysFromSnapshot(snapshot);
+  if (ageDays !== null) {
+    if (ageDays < 7) {
+      score += SCORE_ACCOUNT_UNDER_7_DAYS;
+      reasons.push('Account less than 7 days old');
+    } else if (ageDays < 30) {
+      score += SCORE_ACCOUNT_UNDER_30_DAYS;
+      reasons.push('Account less than 30 days old');
+    } else if (ageDays > 365) {
+      score += SCORE_ACCOUNT_OVER_1_YEAR;
+      reasons.push('Account over 1 year old');
+    }
+  }
+
+  if (snapshot.totalKarma !== null && snapshot.totalKarma <= 0) {
+    score += SCORE_ZERO_TOTAL_KARMA;
+    reasons.push('Zero or negative total karma');
+  }
+  if (snapshot.subredditKarma !== null && snapshot.subredditKarma <= 0) {
+    score += SCORE_ZERO_SUBREDDIT_KARMA;
+    reasons.push('No karma in this subreddit');
+  }
+
+  if (snapshot.recentActivityCount !== null) {
+    if (snapshot.recentActivityCount === 0) {
+      score += SCORE_NO_RECENT_ACTIVITY;
+      reasons.push('No recent posts or comments');
+    } else if (snapshot.recentActivityCount <= 2) {
+      score += SCORE_LOW_RECENT_ACTIVITY;
+      reasons.push('Very little recent activity');
+    }
+  }
+
+  if (snapshot.hasVerifiedEmail === true) {
+    score += SCORE_VERIFIED_EMAIL;
+    reasons.push('Verified email');
+  }
+  if (snapshot.hasRedditPremium === true) {
+    score += SCORE_REDDIT_PREMIUM;
+    reasons.push('Has Reddit Premium');
+  }
+
+  let grade: UserGrade;
+  if (score >= GRADE_LOW_ENGAGEMENT_THRESHOLD) {
+    grade = 'low_engagement';
+  } else if (score <= GRADE_TRUSTED_THRESHOLD) {
+    grade = 'trusted';
+  } else {
+    grade = 'normal';
+  }
+
+  return { grade, score, reasons };
+}
+
+// Known monetization / adult content-creator platforms. Explicit social-link types plus
+// domain matches for links Reddit reports as CUSTOM (Fansly, ManyVids, etc. have no enum type).
+const CREATOR_SOCIAL_LINK_TYPES = new Set([
+  'ONLYFANS',
+  'PATREON',
+  'KOFI',
+  'CASH_APP',
+  'BUY_ME_A_COFFEE',
+]);
+
+const CREATOR_LINK_DOMAINS: { label: string; domain: string }[] = [
+  { label: 'ONLYFANS', domain: 'onlyfans.com' },
+  { label: 'FANSLY', domain: 'fansly.com' },
+  { label: 'MANYVIDS', domain: 'manyvids.com' },
+  { label: 'FANVUE', domain: 'fanvue.com' },
+  { label: 'JUSTFORFANS', domain: 'justfor.fans' },
+  { label: 'LOYALFANS', domain: 'loyalfans.com' },
+  { label: 'FANCENTRO', domain: 'fancentro.com' },
+  { label: 'FANHOUSE', domain: 'fanhouse.app' },
+  { label: 'ADMIREME', domain: 'admireme.vip' },
+  { label: 'AVNSTARS', domain: 'avnstars.com' },
+  { label: 'CLIPS4SALE', domain: 'clips4sale.com' },
+];
+
+type ContentCreatorDetection = {
+  socialLinkCount: number;
+  isContentCreator: boolean;
+  creatorLinkTypes: string[];
+};
+
+function detectContentCreator(rawLinks: unknown): ContentCreatorDetection {
+  const links = Array.isArray(rawLinks) ? rawLinks : [];
+  const creatorLinkTypes = new Set<string>();
+
+  for (const link of links) {
+    if (!link || typeof link !== 'object') {
+      continue;
+    }
+    const entry = link as { type?: unknown; outboundUrl?: unknown };
+    const type = typeof entry.type === 'string' ? entry.type.toUpperCase() : '';
+    if (CREATOR_SOCIAL_LINK_TYPES.has(type)) {
+      creatorLinkTypes.add(type);
+    }
+    const url = typeof entry.outboundUrl === 'string' ? entry.outboundUrl.toLowerCase() : '';
+    if (url) {
+      for (const { label, domain } of CREATOR_LINK_DOMAINS) {
+        if (url.includes(domain)) {
+          creatorLinkTypes.add(label);
+        }
+      }
+    }
+  }
+
+  return {
+    socialLinkCount: links.length,
+    isContentCreator: creatorLinkTypes.size > 0,
+    creatorLinkTypes: Array.from(creatorLinkTypes),
   };
 }
 
@@ -1637,28 +1864,61 @@ async function collectPendingAccountDetailsSnapshot(
   const normalizedUsername = normalizeUsernameStrict(username);
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
 
+  const emptyUserSnapshot = {
+    accountCreatedAt: null as string | null,
+    totalKarma: null as number | null,
+    subredditKarma: null as number | null,
+    hasVerifiedEmail: null as boolean | null,
+    hasRedditPremium: null as boolean | null,
+    socialLinkCount: 0,
+    isContentCreator: false,
+    creatorLinkTypes: [] as string[],
+  };
+
   const userSnapshotTask = withSingleRetry(
     `Pending account details user snapshot lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
-    { accountCreatedAt: null, totalKarma: null, subredditKarma: null },
+    emptyUserSnapshot,
     async () => {
       if (!normalizedUsername) {
-        return { accountCreatedAt: null, totalKarma: null, subredditKarma: null };
+        return emptyUserSnapshot;
       }
       const user = await context.reddit.getUserByUsername(normalizedUsername);
       if (!user) {
-        return { accountCreatedAt: null, totalKarma: null, subredditKarma: null };
+        return emptyUserSnapshot;
       }
-      const userWithKarma = user as typeof user & {
+      const userWithExtras = user as typeof user & {
         getUserKarmaFromCurrentSubreddit?: () => Promise<unknown>;
+        getSocialLinks?: () => Promise<unknown>;
+        hasVerifiedEmail?: unknown;
+        hasRedditPremium?: unknown;
       };
       const rawKarma =
-        typeof userWithKarma.getUserKarmaFromCurrentSubreddit === 'function'
-          ? await userWithKarma.getUserKarmaFromCurrentSubreddit()
+        typeof userWithExtras.getUserKarmaFromCurrentSubreddit === 'function'
+          ? await userWithExtras.getUserKarmaFromCurrentSubreddit()
           : null;
+      let creatorDetection: ContentCreatorDetection = {
+        socialLinkCount: 0,
+        isContentCreator: false,
+        creatorLinkTypes: [],
+      };
+      if (typeof userWithExtras.getSocialLinks === 'function') {
+        try {
+          creatorDetection = detectContentCreator(await userWithExtras.getSocialLinks());
+        } catch (error) {
+          console.log(
+            `Pending account details social link lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
+          );
+        }
+      }
       return {
         accountCreatedAt: normalizeOptionalIsoTimestamp(user.createdAt),
         totalKarma: normalizeSubredditKarmaValue(user),
         subredditKarma: normalizeSubredditKarmaValue(rawKarma),
+        hasVerifiedEmail: normalizeOptionalBoolean(userWithExtras.hasVerifiedEmail),
+        hasRedditPremium: normalizeOptionalBoolean(userWithExtras.hasRedditPremium),
+        socialLinkCount: creatorDetection.socialLinkCount,
+        isContentCreator: creatorDetection.isContentCreator,
+        creatorLinkTypes: creatorDetection.creatorLinkTypes,
       };
     }
   );
@@ -1682,6 +1942,13 @@ async function collectPendingAccountDetailsSnapshot(
     subredditKarma: userSnapshot.subredditKarma,
     previousDeniedAttempts,
     banStatus,
+    hasVerifiedEmail: userSnapshot.hasVerifiedEmail,
+    hasRedditPremium: userSnapshot.hasRedditPremium,
+    isShadowBanned: null,
+    recentActivityCount: null,
+    socialLinkCount: userSnapshot.socialLinkCount,
+    isContentCreator: userSnapshot.isContentCreator,
+    creatorLinkTypes: userSnapshot.creatorLinkTypes,
   };
 }
 
@@ -1819,6 +2086,28 @@ async function submitVerification(
 
   await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
   const pendingModmail = await sendPendingSubmissionModmail(context, record, config);
+  await enrichPendingAccountDetailsFromModmail(context, subredditId, verificationId, pendingModmail.userData);
+
+  if (config.autoDenyShadowbannedEnabled && pendingModmail.userData?.isShadowBanned === true) {
+    try {
+      const autoDenyResult = await autoDenyShadowbannedSubmission(
+        context,
+        subredditId,
+        subredditName,
+        verificationId,
+        config
+      );
+      if (autoDenyResult) {
+        // Auto-denied: skip the pending-submission mod note so it does not contradict the denial.
+        return { pendingModmail };
+      }
+    } catch (error) {
+      console.log(
+        `Auto-deny of shadowbanned submission failed for ${verificationId}: ${errorText(error)}`
+      );
+    }
+  }
+
   try {
     await addPendingSubmissionModNote(context, record);
   } catch (error) {
@@ -1827,6 +2116,37 @@ async function submitVerification(
     );
   }
   return { pendingModmail };
+}
+
+// Folds modmail-only signals (shadowban, recent activity) into the pending snapshot after the
+// submission modmail is sent. Guarded: re-reads the record and writes only if it is still pending,
+// so a concurrent withdrawal/removal cannot be resurrected by this enrichment write.
+async function enrichPendingAccountDetailsFromModmail(
+  context: Devvit.Context,
+  subredditId: string,
+  verificationId: string,
+  userData: ModmailUserSignals | undefined
+): Promise<void> {
+  if (!userData || (userData.isShadowBanned === null && userData.recentActivityCount === null)) {
+    return;
+  }
+  try {
+    const record = await getRecord(context, subredditId, verificationId);
+    if (!record || record.status !== 'pending' || !record.accountDetails) {
+      return;
+    }
+    const updatedRecord: VerificationRecord = {
+      ...record,
+      accountDetails: {
+        ...record.accountDetails,
+        isShadowBanned: userData.isShadowBanned ?? record.accountDetails.isShadowBanned,
+        recentActivityCount: userData.recentActivityCount ?? record.accountDetails.recentActivityCount,
+      },
+    };
+    await setRecord(context, subredditId, updatedRecord);
+  } catch (error) {
+    console.log(`Pending account details modmail enrichment failed for ${verificationId}: ${errorText(error)}`);
+  }
 }
 
 async function onModeratorPurgeUserData(
@@ -3034,131 +3354,271 @@ async function denyVerification(
       lastFlairReconcileAt: null,
     };
 
-    await setRecord(context, subredditId, reviewedRecord);
-    const historyAnchorMs = getHistoryRecordAnchorMs(reviewedRecord);
-    await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
-    await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
-    await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, record.username);
-    await context.redis.zAdd(historyDateIndexKey(subredditId), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await deleteUserPendingPointers(context, subredditId, record.username, record.userId);
-    await setUserLatestPointer(context, subredditId, record.username, record.userId, verificationId);
-    await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
-
-    await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
-
-    const [modmail, modNote] = await Promise.all([
-      sendDenialModmail(context, subredditId, reviewedRecord, config),
-      (async (): Promise<ModNoteStepResult> => {
-        try {
-          await addDenialModNote(context, reviewedRecord, moderator, config);
-          return { status: 'success' };
-        } catch (error) {
-          return { status: 'failed', reason: errorText(error) };
-        }
-      })(),
-    ]);
-
     const denyReasonLabel = getDenyReasonDisplayLabel(config, reason);
-    const denialCount = await incrementDenialCount(context, subredditId, record.username);
-    let userBlocked = false;
-    let manualBlockOutcome: ManualBlockOutcome | undefined;
-    if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
-      const blockedEntry: BlockedUserEntry = {
-        username: normalizeUsernameForLookup(record.username),
-        blockedAt: new Date().toISOString(),
-        deniedCount: denialCount,
-        reason: `Reached ${denialCount} denials`,
-        scope: 'subreddit',
-      };
-      const wasAlreadyBlocked = await isUserBlocked(context, subredditId, record.username);
-      await setBlockedUser(context, subredditId, blockedEntry);
-      userBlocked = true;
-      if (!wasAlreadyBlocked) {
-        try {
-          await appendAuditLog(context, {
-            subredditId,
-            subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
-            username: reviewedRecord.username,
-            actor: moderator,
-            action: 'blocked',
-            verificationId: reviewedRecord.id,
-            notes: blockedEntry.reason,
-          });
-        } catch (error) {
-          console.log(`Audit log write failed (blocked): ${errorText(error)}`);
-        }
-      }
-    }
-    if (options?.blockUser && !userBlocked) {
-      try {
-        const blockResult = await setManualBlockedUserEntry(
-          context,
-          subredditId,
-          subredditName,
-          normalizeUsernameStrict(record.username),
-          moderator,
-          denialCount,
-          false
-        );
-        manualBlockOutcome = {
-          status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
-          username: blockResult.entry.username,
-        };
-      } catch (error) {
-        manualBlockOutcome = {
-          status: 'failed',
-          reason: errorText(error),
-        };
-      }
-    }
-
-    try {
-      await appendAuditLog(context, {
-        subredditId,
-        subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
-        username: reviewedRecord.username,
-        actor: moderator,
-        action: 'denied',
-        verificationId: reviewedRecord.id,
-        notes: `${denyReasonLabel}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
-          userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
-        }${
-          manualBlockOutcome?.status === 'blocked'
-            ? ' | Blocked by moderator during denial.'
-            : manualBlockOutcome?.status === 'already_blocked'
-              ? ' | User was already blocked.'
-              : manualBlockOutcome?.status === 'failed'
-                ? ` | Block request failed: ${manualBlockOutcome.reason ?? 'unknown error'}`
-                : ''
-        }`,
-      });
-    } catch (error) {
-      console.log(`Audit log write failed (denied): ${errorText(error)}`);
-    }
-
-    return {
-      outcome: 'completed',
-      applied: true,
-      username: reviewedRecord.username,
+    return await finalizeDeniedVerification(context, subredditId, subredditName, reviewedRecord, config, {
+      actor: moderator,
       denyReasonLabel,
-      flair: { status: 'skipped', reason: 'not applicable' },
-      modmail,
-      modNote,
-      userBlocked,
-      denialCount,
-      manualBlockOutcome,
+      auditReasonNote: denyReasonLabel,
+      moderatorNotes,
+      blockUser: options?.blockUser,
+      sendModmail: () => sendDenialModmail(context, subredditId, reviewedRecord, config),
+      addModNote: () => addDenialModNote(context, reviewedRecord, moderator, config),
+    });
+  });
+}
+
+// Shared persistence + side effects for a denial, used by both moderator-initiated denials and
+// the automated shadowban auto-deny path. The caller builds `reviewedRecord` (status 'denied',
+// moderator/actor, denyReason) and supplies the modmail + mod-note senders; this function performs
+// the record write, index updates, denial-count increment, block-at-threshold, and audit logging.
+async function finalizeDeniedVerification(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  reviewedRecord: VerificationRecord,
+  config: RuntimeConfig,
+  params: {
+    actor: string;
+    denyReasonLabel: string;
+    auditReasonNote: string;
+    moderatorNotes?: string;
+    blockUser?: boolean;
+    countTowardBlock?: boolean;
+    sendModmail: () => Promise<ModmailStepResult>;
+    addModNote: () => Promise<void>;
+  }
+): Promise<ActionResult> {
+  const { actor, denyReasonLabel, auditReasonNote, moderatorNotes } = params;
+  // Moderator denials count toward the auto-block threshold; automated denials (e.g. shadowban)
+  // deliberately do not, so a Reddit-level shadowban does not silently push a user toward a block.
+  const countTowardBlock = params.countTowardBlock !== false;
+  const verificationId = reviewedRecord.id;
+
+  await setRecord(context, subredditId, reviewedRecord);
+  const historyAnchorMs = getHistoryRecordAnchorMs(reviewedRecord);
+  await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
+  await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
+  await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, reviewedRecord.username);
+  await context.redis.zAdd(historyDateIndexKey(subredditId), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(reviewedRecord.username)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(actor)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await deleteUserPendingPointers(context, subredditId, reviewedRecord.username, reviewedRecord.userId);
+  await setUserLatestPointer(context, subredditId, reviewedRecord.username, reviewedRecord.userId, verificationId);
+  await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
+
+  await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
+
+  const [modmail, modNote] = await Promise.all([
+    params.sendModmail(),
+    (async (): Promise<ModNoteStepResult> => {
+      try {
+        await params.addModNote();
+        return { status: 'success' };
+      } catch (error) {
+        return { status: 'failed', reason: errorText(error) };
+      }
+    })(),
+  ]);
+
+  const denialCount = countTowardBlock
+    ? await incrementDenialCount(context, subredditId, reviewedRecord.username)
+    : await getStoredDenialCount(context, subredditId, reviewedRecord.username);
+  let userBlocked = false;
+  let manualBlockOutcome: ManualBlockOutcome | undefined;
+  if (countTowardBlock && config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
+    const blockedEntry: BlockedUserEntry = {
+      username: normalizeUsernameForLookup(reviewedRecord.username),
+      blockedAt: new Date().toISOString(),
+      deniedCount: denialCount,
+      reason: `Reached ${denialCount} denials`,
+      scope: 'subreddit',
     };
+    const wasAlreadyBlocked = await isUserBlocked(context, subredditId, reviewedRecord.username);
+    await setBlockedUser(context, subredditId, blockedEntry);
+    userBlocked = true;
+    if (!wasAlreadyBlocked) {
+      try {
+        await appendAuditLog(context, {
+          subredditId,
+          subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
+          username: reviewedRecord.username,
+          actor,
+          action: 'blocked',
+          verificationId: reviewedRecord.id,
+          notes: blockedEntry.reason,
+        });
+      } catch (error) {
+        console.log(`Audit log write failed (blocked): ${errorText(error)}`);
+      }
+    }
+  }
+  if (countTowardBlock && params.blockUser && !userBlocked) {
+    try {
+      const blockResult = await setManualBlockedUserEntry(
+        context,
+        subredditId,
+        subredditName,
+        normalizeUsernameStrict(reviewedRecord.username),
+        actor,
+        denialCount,
+        false
+      );
+      manualBlockOutcome = {
+        status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
+        username: blockResult.entry.username,
+      };
+    } catch (error) {
+      manualBlockOutcome = {
+        status: 'failed',
+        reason: errorText(error),
+      };
+    }
+  }
+
+  try {
+    await appendAuditLog(context, {
+      subredditId,
+      subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
+      username: reviewedRecord.username,
+      actor,
+      action: 'denied',
+      verificationId: reviewedRecord.id,
+      notes: `${auditReasonNote}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
+        userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
+      }${
+        manualBlockOutcome?.status === 'blocked'
+          ? ' | Blocked by moderator during denial.'
+          : manualBlockOutcome?.status === 'already_blocked'
+            ? ' | User was already blocked.'
+            : manualBlockOutcome?.status === 'failed'
+              ? ` | Block request failed: ${manualBlockOutcome.reason ?? 'unknown error'}`
+              : ''
+      }`,
+    });
+  } catch (error) {
+    console.log(`Audit log write failed (denied): ${errorText(error)}`);
+  }
+
+  return {
+    outcome: 'completed',
+    applied: true,
+    username: reviewedRecord.username,
+    denyReasonLabel,
+    flair: { status: 'skipped', reason: 'not applicable' },
+    modmail,
+    modNote,
+    userBlocked,
+    denialCount,
+    manualBlockOutcome,
+  };
+}
+
+// Automated denial of a just-submitted verification when Reddit reports the account as
+// shadowbanned and the moderator has opted in. Re-reads the record inside the action lock and
+// only acts while it is still pending, so a concurrent withdrawal cannot be resurrected. The
+// denial does not count toward the auto-block threshold, and the user-facing modmail explains the
+// shadowban and links to Reddit's appeal page.
+const AUTO_DENY_SYSTEM_ACTOR = 'VouchX (auto)';
+// Reddit's official appeal page for account actions. Shadowbans are applied by Reddit admins,
+// not by the subreddit, so users must appeal to Reddit directly.
+const SHADOWBAN_APPEAL_URL = 'https://www.reddit.com/appeals';
+
+async function autoDenyShadowbannedSubmission(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  verificationId: string,
+  config: RuntimeConfig
+): Promise<ActionResult | null> {
+  return await withVerificationActionLock(context, subredditId, verificationId, async () => {
+    const record = await getRecord(context, subredditId, verificationId);
+    if (!record || record.status !== 'pending') {
+      return null;
+    }
+    const reviewedRecord: VerificationRecord = {
+      ...record,
+      status: 'denied',
+      moderator: AUTO_DENY_SYSTEM_ACTOR,
+      reviewedAt: new Date().toISOString(),
+      denyReason: null,
+      denyNotes: 'Account is shadowbanned',
+      claimedBy: null,
+      claimedAt: null,
+      accountDetails: null,
+      removedAt: null,
+      removedBy: null,
+      lastValidatedAt: null,
+      nextValidationAt: null,
+      hardExpireAt: null,
+      validationFailureCount: 0,
+      terminalValidationFailureCount: 0,
+      lastFlairReconcileAt: null,
+    };
+    return await finalizeDeniedVerification(context, subredditId, subredditName, reviewedRecord, config, {
+      actor: AUTO_DENY_SYSTEM_ACTOR,
+      denyReasonLabel: 'Shadowbanned account',
+      auditReasonNote: 'Auto-denied — account is shadowbanned',
+      moderatorNotes: undefined,
+      blockUser: false,
+      countTowardBlock: false,
+      sendModmail: () => sendShadowbanAutoDenyModmail(context, subredditId, reviewedRecord, config),
+      addModNote: () => addShadowbanAutoDenyModNote(context, reviewedRecord),
+    });
+  });
+}
+
+async function sendShadowbanAutoDenyModmail(
+  context: Devvit.Context,
+  subredditId: string,
+  record: VerificationRecord,
+  config: RuntimeConfig
+): Promise<ModmailStepResult> {
+  const subredditName = sanitizeSubredditName(record.subredditName);
+  const values = {
+    username: record.username,
+    mod: '',
+    subreddit: subredditName,
+    date_submitted: formatTimestamp(record.submittedAt),
+    reason: '',
+    denial_notes: '',
+    days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+  };
+  const subject = buildModmailSubject(config.modmailSubject, values);
+  const body = [
+    `Thanks for your verification request to r/${subredditName}.`,
+    '',
+    'We are unable to approve it because your Reddit account appears to be **shadowbanned**. ' +
+      'A shadowban is applied by Reddit’s admins, not by this community, and it prevents us from ' +
+      'verifying your account activity.',
+    '',
+    `You can appeal this directly to Reddit at ${SHADOWBAN_APPEAL_URL}. Once the shadowban is lifted, ` +
+      'you are welcome to submit a new verification request.',
+  ].join('\n');
+
+  return await sendUserModmailWithFallback(context, {
+    subredditId,
+    subredditName,
+    subject,
+    body,
+    username: record.username,
+    eventId: `deny:${record.id}`,
+  });
+}
+
+async function addShadowbanAutoDenyModNote(context: Devvit.Context, record: VerificationRecord): Promise<void> {
+  await context.reddit.addModNote({
+    subreddit: sanitizeSubredditName(record.subredditName),
+    user: record.username,
+    note: 'Verification auto-denied by VouchX: account is shadowbanned.',
   });
 }
 
@@ -3892,6 +4352,35 @@ async function rememberPendingModmailConversation(
   await context.redis.set(pendingModmailConversationKey(subredditId, normalizedConversationId), verificationId.trim());
 }
 
+// Normalizes the ConversationUserData embedded in modmail create/reply responses into the
+// two signals we score on. isShadowBanned is only reported by modmail (not the User object).
+function extractModmailUserSignals(user: unknown): ModmailUserSignals {
+  if (!user || typeof user !== 'object') {
+    return { isShadowBanned: null, recentActivityCount: null };
+  }
+  const data = user as { isShadowBanned?: unknown; recentComments?: unknown; recentPosts?: unknown };
+  const countEntries = (value: unknown): number | null =>
+    value && typeof value === 'object' ? Object.keys(value as Record<string, unknown>).length : null;
+  const commentCount = countEntries(data.recentComments);
+  const postCount = countEntries(data.recentPosts);
+  const recentActivityCount =
+    commentCount === null && postCount === null ? null : (commentCount ?? 0) + (postCount ?? 0);
+  return {
+    isShadowBanned: normalizeOptionalBoolean(data.isShadowBanned),
+    recentActivityCount,
+  };
+}
+
+// Attaches modmail user signals to a send result only when at least one signal is present,
+// keeping the result minimal when the response carries no embedded user data.
+function attachModmailUserSignals(result: ModmailStepResult, user: unknown): ModmailStepResult {
+  const signals = extractModmailUserSignals(user);
+  if (signals.isShadowBanned === null && signals.recentActivityCount === null) {
+    return result;
+  }
+  return { ...result, userData: signals };
+}
+
 async function sendUserModmailWithFallback(
   context: Devvit.Context,
   input: {
@@ -3983,7 +4472,7 @@ async function sendUserModmailWithFallback(
         } catch {
           // Ignore if unarchive fails.
         }
-        await context.reddit.modMail.reply({
+        const replyResponse = await context.reddit.modMail.reply({
           conversationId: existingConversationId,
           body,
           isAuthorHidden: true,
@@ -3996,7 +4485,10 @@ async function sendUserModmailWithFallback(
         if (archiveAfterSend) {
           await archiveModmailConversationBestEffort(context, subredditName, username, existingConversationId);
         }
-        return { status: 'replied', conversationId: existingConversationId };
+        return attachModmailUserSignals(
+          { status: 'replied', conversationId: existingConversationId },
+          (replyResponse as { user?: unknown } | null | undefined)?.user
+        );
       } catch (error) {
         const replyErrorMessage = errorText(error);
         if (looksLikeTransientRedditTransportError(replyErrorMessage)) {
@@ -4034,7 +4526,10 @@ async function sendUserModmailWithFallback(
         if (archiveAfterSend) {
           await archiveModmailConversationBestEffort(context, subredditName, username, conversationId);
         }
-        return { status: 'created', conversationId };
+        return attachModmailUserSignals(
+          { status: 'created', conversationId },
+          (response as { user?: unknown } | null | undefined)?.user
+        );
       } catch (error) {
         lastError = errorText(error);
       }
@@ -7518,6 +8013,9 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawAutoDenyShadowbannedEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED
+  );
   const rawMultipleApprovalFlairsEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED
   );
@@ -7534,6 +8032,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const autoDenyShadowbannedEnabled =
+    typeof rawAutoDenyShadowbannedEnabled === 'boolean'
+      ? rawAutoDenyShadowbannedEnabled
+      : parseBooleanString(rawAutoDenyShadowbannedEnabled, false);
   const multipleApprovalFlairsEnabled =
     typeof rawMultipleApprovalFlairsEnabled === 'boolean'
       ? rawMultipleApprovalFlairsEnabled
@@ -7569,6 +8071,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
     autoFlairReconcileEnabled,
+    autoDenyShadowbannedEnabled,
     maxDenialsBeforeBlock,
     requiredPhotoCount,
     photoInstructions: normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructions]),
@@ -9592,6 +10095,7 @@ export {
   deleteCurrentUserVerificationData,
   approveVerification,
   denyVerification,
+  autoDenyShadowbannedSubmission,
   batchReviewVerifications,
   buildBatchReviewToast,
   normalizeBatchReviewVerificationIds,
@@ -9633,6 +10137,10 @@ export {
   resolveThemePalette,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  computeUserGrade,
+  detectContentCreator,
+  extractModmailUserSignals,
+  parsePendingAccountDetailsSnapshot,
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
   getViewerFlairSnapshot,

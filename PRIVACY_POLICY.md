@@ -67,7 +67,9 @@ This information is used to apply, remove, check, or reconcile subreddit flair a
 
 2.8 Account Snapshot Information
 
-For moderator review context, the Application may process limited Reddit account-related information such as account creation date, total karma, subreddit karma, previous denial attempts, and subreddit ban status where available through Reddit or Devvit APIs.
+For moderator review context, the Application may process limited Reddit account-related information such as account creation date, total karma, subreddit karma, previous denial attempts, subreddit ban status, whether the account has a verified email, whether the account has Reddit Premium, whether the account is shadowbanned, a count of recent posts and comments, the number of linked social/external profiles, and whether any linked profile points to a known content-creator platform, where available through Reddit or Devvit APIs.
+
+From these signals the Application may compute an advisory grade (for example, indicating possible spam risk or limited account history) and may display an informational badge when a known content-creator platform is linked. These are generally non-binding aids for moderators. However, a moderator may optionally enable a setting that automatically denies a submission when Reddit reports the account as shadowbanned; when that setting is enabled, the shadowbanned status alone may result in an automated denial, which is recorded in the moderation log. This snapshot is stored only while a submission is pending and is discarded when the submission is reviewed, withdrawn, removed, or otherwise purged under the Application’s retention periods.
 
 This information is used to assist moderators in reviewing pending submissions. The Application does not independently verify a user’s identity, age, consent, legality, authenticity, or trustworthiness.
 
