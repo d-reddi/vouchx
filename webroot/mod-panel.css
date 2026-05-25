@@ -1835,6 +1835,11 @@ textarea {
 
 .dialog-card {
   width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px;
   border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 86%, transparent);
@@ -2719,11 +2724,41 @@ textarea {
     gap: 8px;
   }
 
-  .stats-dialog-head,
+  .stats-dialog-card {
+    padding: 14px;
+  }
+
+  .stats-dialog-head {
+    margin-bottom: 10px;
+    gap: 10px;
+  }
+
   .stats-primary-row,
   .stats-row {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    padding: 8px 0;
+  }
+
+  .stats-primary-value,
+  .stats-value {
+    margin-left: auto;
+    text-align: right;
+    font-size: 0.95rem;
+  }
+
+  .stats-label {
+    font-size: 0.68rem;
+  }
+
+  .stats-reasons-section {
+    margin-top: 8px;
+  }
+
+  .stats-reasons-list {
+    font-size: 0.8rem;
   }
 
   .panel-warning {
