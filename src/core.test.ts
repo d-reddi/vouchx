@@ -11,6 +11,10 @@ import {
   checkVerificationFlair,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  computeUserGrade,
+  detectContentCreator,
+  extractModmailUserSignals,
+  parsePendingAccountDetailsSnapshot,
   denyVerification,
   dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
@@ -105,6 +109,13 @@ function buildPendingAccountDetailsSnapshot(overrides: Record<string, unknown> =
     subredditKarma: 42,
     previousDeniedAttempts: 2,
     banStatus: 'not_banned' as const,
+    hasVerifiedEmail: true,
+    hasRedditPremium: false,
+    isShadowBanned: false,
+    recentActivityCount: 5,
+    socialLinkCount: 0,
+    isContentCreator: false,
+    creatorLinkTypes: [] as string[],
     ...overrides,
   };
 }
@@ -2786,6 +2797,13 @@ test('parseRecord preserves legacy pending account details snapshots without tot
     subredditKarma: 42,
     previousDeniedAttempts: 2,
     banStatus: 'not_banned',
+    hasVerifiedEmail: null,
+    hasRedditPremium: null,
+    isShadowBanned: null,
+    recentActivityCount: null,
+    socialLinkCount: 0,
+    isContentCreator: false,
+    creatorLinkTypes: [],
   });
 });
 
@@ -2815,7 +2833,10 @@ test('toModPanelState includes account details on pending items', () => {
   );
 
   assert.equal(modState.pending.length, 1);
-  assert.deepEqual(modState.pending[0].accountDetails, accountDetails);
+  assert.deepEqual(modState.pending[0].accountDetails, {
+    ...accountDetails,
+    ...computeUserGrade(accountDetails),
+  });
 });
 
 test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
@@ -5159,4 +5180,183 @@ test('ensureUserValidationSchedule does not delete a newer schedule lock it does
   assert.equal(schedulerContext.getCalls.length, 2);
   assert.equal(schedulerContext.delCalls.length, 0);
   assert.equal(schedulerContext.currentLockValue, 'newer-schedule-lock-token');
+});
+
+test('computeUserGrade flags shadowbanned accounts as spam risk', () => {
+  const result = computeUserGrade(buildPendingAccountDetailsSnapshot({ isShadowBanned: true }));
+  assert.equal(result.grade, 'spam_risk');
+  assert.ok(result.score >= 100);
+  assert.ok(result.reasons.some((reason) => reason.toLowerCase().includes('shadowbanned')));
+});
+
+test('computeUserGrade flags subreddit-banned accounts as spam risk', () => {
+  const result = computeUserGrade(
+    buildPendingAccountDetailsSnapshot({ previousDeniedAttempts: 0, banStatus: 'banned' })
+  );
+  assert.equal(result.grade, 'spam_risk');
+  assert.ok(result.reasons.some((reason) => reason.toLowerCase().includes('banned')));
+});
+
+test('computeUserGrade marks aged, verified, premium accounts as trusted', () => {
+  const result = computeUserGrade(
+    buildPendingAccountDetailsSnapshot({
+      accountCreatedAt: '2024-03-11T12:00:00.000Z',
+      previousDeniedAttempts: 0,
+      totalKarma: 5000,
+      subredditKarma: 200,
+      recentActivityCount: 50,
+      hasVerifiedEmail: true,
+      hasRedditPremium: true,
+    })
+  );
+  assert.equal(result.grade, 'trusted');
+  assert.ok(result.score <= 0);
+});
+
+test('computeUserGrade marks new low-karma inactive accounts as low engagement', () => {
+  const result = computeUserGrade(
+    buildPendingAccountDetailsSnapshot({
+      accountCreatedAt: '2026-03-08T12:00:00.000Z',
+      previousDeniedAttempts: 0,
+      totalKarma: 0,
+      subredditKarma: 0,
+      recentActivityCount: 0,
+      hasVerifiedEmail: false,
+      hasRedditPremium: false,
+    })
+  );
+  assert.equal(result.grade, 'low_engagement');
+});
+
+test('computeUserGrade returns normal for mildly weak signals', () => {
+  const result = computeUserGrade(
+    buildPendingAccountDetailsSnapshot({
+      accountCreatedAt: '2025-12-01T12:00:00.000Z',
+      previousDeniedAttempts: 0,
+      totalKarma: 100,
+      subredditKarma: 0,
+      recentActivityCount: 10,
+      hasVerifiedEmail: false,
+      hasRedditPremium: false,
+    })
+  );
+  assert.equal(result.grade, 'normal');
+});
+
+test('computeUserGrade ignores content-creator status', () => {
+  const base = buildPendingAccountDetailsSnapshot({ previousDeniedAttempts: 0 });
+  const withoutCreator = computeUserGrade({ ...base, isContentCreator: false, creatorLinkTypes: [] });
+  const withCreator = computeUserGrade({
+    ...base,
+    isContentCreator: true,
+    creatorLinkTypes: ['ONLYFANS'],
+  });
+  assert.equal(withCreator.score, withoutCreator.score);
+  assert.equal(withCreator.grade, withoutCreator.grade);
+});
+
+test('detectContentCreator flags explicit creator link types', () => {
+  const result = detectContentCreator([
+    { type: 'INSTAGRAM', outboundUrl: 'https://instagram.com/example' },
+    { type: 'ONLYFANS', outboundUrl: 'https://onlyfans.com/example' },
+  ]);
+  assert.equal(result.socialLinkCount, 2);
+  assert.equal(result.isContentCreator, true);
+  assert.ok(result.creatorLinkTypes.includes('ONLYFANS'));
+});
+
+test('detectContentCreator matches creator domains on custom links', () => {
+  const result = detectContentCreator([
+    { type: 'CUSTOM', outboundUrl: 'https://fansly.com/example' },
+    { type: 'CUSTOM', outboundUrl: 'https://manyvids.com/Profile/example' },
+  ]);
+  assert.equal(result.isContentCreator, true);
+  assert.ok(result.creatorLinkTypes.includes('FANSLY'));
+  assert.ok(result.creatorLinkTypes.includes('MANYVIDS'));
+});
+
+test('detectContentCreator does not flag non-creator links', () => {
+  const result = detectContentCreator([
+    { type: 'TWITTER', outboundUrl: 'https://twitter.com/example' },
+    { type: 'CUSTOM', outboundUrl: 'https://example.com/portfolio' },
+  ]);
+  assert.equal(result.socialLinkCount, 2);
+  assert.equal(result.isContentCreator, false);
+  assert.deepEqual(result.creatorLinkTypes, []);
+});
+
+test('detectContentCreator handles missing or malformed input', () => {
+  assert.deepEqual(detectContentCreator(undefined), {
+    socialLinkCount: 0,
+    isContentCreator: false,
+    creatorLinkTypes: [],
+  });
+  const result = detectContentCreator([null, 'bad', { type: 'CUSTOM' }]);
+  assert.equal(result.socialLinkCount, 3);
+  assert.equal(result.isContentCreator, false);
+});
+
+test('extractModmailUserSignals reads shadowban and recent activity', () => {
+  const result = extractModmailUserSignals({
+    isShadowBanned: true,
+    recentComments: { c1: {}, c2: {} },
+    recentPosts: { p1: {} },
+  });
+  assert.equal(result.isShadowBanned, true);
+  assert.equal(result.recentActivityCount, 3);
+});
+
+test('extractModmailUserSignals returns nulls when data is absent', () => {
+  assert.deepEqual(extractModmailUserSignals(undefined), {
+    isShadowBanned: null,
+    recentActivityCount: null,
+  });
+  assert.deepEqual(extractModmailUserSignals({}), {
+    isShadowBanned: null,
+    recentActivityCount: null,
+  });
+});
+
+test('parsePendingAccountDetailsSnapshot defaults new fields for legacy records', () => {
+  const parsed = parsePendingAccountDetailsSnapshot({
+    capturedAt: '2026-03-11T12:00:00.000Z',
+    accountCreatedAt: '2026-03-01T12:00:00.000Z',
+    totalKarma: 10,
+    subredditKarma: 1,
+    previousDeniedAttempts: 0,
+    banStatus: 'not_banned',
+  });
+  assert.ok(parsed);
+  assert.equal(parsed?.hasVerifiedEmail, null);
+  assert.equal(parsed?.isShadowBanned, null);
+  assert.equal(parsed?.recentActivityCount, null);
+  assert.equal(parsed?.socialLinkCount, 0);
+  assert.equal(parsed?.isContentCreator, false);
+  assert.deepEqual(parsed?.creatorLinkTypes, []);
+});
+
+test('computeUserGrade ignores prior denied attempts', () => {
+  const base = buildPendingAccountDetailsSnapshot({ isShadowBanned: false, banStatus: 'not_banned' as const });
+  const noDenials = computeUserGrade({ ...base, previousDeniedAttempts: 0 });
+  const manyDenials = computeUserGrade({ ...base, previousDeniedAttempts: 5 });
+  assert.equal(manyDenials.score, noDenials.score);
+  assert.equal(manyDenials.grade, noDenials.grade);
+  assert.ok(!manyDenials.reasons.some((reason) => reason.toLowerCase().includes('denied')));
+});
+
+test('computeUserGrade keeps hard-risk override despite positive signals', () => {
+  const result = computeUserGrade(
+    buildPendingAccountDetailsSnapshot({
+      previousDeniedAttempts: 0,
+      isShadowBanned: true,
+      accountCreatedAt: '2024-03-11T12:00:00.000Z',
+      totalKarma: 9000,
+      subredditKarma: 500,
+      recentActivityCount: 80,
+      hasVerifiedEmail: true,
+      hasRedditPremium: true,
+    })
+  );
+  assert.equal(result.grade, 'spam_risk');
+  assert.deepEqual(result.reasons, ['Account is shadowbanned']);
 });

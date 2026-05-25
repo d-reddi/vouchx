@@ -945,10 +945,14 @@
         </div>
         <div class="stats-section">
           <div class="stats-primary-row">
-            <span class="stats-label">Subreddit karma</span>
-            <span id="stats-subreddit-karma" class="stats-primary-value">Unknown</span>
+            <span class="stats-label">Advisory grade</span>
+            <span id="stats-grade" class="stats-primary-value pending-grade-badge">Not scored</span>
           </div>
           <div class="stats-list">
+            <div class="stats-row">
+              <span class="stats-label">Subreddit karma</span>
+              <span id="stats-subreddit-karma" class="stats-value">Unknown</span>
+            </div>
             <div class="stats-row">
               <span class="stats-label">Overall karma</span>
               <span id="stats-overall-karma" class="stats-value">Unknown</span>
@@ -957,6 +961,30 @@
               <span class="stats-label">Previous denied attempts</span>
               <span id="stats-previous-denials" class="stats-value">Unknown</span>
             </div>
+            <div class="stats-row">
+              <span class="stats-label">Verified email</span>
+              <span id="stats-verified-email" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Reddit Premium</span>
+              <span id="stats-reddit-premium" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Shadowbanned</span>
+              <span id="stats-shadowbanned" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Recent activity</span>
+              <span id="stats-recent-activity" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Content creator</span>
+              <span id="stats-content-creator" class="stats-value">Unknown</span>
+            </div>
+          </div>
+          <div id="stats-reasons-section" class="stats-reasons-section hidden">
+            <span class="stats-label">Why this grade</span>
+            <ul id="stats-reasons" class="stats-reasons-list"></ul>
           </div>
         </div>
       </div>

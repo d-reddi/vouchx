@@ -209,6 +209,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const statsSubredditKarma = document.getElementById('stats-subreddit-karma');
   const statsOverallKarma = document.getElementById('stats-overall-karma');
   const statsPreviousDenials = document.getElementById('stats-previous-denials');
+  const statsGrade = document.getElementById('stats-grade');
+  const statsVerifiedEmail = document.getElementById('stats-verified-email');
+  const statsRedditPremium = document.getElementById('stats-reddit-premium');
+  const statsShadowbanned = document.getElementById('stats-shadowbanned');
+  const statsRecentActivity = document.getElementById('stats-recent-activity');
+  const statsContentCreator = document.getElementById('stats-content-creator');
+  const statsReasonsSection = document.getElementById('stats-reasons-section');
+  const statsReasons = document.getElementById('stats-reasons');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
@@ -3084,6 +3092,41 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return badge;
   }
 
+  const GRADE_BADGE_META = {
+    spam_risk: { label: 'Spam Risk', className: 'pending-grade-spam' },
+    low_engagement: { label: 'Limited History', className: 'pending-grade-low' },
+    normal: { label: 'Standard', className: 'pending-grade-normal' },
+    trusted: { label: 'Established', className: 'pending-grade-trusted' },
+  };
+
+  function createPendingGradeBadge(accountDetails) {
+    const meta = accountDetails && GRADE_BADGE_META[accountDetails.grade];
+    if (!meta) {
+      return null;
+    }
+    const badge = document.createElement('span');
+    badge.className = `pending-age-badge pending-grade-badge ${meta.className}`;
+    badge.textContent = meta.label;
+    const reasons = Array.isArray(accountDetails.reasons) ? accountDetails.reasons : [];
+    badge.title = reasons.length > 0 ? `Why: ${reasons.join('; ')}` : 'Advisory grade from account signals.';
+    return badge;
+  }
+
+  function createPendingCreatorBadge(accountDetails) {
+    if (!accountDetails || accountDetails.isContentCreator !== true) {
+      return null;
+    }
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge pending-creator-badge';
+    badge.textContent = 'Content Creator';
+    const types = Array.isArray(accountDetails.creatorLinkTypes) ? accountDetails.creatorLinkTypes : [];
+    badge.title =
+      types.length > 0
+        ? `Linked creator platforms: ${types.join(', ')}`
+        : 'Account links to a known content-creator platform.';
+    return badge;
+  }
+
   function createPendingAccountAgeMeta(item) {
     const meta = document.createElement('p');
     meta.className = 'item-meta pending-account-meta';
@@ -3145,6 +3188,14 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (accountDetails && accountDetails.banStatus === 'banned') {
       badgeRow.appendChild(createPendingBannedBadge());
+    }
+    const gradeBadge = createPendingGradeBadge(accountDetails);
+    if (gradeBadge) {
+      badgeRow.appendChild(gradeBadge);
+    }
+    const creatorBadge = createPendingCreatorBadge(accountDetails);
+    if (creatorBadge) {
+      badgeRow.appendChild(creatorBadge);
     }
     if (isResubmission) {
       badgeRow.appendChild(createPendingResubmitBadge());
@@ -4826,6 +4877,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unknown';
   }
 
+  function formatStatBoolean(value, trueText, falseText) {
+    if (value === true) {
+      return trueText || 'Yes';
+    }
+    if (value === false) {
+      return falseText || 'No';
+    }
+    return 'Unknown';
+  }
+
   function openStatsModal(item) {
     if (!statsModal) {
       return;
@@ -4851,6 +4912,54 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (statsPreviousDenials) {
       statsPreviousDenials.textContent =
         accountDetails ? formatStatCount(accountDetails.previousDeniedAttempts) : 'Unknown';
+    }
+    if (statsGrade) {
+      const gradeMeta = accountDetails && GRADE_BADGE_META[accountDetails.grade];
+      statsGrade.textContent = gradeMeta ? gradeMeta.label : 'Not scored';
+      statsGrade.className = `stats-primary-value pending-grade-badge${gradeMeta ? ` ${gradeMeta.className}` : ''}`;
+    }
+    if (statsVerifiedEmail) {
+      statsVerifiedEmail.textContent = accountDetails ? formatStatBoolean(accountDetails.hasVerifiedEmail) : 'Unknown';
+    }
+    if (statsRedditPremium) {
+      statsRedditPremium.textContent = accountDetails ? formatStatBoolean(accountDetails.hasRedditPremium) : 'Unknown';
+    }
+    if (statsShadowbanned) {
+      statsShadowbanned.textContent = accountDetails
+        ? formatStatBoolean(accountDetails.isShadowBanned, 'Yes', 'No')
+        : 'Unknown';
+    }
+    if (statsRecentActivity) {
+      statsRecentActivity.textContent =
+        accountDetails && typeof accountDetails.recentActivityCount === 'number'
+          ? `${formatStatCount(accountDetails.recentActivityCount)} recent post(s)/comment(s)`
+          : 'Unknown';
+    }
+    if (statsContentCreator) {
+      const types =
+        accountDetails && Array.isArray(accountDetails.creatorLinkTypes) ? accountDetails.creatorLinkTypes : [];
+      statsContentCreator.textContent =
+        accountDetails && accountDetails.isContentCreator === true
+          ? types.length > 0
+            ? `Yes (${types.join(', ')})`
+            : 'Yes'
+          : accountDetails
+            ? 'No'
+            : 'Unknown';
+    }
+    if (statsReasons && statsReasonsSection) {
+      const reasons = accountDetails && Array.isArray(accountDetails.reasons) ? accountDetails.reasons : [];
+      statsReasons.textContent = '';
+      if (reasons.length > 0) {
+        for (const reason of reasons) {
+          const li = document.createElement('li');
+          li.textContent = String(reason);
+          statsReasons.appendChild(li);
+        }
+        statsReasonsSection.classList.remove('hidden');
+      } else {
+        statsReasonsSection.classList.add('hidden');
+      }
     }
 
     statsModal.classList.remove('hidden');
