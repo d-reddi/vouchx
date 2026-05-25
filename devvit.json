@@ -267,6 +267,12 @@
         "helpText": "When enabled the app archives pending verification modmail conversations and user replies before a moderator approval or denial is made.",
         "defaultValue": true
       },
+      "auto_deny_shadowbanned_enabled": {
+        "type": "boolean",
+        "label": "Auto-deny shadowbanned accounts",
+        "helpText": "When enabled the app automatically denies a new verification submission if Reddit reports the account as shadowbanned. The denial counts toward the auto-block threshold and is logged as an automated action. Leave off to keep shadowbanned submissions in the queue for manual review.",
+        "defaultValue": false
+      },
       "multiple_approval_flairs_enabled": {
         "type": "boolean",
         "label": "Enable multiple approval flairs",

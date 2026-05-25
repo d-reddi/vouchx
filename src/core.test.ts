@@ -5,6 +5,7 @@ import {
   assertCanReview,
   approveVerification,
   archivePendingVerificationModmailReply,
+  autoDenyShadowbannedSubmission,
   batchReviewVerifications,
   buildBatchReviewToast,
   buildModeratorUpdateNotice,
@@ -125,6 +126,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
     autoFlairReconcileEnabled: true,
+    autoDenyShadowbannedEnabled: false,
     maxDenialsBeforeBlock: 3,
     requiredPhotoCount: 2,
     photoInstructions: 'Follow the instructions.',
@@ -5359,4 +5361,62 @@ test('computeUserGrade keeps hard-risk override despite positive signals', () =>
   );
   assert.equal(result.grade, 'spam_risk');
   assert.deepEqual(result.reasons, ['Account is shadowbanned']);
+});
+
+test('autoDenyShadowbannedSubmission denies without counting toward the block threshold', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 2,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        example_user: '1',
+      },
+    },
+  });
+
+  const result = await autoDenyShadowbannedSubmission(
+    reviewContext.context as never,
+    reviewContext.subredditId,
+    'ExampleSub',
+    reviewContext.record.id,
+    { ...buildRuntimeConfig(), maxDenialsBeforeBlock: 2 }
+  );
+
+  assert.ok(result);
+  assert.equal(result?.outcome, 'completed');
+  assert.equal(result?.applied, true);
+  assert.equal(result?.userBlocked, false);
+
+  const storedRecord = reviewContext.getParsedRecord();
+  assert.equal(storedRecord?.status, 'denied');
+  assert.equal(storedRecord?.moderator, 'VouchX (auto)');
+  assert.equal(storedRecord?.denyReason, null);
+  // Denial count is not incremented and the user is not auto-blocked.
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
+  assert.ok(!reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.has('example_user'));
+  assert.ok(
+    reviewContext.addModNoteCalls.some((call) => String(call.note ?? '').toLowerCase().includes('shadowbanned'))
+  );
+  // The user-facing modmail explains the shadowban and links to the appeal page.
+  const denialModmail = reviewContext.createConversationCalls.find((call) =>
+    String(call.body ?? '').toLowerCase().includes('shadowbanned')
+  );
+  assert.ok(denialModmail, 'expected a shadowban denial modmail to be sent');
+  assert.ok(String(denialModmail?.body ?? '').includes('reddit.com/appeals'));
+});
+
+test('autoDenyShadowbannedSubmission is a no-op when the record is no longer pending', async () => {
+  const reviewContext = createReviewActionContext({
+    recordOverrides: { status: 'denied', reviewedAt: '2026-03-11T12:30:00.000Z' },
+  });
+
+  const result = await autoDenyShadowbannedSubmission(
+    reviewContext.context as never,
+    reviewContext.subredditId,
+    'ExampleSub',
+    reviewContext.record.id,
+    buildRuntimeConfig()
+  );
+
+  assert.equal(result, null);
+  assert.equal(reviewContext.addModNoteCalls.length, 0);
 });

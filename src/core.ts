@@ -130,6 +130,7 @@ type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
   autoFlairReconcileEnabled: boolean;
+  autoDenyShadowbannedEnabled: boolean;
   maxDenialsBeforeBlock: number;
   requiredPhotoCount: number;
   photoInstructions: string;
@@ -773,6 +774,7 @@ const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
 const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
 const INSTALL_SETTING_AUTO_ARCHIVE_PENDING_MODMAIL_ENABLED = 'auto_archive_pending_modmail_enabled';
+const INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED = 'auto_deny_shadowbanned_enabled';
 const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flairs_enabled';
 const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
@@ -2085,6 +2087,27 @@ async function submitVerification(
   await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
   const pendingModmail = await sendPendingSubmissionModmail(context, record, config);
   await enrichPendingAccountDetailsFromModmail(context, subredditId, verificationId, pendingModmail.userData);
+
+  if (config.autoDenyShadowbannedEnabled && pendingModmail.userData?.isShadowBanned === true) {
+    try {
+      const autoDenyResult = await autoDenyShadowbannedSubmission(
+        context,
+        subredditId,
+        subredditName,
+        verificationId,
+        config
+      );
+      if (autoDenyResult) {
+        // Auto-denied: skip the pending-submission mod note so it does not contradict the denial.
+        return { pendingModmail };
+      }
+    } catch (error) {
+      console.log(
+        `Auto-deny of shadowbanned submission failed for ${verificationId}: ${errorText(error)}`
+      );
+    }
+  }
+
   try {
     await addPendingSubmissionModNote(context, record);
   } catch (error) {
@@ -3331,131 +3354,271 @@ async function denyVerification(
       lastFlairReconcileAt: null,
     };
 
-    await setRecord(context, subredditId, reviewedRecord);
-    const historyAnchorMs = getHistoryRecordAnchorMs(reviewedRecord);
-    await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
-    await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
-    await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, record.username);
-    await context.redis.zAdd(historyDateIndexKey(subredditId), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await deleteUserPendingPointers(context, subredditId, record.username, record.userId);
-    await setUserLatestPointer(context, subredditId, record.username, record.userId, verificationId);
-    await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
-
-    await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
-
-    const [modmail, modNote] = await Promise.all([
-      sendDenialModmail(context, subredditId, reviewedRecord, config),
-      (async (): Promise<ModNoteStepResult> => {
-        try {
-          await addDenialModNote(context, reviewedRecord, moderator, config);
-          return { status: 'success' };
-        } catch (error) {
-          return { status: 'failed', reason: errorText(error) };
-        }
-      })(),
-    ]);
-
     const denyReasonLabel = getDenyReasonDisplayLabel(config, reason);
-    const denialCount = await incrementDenialCount(context, subredditId, record.username);
-    let userBlocked = false;
-    let manualBlockOutcome: ManualBlockOutcome | undefined;
-    if (config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
-      const blockedEntry: BlockedUserEntry = {
-        username: normalizeUsernameForLookup(record.username),
-        blockedAt: new Date().toISOString(),
-        deniedCount: denialCount,
-        reason: `Reached ${denialCount} denials`,
-        scope: 'subreddit',
-      };
-      const wasAlreadyBlocked = await isUserBlocked(context, subredditId, record.username);
-      await setBlockedUser(context, subredditId, blockedEntry);
-      userBlocked = true;
-      if (!wasAlreadyBlocked) {
-        try {
-          await appendAuditLog(context, {
-            subredditId,
-            subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
-            username: reviewedRecord.username,
-            actor: moderator,
-            action: 'blocked',
-            verificationId: reviewedRecord.id,
-            notes: blockedEntry.reason,
-          });
-        } catch (error) {
-          console.log(`Audit log write failed (blocked): ${errorText(error)}`);
-        }
-      }
-    }
-    if (options?.blockUser && !userBlocked) {
-      try {
-        const blockResult = await setManualBlockedUserEntry(
-          context,
-          subredditId,
-          subredditName,
-          normalizeUsernameStrict(record.username),
-          moderator,
-          denialCount,
-          false
-        );
-        manualBlockOutcome = {
-          status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
-          username: blockResult.entry.username,
-        };
-      } catch (error) {
-        manualBlockOutcome = {
-          status: 'failed',
-          reason: errorText(error),
-        };
-      }
-    }
-
-    try {
-      await appendAuditLog(context, {
-        subredditId,
-        subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
-        username: reviewedRecord.username,
-        actor: moderator,
-        action: 'denied',
-        verificationId: reviewedRecord.id,
-        notes: `${denyReasonLabel}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
-          userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
-        }${
-          manualBlockOutcome?.status === 'blocked'
-            ? ' | Blocked by moderator during denial.'
-            : manualBlockOutcome?.status === 'already_blocked'
-              ? ' | User was already blocked.'
-              : manualBlockOutcome?.status === 'failed'
-                ? ` | Block request failed: ${manualBlockOutcome.reason ?? 'unknown error'}`
-                : ''
-        }`,
-      });
-    } catch (error) {
-      console.log(`Audit log write failed (denied): ${errorText(error)}`);
-    }
-
-    return {
-      outcome: 'completed',
-      applied: true,
-      username: reviewedRecord.username,
+    return await finalizeDeniedVerification(context, subredditId, subredditName, reviewedRecord, config, {
+      actor: moderator,
       denyReasonLabel,
-      flair: { status: 'skipped', reason: 'not applicable' },
-      modmail,
-      modNote,
-      userBlocked,
-      denialCount,
-      manualBlockOutcome,
+      auditReasonNote: denyReasonLabel,
+      moderatorNotes,
+      blockUser: options?.blockUser,
+      sendModmail: () => sendDenialModmail(context, subredditId, reviewedRecord, config),
+      addModNote: () => addDenialModNote(context, reviewedRecord, moderator, config),
+    });
+  });
+}
+
+// Shared persistence + side effects for a denial, used by both moderator-initiated denials and
+// the automated shadowban auto-deny path. The caller builds `reviewedRecord` (status 'denied',
+// moderator/actor, denyReason) and supplies the modmail + mod-note senders; this function performs
+// the record write, index updates, denial-count increment, block-at-threshold, and audit logging.
+async function finalizeDeniedVerification(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  reviewedRecord: VerificationRecord,
+  config: RuntimeConfig,
+  params: {
+    actor: string;
+    denyReasonLabel: string;
+    auditReasonNote: string;
+    moderatorNotes?: string;
+    blockUser?: boolean;
+    countTowardBlock?: boolean;
+    sendModmail: () => Promise<ModmailStepResult>;
+    addModNote: () => Promise<void>;
+  }
+): Promise<ActionResult> {
+  const { actor, denyReasonLabel, auditReasonNote, moderatorNotes } = params;
+  // Moderator denials count toward the auto-block threshold; automated denials (e.g. shadowban)
+  // deliberately do not, so a Reddit-level shadowban does not silently push a user toward a block.
+  const countTowardBlock = params.countTowardBlock !== false;
+  const verificationId = reviewedRecord.id;
+
+  await setRecord(context, subredditId, reviewedRecord);
+  const historyAnchorMs = getHistoryRecordAnchorMs(reviewedRecord);
+  await context.redis.zRem(pendingIndexKey(subredditId), [verificationId]);
+  await context.redis.zRem(approvedIndexKey(subredditId), [verificationId]);
+  await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, reviewedRecord.username);
+  await context.redis.zAdd(historyDateIndexKey(subredditId), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(reviewedRecord.username)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(actor)), {
+    member: verificationId,
+    score: historyAnchorMs,
+  });
+  await deleteUserPendingPointers(context, subredditId, reviewedRecord.username, reviewedRecord.userId);
+  await setUserLatestPointer(context, subredditId, reviewedRecord.username, reviewedRecord.userId, verificationId);
+  await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
+
+  await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
+
+  const [modmail, modNote] = await Promise.all([
+    params.sendModmail(),
+    (async (): Promise<ModNoteStepResult> => {
+      try {
+        await params.addModNote();
+        return { status: 'success' };
+      } catch (error) {
+        return { status: 'failed', reason: errorText(error) };
+      }
+    })(),
+  ]);
+
+  const denialCount = countTowardBlock
+    ? await incrementDenialCount(context, subredditId, reviewedRecord.username)
+    : await getStoredDenialCount(context, subredditId, reviewedRecord.username);
+  let userBlocked = false;
+  let manualBlockOutcome: ManualBlockOutcome | undefined;
+  if (countTowardBlock && config.maxDenialsBeforeBlock > 0 && denialCount >= config.maxDenialsBeforeBlock) {
+    const blockedEntry: BlockedUserEntry = {
+      username: normalizeUsernameForLookup(reviewedRecord.username),
+      blockedAt: new Date().toISOString(),
+      deniedCount: denialCount,
+      reason: `Reached ${denialCount} denials`,
+      scope: 'subreddit',
     };
+    const wasAlreadyBlocked = await isUserBlocked(context, subredditId, reviewedRecord.username);
+    await setBlockedUser(context, subredditId, blockedEntry);
+    userBlocked = true;
+    if (!wasAlreadyBlocked) {
+      try {
+        await appendAuditLog(context, {
+          subredditId,
+          subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
+          username: reviewedRecord.username,
+          actor,
+          action: 'blocked',
+          verificationId: reviewedRecord.id,
+          notes: blockedEntry.reason,
+        });
+      } catch (error) {
+        console.log(`Audit log write failed (blocked): ${errorText(error)}`);
+      }
+    }
+  }
+  if (countTowardBlock && params.blockUser && !userBlocked) {
+    try {
+      const blockResult = await setManualBlockedUserEntry(
+        context,
+        subredditId,
+        subredditName,
+        normalizeUsernameStrict(reviewedRecord.username),
+        actor,
+        denialCount,
+        false
+      );
+      manualBlockOutcome = {
+        status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',
+        username: blockResult.entry.username,
+      };
+    } catch (error) {
+      manualBlockOutcome = {
+        status: 'failed',
+        reason: errorText(error),
+      };
+    }
+  }
+
+  try {
+    await appendAuditLog(context, {
+      subredditId,
+      subredditName: sanitizeSubredditName(reviewedRecord.subredditName),
+      username: reviewedRecord.username,
+      actor,
+      action: 'denied',
+      verificationId: reviewedRecord.id,
+      notes: `${auditReasonNote}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
+        userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
+      }${
+        manualBlockOutcome?.status === 'blocked'
+          ? ' | Blocked by moderator during denial.'
+          : manualBlockOutcome?.status === 'already_blocked'
+            ? ' | User was already blocked.'
+            : manualBlockOutcome?.status === 'failed'
+              ? ` | Block request failed: ${manualBlockOutcome.reason ?? 'unknown error'}`
+              : ''
+      }`,
+    });
+  } catch (error) {
+    console.log(`Audit log write failed (denied): ${errorText(error)}`);
+  }
+
+  return {
+    outcome: 'completed',
+    applied: true,
+    username: reviewedRecord.username,
+    denyReasonLabel,
+    flair: { status: 'skipped', reason: 'not applicable' },
+    modmail,
+    modNote,
+    userBlocked,
+    denialCount,
+    manualBlockOutcome,
+  };
+}
+
+// Automated denial of a just-submitted verification when Reddit reports the account as
+// shadowbanned and the moderator has opted in. Re-reads the record inside the action lock and
+// only acts while it is still pending, so a concurrent withdrawal cannot be resurrected. The
+// denial does not count toward the auto-block threshold, and the user-facing modmail explains the
+// shadowban and links to Reddit's appeal page.
+const AUTO_DENY_SYSTEM_ACTOR = 'VouchX (auto)';
+// Reddit's official appeal page for account actions. Shadowbans are applied by Reddit admins,
+// not by the subreddit, so users must appeal to Reddit directly.
+const SHADOWBAN_APPEAL_URL = 'https://www.reddit.com/appeals';
+
+async function autoDenyShadowbannedSubmission(
+  context: Devvit.Context,
+  subredditId: string,
+  subredditName: string,
+  verificationId: string,
+  config: RuntimeConfig
+): Promise<ActionResult | null> {
+  return await withVerificationActionLock(context, subredditId, verificationId, async () => {
+    const record = await getRecord(context, subredditId, verificationId);
+    if (!record || record.status !== 'pending') {
+      return null;
+    }
+    const reviewedRecord: VerificationRecord = {
+      ...record,
+      status: 'denied',
+      moderator: AUTO_DENY_SYSTEM_ACTOR,
+      reviewedAt: new Date().toISOString(),
+      denyReason: null,
+      denyNotes: 'Account is shadowbanned',
+      claimedBy: null,
+      claimedAt: null,
+      accountDetails: null,
+      removedAt: null,
+      removedBy: null,
+      lastValidatedAt: null,
+      nextValidationAt: null,
+      hardExpireAt: null,
+      validationFailureCount: 0,
+      terminalValidationFailureCount: 0,
+      lastFlairReconcileAt: null,
+    };
+    return await finalizeDeniedVerification(context, subredditId, subredditName, reviewedRecord, config, {
+      actor: AUTO_DENY_SYSTEM_ACTOR,
+      denyReasonLabel: 'Shadowbanned account',
+      auditReasonNote: 'Auto-denied — account is shadowbanned',
+      moderatorNotes: undefined,
+      blockUser: false,
+      countTowardBlock: false,
+      sendModmail: () => sendShadowbanAutoDenyModmail(context, subredditId, reviewedRecord, config),
+      addModNote: () => addShadowbanAutoDenyModNote(context, reviewedRecord),
+    });
+  });
+}
+
+async function sendShadowbanAutoDenyModmail(
+  context: Devvit.Context,
+  subredditId: string,
+  record: VerificationRecord,
+  config: RuntimeConfig
+): Promise<ModmailStepResult> {
+  const subredditName = sanitizeSubredditName(record.subredditName);
+  const values = {
+    username: record.username,
+    mod: '',
+    subreddit: subredditName,
+    date_submitted: formatTimestamp(record.submittedAt),
+    reason: '',
+    denial_notes: '',
+    days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+  };
+  const subject = buildModmailSubject(config.modmailSubject, values);
+  const body = [
+    `Thanks for your verification request to r/${subredditName}.`,
+    '',
+    'We are unable to approve it because your Reddit account appears to be **shadowbanned**. ' +
+      'A shadowban is applied by Reddit’s admins, not by this community, and it prevents us from ' +
+      'verifying your account activity.',
+    '',
+    `You can appeal this directly to Reddit at ${SHADOWBAN_APPEAL_URL}. Once the shadowban is lifted, ` +
+      'you are welcome to submit a new verification request.',
+  ].join('\n');
+
+  return await sendUserModmailWithFallback(context, {
+    subredditId,
+    subredditName,
+    subject,
+    body,
+    username: record.username,
+    eventId: `deny:${record.id}`,
+  });
+}
+
+async function addShadowbanAutoDenyModNote(context: Devvit.Context, record: VerificationRecord): Promise<void> {
+  await context.reddit.addModNote({
+    subreddit: sanitizeSubredditName(record.subredditName),
+    user: record.username,
+    note: 'Verification auto-denied by VouchX: account is shadowbanned.',
   });
 }
 
@@ -7850,6 +8013,9 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
   const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
   );
+  const rawAutoDenyShadowbannedEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED
+  );
   const rawMultipleApprovalFlairsEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED
   );
@@ -7866,6 +8032,10 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     typeof rawAutoFlairReconcileEnabled === 'boolean'
       ? rawAutoFlairReconcileEnabled
       : parseBooleanString(rawAutoFlairReconcileEnabled, true);
+  const autoDenyShadowbannedEnabled =
+    typeof rawAutoDenyShadowbannedEnabled === 'boolean'
+      ? rawAutoDenyShadowbannedEnabled
+      : parseBooleanString(rawAutoDenyShadowbannedEnabled, false);
   const multipleApprovalFlairsEnabled =
     typeof rawMultipleApprovalFlairsEnabled === 'boolean'
       ? rawMultipleApprovalFlairsEnabled
@@ -7901,6 +8071,7 @@ async function getRuntimeConfig(context: Devvit.Context, subredditId: string): P
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
     autoFlairReconcileEnabled,
+    autoDenyShadowbannedEnabled,
     maxDenialsBeforeBlock,
     requiredPhotoCount,
     photoInstructions: normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructions]),
@@ -9924,6 +10095,7 @@ export {
   deleteCurrentUserVerificationData,
   approveVerification,
   denyVerification,
+  autoDenyShadowbannedSubmission,
   batchReviewVerifications,
   buildBatchReviewToast,
   normalizeBatchReviewVerificationIds,
