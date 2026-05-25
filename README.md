@@ -116,6 +116,9 @@ Full changelog:
 - Photo Instructions now support multiple languages: English, Spanish, and French, Configured in **Mod Panel > Photo Instructions**
 - History & Audit records now include links to view submitted photos for approved verifications
 - Added batch queue actions for moderators
+- Added a user scoring system that assigns an advisory grade — Spam Risk, Limited History, Standard, or Established — to each pending verification, shown as a badge on the queue card. Grades are derived from account signals, with a per-signal breakdown available in the account details "stats" on the pending car
+- Added a Content Creator badge that flags pending submissions whose Reddit profile links to a known content-creator platform (informational only; does not affect the grade)
+- Added an optional setting to automatically deny submissions from shadowbanned accounts, Configurable in **Install Settings** (off by default). 
 - Added optional auto-archive support for pending-user modmail replies, Configurable in **Install Settings**
 - Added Markdown helper controls and placeholder insertion menus to:
   - Photo Instructions
@@ -129,6 +132,7 @@ Full changelog:
 - Improved performance for flair and moderator lookups
 - Updated to Devvit 0.12.24
 - Added global blocklist support
+- Updated the Privacy Policy to disclose the additional account signals processed for the user scoring system and the optional shadowban auto-deny
 - Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied
 
 ---
