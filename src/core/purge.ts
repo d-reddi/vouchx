@@ -7,14 +7,8 @@ import type {
   RedisContext,
   VerificationRecord,
 } from './types.ts';
-import {
-  SELF_DELETE_INDEX_SCAN_LIMIT,
-  VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS,
-} from './constants.ts';
-import {
-  extractTemplateId,
-  normalizeTemplateId,
-} from './flair.ts';
+import { SELF_DELETE_INDEX_SCAN_LIMIT, VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS } from './constants.ts';
+import { extractTemplateId, normalizeTemplateId } from './flair.ts';
 import {
   approvedIndexKey,
   auditDateIndexKey,
@@ -31,18 +25,16 @@ import {
   reopenedChildByDeniedKey,
   reopenedStateByDeniedKey,
   userLatestKey,
+  userLatestKeyById,
   userPendingKey,
+  userPendingKeyById,
   verificationRecordKey,
 } from './keys.ts';
-import {
-  assertCanReview,
-} from './moderator-access.ts';
-import {
-  addPendingWithdrawalModNote,
-  addSelfRemovalModNote,
-} from './modmail.ts';
+import { assertCanReview } from './moderator-access.ts';
+import { addPendingWithdrawalModNote, addSelfRemovalModNote } from './modmail.ts';
 import {
   errorText,
+  getCurrentSubredditNameCompat,
   maskUsernameForLog,
   normalizeUsername,
   normalizeUsernameKey,
@@ -62,16 +54,7 @@ import {
   parseRecord,
   removeApprovedPrefixIndexEntries,
 } from './records.ts';
-import {
-  getModMenuAuditPurgeMinAgeDays,
-  purgeAuditLogOlderThanDays,
-  removeValidationTrackingForRecordIds,
-} from './retention.ts';
-import {
-  getCurrentSubredditNameCompat,
-  userLatestKeyById,
-  userPendingKeyById,
-} from '../core.ts';
+import { getModMenuAuditPurgeMinAgeDays, purgeAuditLogOlderThanDays, removeValidationTrackingForRecordIds } from './retention.ts';
 
 export async function onModeratorPurgeUserData(
   event: FormOnSubmitEvent<PurgeUserDataFormValues>,

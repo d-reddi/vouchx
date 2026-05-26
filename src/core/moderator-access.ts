@@ -20,7 +20,10 @@ import {
   pendingIndexKey,
 } from './keys.ts';
 import {
+  dedupeNonEmpty,
   errorText,
+  getCurrentSubredditNameCompat,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUserId,
   normalizeUsername,
@@ -29,12 +32,7 @@ import {
   sanitizeSubredditName,
   usernamesEqual,
 } from './normalize.ts';
-import {
-  dedupeNonEmpty,
-  getCurrentSubredditNameCompat,
-  looksLikeTransientRedditTransportError,
-  parseBooleanString,
-} from '../core.ts';
+import { parseBooleanString } from './settings.ts';
 
 export const moderatorAccessRequestMemoSymbol = Symbol('vouchx.moderatorAccessRequestMemo');
 

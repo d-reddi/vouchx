@@ -24,11 +24,14 @@ import {
   modmailThreadByUserEntryKey,
   pendingModmailConversationKey,
   userPendingKey,
+  userPendingKeyById,
 } from './keys.ts';
 import {
+  dedupeNonEmpty,
   errorText,
   firstNonEmpty,
   formatTimestamp,
+  looksLikeTransientRedditTransportError,
   normalizeModmailConversationId,
   normalizeOptionalBoolean,
   normalizeUserId,
@@ -39,19 +42,16 @@ import {
   usernameLookupFields,
   usernamesEqual,
 } from './normalize.ts';
+import { SHADOWBAN_APPEAL_URL } from './review-actions.ts';
 import {
-  SHADOWBAN_APPEAL_URL,
-  dedupeNonEmpty,
   formatPendingTurnaroundDays,
   getConfiguredDenyReason,
   getDenyReasonDisplayLabel,
-  getRecord,
   getRuntimeConfig,
-  looksLikeTransientRedditTransportError,
   parseBooleanString,
   parseDenyReason,
-  userPendingKeyById,
-} from '../core.ts';
+} from './settings.ts';
+import { getRecord } from './records.ts';
 
 export async function sendShadowbanAutoDenyModmail(
   context: Devvit.Context,

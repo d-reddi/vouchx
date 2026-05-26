@@ -45,13 +45,12 @@ import {
   validationSchedulePresentKey,
   verificationRecordKey,
 } from './keys.ts';
-import {
-  createRedisLockToken,
-  releaseRedisLockIfOwned,
-} from './locks.ts';
+import { createRedisLockToken, releaseRedisLockIfOwned } from './locks.ts';
 import {
   addDaysIso,
   errorText,
+  looksLikeDeletedOrSuspendedError,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUsername,
   normalizeUsernameStrict,
@@ -74,12 +73,8 @@ import {
   setUserLatestPointer,
   sweepStaleRecordIndexEntries,
 } from './records.ts';
-import {
-  looksLikeDeletedOrSuspendedError,
-  looksLikeTransientRedditTransportError,
-  parseNonNegativeInt,
-  purgeUserVerificationData,
-} from '../core.ts';
+import { parseNonNegativeInt } from './settings.ts';
+import { purgeUserVerificationData } from './purge.ts';
 
 export async function pruneHistoryOlderThanDays(
   context: RedisContext,

@@ -102,6 +102,18 @@ import type {
   RgbColor,
 } from './core/types.ts';
 import {
+  getCurrentSubredditNameCompat,
+} from './core/normalize.ts';
+import {
+  readGlobalUsernameSetting,
+  readMergedGlobalUsernameSettings,
+} from './core/blocking.ts';
+import {
+  dedupeNonEmpty,
+  looksLikeDeletedOrSuspendedError,
+  looksLikeTransientRedditTransportError,
+} from './core/normalize.ts';
+import {
   onModeratorPurgeUserData,
   withdrawCurrentUserPendingVerification,
   deleteCurrentUserVerificationData,
@@ -672,27 +684,7 @@ import {
 
 
 
-async function readGlobalUsernameSetting(
-  context: Pick<Devvit.Context, 'settings'>,
-  settingName: string
-): Promise<ParsedRedditUsernameList> {
-  return parseRedditUsernameList(await context.settings.get<string>(settingName));
-}
 
-async function readMergedGlobalUsernameSettings(
-  context: Pick<Devvit.Context, 'settings'>,
-  settingNames: readonly string[]
-): Promise<ParsedRedditUsernameList> {
-  const rawChunkCount = await context.settings.get<string>(GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME);
-  const parsedChunkCount = Number.parseInt(String(rawChunkCount ?? '').trim(), 10);
-  const activeSettingNames =
-    Number.isFinite(parsedChunkCount) && parsedChunkCount >= 0
-      ? settingNames.slice(0, Math.min(settingNames.length, parsedChunkCount))
-      : settingNames;
-  return mergeParsedRedditUsernameLists(
-    await Promise.all(activeSettingNames.map((settingName) => readGlobalUsernameSetting(context, settingName)))
-  );
-}
 
 
 
@@ -842,19 +834,6 @@ async function readMergedGlobalUsernameSettings(
 
 
 
-function dedupeNonEmpty(values: string[]): string[] {
-  const deduped: string[] = [];
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      continue;
-    }
-    if (!deduped.includes(trimmed)) {
-      deduped.push(trimmed);
-    }
-  }
-  return deduped;
-}
 
 
 
@@ -979,29 +958,9 @@ function dedupeNonEmpty(values: string[]): string[] {
 
 
 
-async function getCurrentSubredditNameCompat(
-  context: Pick<Devvit.Context, 'reddit'> & { subredditName?: string | null }
-): Promise<string> {
-  const contextSubredditName = sanitizeSubredditName(typeof context.subredditName === 'string' ? context.subredditName : '');
-  if (contextSubredditName) {
-    return contextSubredditName;
-  }
 
-  const redditClient = context.reddit as Devvit.Context['reddit'] & {
-    getCurrentSubredditName?: () => Promise<string>;
-    getCurrentSubreddit: () => Promise<{ name?: string | null }>;
-  };
 
-  if (typeof redditClient.getCurrentSubredditName === 'function') {
-    const subredditName = sanitizeSubredditName(await redditClient.getCurrentSubredditName());
-    if (subredditName) {
-      return subredditName;
-    }
-  }
 
-  const subreddit = await redditClient.getCurrentSubreddit();
-  return sanitizeSubredditName(typeof subreddit?.name === 'string' ? subreddit.name : '');
-}
 
 
 
@@ -1073,62 +1032,6 @@ async function getCurrentSubredditNameCompat(
 
 
 
-
-function looksLikeDeletedOrSuspendedError(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  if (normalized.includes('user_doesnt_exist')) {
-    return true;
-  }
-  if (normalized.includes('does not exist') && normalized.includes('user')) {
-    return true;
-  }
-  if (normalized.includes("doesn't exist") && normalized.includes('user')) {
-    return true;
-  }
-  if (normalized.includes('doesnt exist') && normalized.includes('user')) {
-    return true;
-  }
-  if (normalized.includes('unknown user')) {
-    return true;
-  }
-  if (normalized.includes('not found') && normalized.includes('user')) {
-    return true;
-  }
-  if (normalized.includes('account deleted') || normalized.includes('account is deleted')) {
-    return true;
-  }
-  if (normalized.includes('account suspended') || normalized.includes('user is suspended')) {
-    return true;
-  }
-  return false;
-}
-
-
-function looksLikeTransientRedditTransportError(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  return (
-    normalized.includes('unknown internal error') ||
-    (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
-    (normalized.includes('grpc invocation failed') && /\b5\d\d\b/.test(normalized)) ||
-    /\b5\d\d\s+internal server error\b/.test(normalized) ||
-    normalized.includes('unexpected eof') ||
-    normalized.includes('i/o timeout') ||
-    normalized.includes('read tcp') ||
-    normalized.includes('write tcp') ||
-    normalized.includes('upstream request missing or timed out') ||
-    normalized.includes('timed out') ||
-    normalized.includes('timeout') ||
-    normalized.includes('socket hang up') ||
-    normalized.includes('econnreset') ||
-    normalized.includes('connection reset')
-  );
-}
 
 
 export {
@@ -1252,39 +1155,3 @@ export type {
   UpdateNoticeState,
 };
 
-// @core-reexport-start (managed: internal symbols imported by submodules)
-export {
-  SHADOWBAN_APPEAL_URL,
-  addApprovedPrefixIndexEntry,
-  applyApprovalFlairWithFallbacks,
-  asAuditAction,
-  assertCanAccessModeratorSettingsTab,
-  dedupeNonEmpty,
-  formatAuditEntry,
-  formatPendingTurnaroundDays,
-  getConfiguredDenyReason,
-  getDenyReasonDisplayLabel,
-  getRecord,
-  getViewerIdentitySnapshot,
-  logModeratorLookupFailureWithCooldown,
-  looksLikeDeletedOrSuspendedError,
-  looksLikeTransientRedditTransportError,
-  mGetStringValuesInChunks,
-  parseAuditEntry,
-  parseBooleanString,
-  parseNonNegativeInt,
-  pendingClaimChanged,
-  purgeUserVerificationData,
-  readGlobalUsernameSetting,
-  readMergedGlobalUsernameSettings,
-  removeAllVerificationRecordsForUser,
-  removeApprovedPrefixIndexEntries,
-  removeUserFlairWithFallbacks,
-  removeValidationTrackingForRecordIds,
-  setRecord,
-  shouldSuppressViewerVerifiedState,
-  toPendingPanelItem,
-  userLatestKeyById,
-  userPendingKeyById,
-};
-// @core-reexport-end

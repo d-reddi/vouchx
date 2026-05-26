@@ -30,19 +30,9 @@ import {
   setManualBlockedUserEntry,
   unblockUserForModerator,
 } from './blocking.ts';
-import {
-  BATCH_REVIEW_CONCURRENCY,
-  HISTORY_RETENTION_DAYS,
-  MAX_BATCH_REVIEW_ITEMS,
-} from './constants.ts';
-import {
-  toPendingPanelItem,
-} from './dashboard.ts';
-import {
-  configuredApprovalTemplateIds,
-  isLikelyFlairTemplateId,
-  normalizeTemplateId,
-} from './flair.ts';
+import { BATCH_REVIEW_CONCURRENCY, HISTORY_RETENTION_DAYS, MAX_BATCH_REVIEW_ITEMS } from './constants.ts';
+import { toPendingPanelItem } from './dashboard.ts';
+import { configuredApprovalTemplateIds, isLikelyFlairTemplateId, normalizeTemplateId } from './flair.ts';
 import {
   approvedIndexKey,
   auditDateIndexKey,
@@ -60,13 +50,8 @@ import {
   userPendingKey,
   verificationRecordKey,
 } from './keys.ts';
-import {
-  assertClaimAllowsAction,
-  withVerificationActionLock,
-} from './locks.ts';
-import {
-  assertCanReview,
-} from './moderator-access.ts';
+import { assertClaimAllowsAction, withVerificationActionLock } from './locks.ts';
+import { assertCanReview } from './moderator-access.ts';
 import {
   addApprovalModNote,
   addDenialModNote,
@@ -79,6 +64,8 @@ import {
 } from './modmail.ts';
 import {
   errorText,
+  getCurrentSubredditNameCompat,
+  looksLikeDeletedOrSuspendedError,
   maskUsernameForLog,
   normalizeUsername,
   normalizeUsernameForLookup,
@@ -115,15 +102,8 @@ import {
   getRuntimeConfig,
   normalizePhotoInput,
 } from './settings.ts';
-import {
-  collectPendingAccountDetailsSnapshot,
-  lookupCurrentSubredditBanStatus,
-} from './submission.ts';
-import {
-  getCurrentSubredditNameCompat,
-  looksLikeDeletedOrSuspendedError,
-  removeUserFlairWithFallbacks,
-} from '../core.ts';
+import { collectPendingAccountDetailsSnapshot, lookupCurrentSubredditBanStatus } from './submission.ts';
+import { removeUserFlairWithFallbacks } from './purge.ts';
 
 export async function preflightReviewTargetAccount(
   context: Pick<Devvit.Context, 'reddit'>,

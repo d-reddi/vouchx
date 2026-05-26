@@ -1,7 +1,6 @@
-import type {
-  ParsedVersion,
-} from './types.ts';
+import type { ParsedVersion } from './types.ts';
 import { normalizeLooseRedditUsername, normalizeStrictRedditUsername } from '../shared/global-usernames.ts';
+import type { Devvit } from '@devvit/public-api';
 
 export function parseVersion(value: unknown): ParsedVersion | null {
   const normalized = typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
@@ -194,4 +193,97 @@ export function formatTimestamp(iso: string): string {
     return iso;
   }
   return date.toLocaleString();
+}
+
+export function dedupeNonEmpty(values: string[]): string[] {
+  const deduped: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (!deduped.includes(trimmed)) {
+      deduped.push(trimmed);
+    }
+  }
+  return deduped;
+}
+
+export function looksLikeDeletedOrSuspendedError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (normalized.includes('user_doesnt_exist')) {
+    return true;
+  }
+  if (normalized.includes('does not exist') && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes("doesn't exist") && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes('doesnt exist') && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes('unknown user')) {
+    return true;
+  }
+  if (normalized.includes('not found') && normalized.includes('user')) {
+    return true;
+  }
+  if (normalized.includes('account deleted') || normalized.includes('account is deleted')) {
+    return true;
+  }
+  if (normalized.includes('account suspended') || normalized.includes('user is suspended')) {
+    return true;
+  }
+  return false;
+}
+
+export function looksLikeTransientRedditTransportError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('unknown internal error') ||
+    (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
+    (normalized.includes('grpc invocation failed') && /\b5\d\d\b/.test(normalized)) ||
+    /\b5\d\d\s+internal server error\b/.test(normalized) ||
+    normalized.includes('unexpected eof') ||
+    normalized.includes('i/o timeout') ||
+    normalized.includes('read tcp') ||
+    normalized.includes('write tcp') ||
+    normalized.includes('upstream request missing or timed out') ||
+    normalized.includes('timed out') ||
+    normalized.includes('timeout') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('connection reset')
+  );
+}
+
+export async function getCurrentSubredditNameCompat(
+  context: Pick<Devvit.Context, 'reddit'> & { subredditName?: string | null }
+): Promise<string> {
+  const contextSubredditName = sanitizeSubredditName(typeof context.subredditName === 'string' ? context.subredditName : '');
+  if (contextSubredditName) {
+    return contextSubredditName;
+  }
+
+  const redditClient = context.reddit as Devvit.Context['reddit'] & {
+    getCurrentSubredditName?: () => Promise<string>;
+    getCurrentSubreddit: () => Promise<{ name?: string | null }>;
+  };
+
+  if (typeof redditClient.getCurrentSubredditName === 'function') {
+    const subredditName = sanitizeSubredditName(await redditClient.getCurrentSubredditName());
+    if (subredditName) {
+      return subredditName;
+    }
+  }
+
+  const subreddit = await redditClient.getCurrentSubreddit();
+  return sanitizeSubredditName(typeof subreddit?.name === 'string' ? subreddit.name : '');
 }
