@@ -172,3 +172,11 @@ export function updateNoticeDismissalKey(subredditId: string, moderator: string,
     moderator
   )}:${normalizedVersion}`;
 }
+
+export function userPendingKeyById(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
+}
+
+export function userLatestKeyById(subredditId: string, userId: string): string {
+  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:latest`;
+}
