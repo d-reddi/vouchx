@@ -1,33 +1,17 @@
 import type { Devvit } from '@devvit/public-api';
-import type {
-  PendingPanelItem,
-  VerificationRecord,
-} from './types.ts';
+import type { PendingPanelItem, VerificationRecord } from './types.ts';
+import { PENDING_CLAIM_TTL_MS, VERIFICATION_ACTION_LOCK_TTL_MS } from './constants.ts';
+import { pendingIndexKey, verificationActionLockKey } from './keys.ts';
+import { assertCanReview } from './moderator-access.ts';
 import {
-  PENDING_CLAIM_TTL_MS,
-  VERIFICATION_ACTION_LOCK_TTL_MS,
-} from './constants.ts';
-import {
-  pendingIndexKey,
-  verificationActionLockKey,
-} from './keys.ts';
-import {
-  assertCanReview,
-} from './moderator-access.ts';
-import {
+  getCurrentSubredditNameCompat,
   normalizeUsernameForLookup,
   parseTimestampMs,
   sanitizeSubredditId,
   usernamesEqual,
 } from './normalize.ts';
-import {
-  getRecord,
-  setRecord,
-} from './records.ts';
-import {
-  getCurrentSubredditNameCompat,
-  toPendingPanelItem,
-} from '../core.ts';
+import { getRecord, setRecord } from './records.ts';
+import { toPendingPanelItem } from './dashboard.ts';
 
 export function assertClaimAllowsAction(record: VerificationRecord, moderator: string): void {
   const normalizedRecord = clearExpiredPendingClaim(record);

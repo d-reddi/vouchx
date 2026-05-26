@@ -1,30 +1,20 @@
 import type { Devvit } from '@devvit/public-api';
-import type {
-  BlockedUserEntry,
-  RedisContext,
-  RuntimeConfig,
-} from './types.ts';
+import type { BlockedUserEntry, RedisContext, RuntimeConfig } from './types.ts';
 import type { ParsedRedditUsernameList } from '../shared/global-usernames.ts';
-import {
-  blockedUsersKey,
-  denialCountKey,
-} from './keys.ts';
+import { blockedUsersKey, denialCountKey } from './keys.ts';
 import {
   errorText,
+  looksLikeDeletedOrSuspendedError,
   normalizeUsername,
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
   primaryUsernameLookupField,
   usernameLookupFields,
 } from './normalize.ts';
-import {
-  appendAuditLog,
-} from './records.ts';
-import {
-  assertCanReview,
-  getRuntimeConfig,
-  looksLikeDeletedOrSuspendedError,
-} from '../core.ts';
+import { appendAuditLog } from './records.ts';
+import { GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME, mergeParsedRedditUsernameLists, parseRedditUsernameList } from '../shared/global-usernames.ts';
+import { assertCanReview } from './moderator-access.ts';
+import { getRuntimeConfig } from './settings.ts';
 
 export function createGlobalBlockedUserEntry(
   blockedUsernames: ParsedRedditUsernameList,
@@ -348,4 +338,26 @@ export function parseBlockedUserEntry(
   } catch {
     return null;
   }
+}
+
+export async function readGlobalUsernameSetting(
+  context: Pick<Devvit.Context, 'settings'>,
+  settingName: string
+): Promise<ParsedRedditUsernameList> {
+  return parseRedditUsernameList(await context.settings.get<string>(settingName));
+}
+
+export async function readMergedGlobalUsernameSettings(
+  context: Pick<Devvit.Context, 'settings'>,
+  settingNames: readonly string[]
+): Promise<ParsedRedditUsernameList> {
+  const rawChunkCount = await context.settings.get<string>(GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME);
+  const parsedChunkCount = Number.parseInt(String(rawChunkCount ?? '').trim(), 10);
+  const activeSettingNames =
+    Number.isFinite(parsedChunkCount) && parsedChunkCount >= 0
+      ? settingNames.slice(0, Math.min(settingNames.length, parsedChunkCount))
+      : settingNames;
+  return mergeParsedRedditUsernameLists(
+    await Promise.all(activeSettingNames.map((settingName) => readGlobalUsernameSetting(context, settingName)))
+  );
 }

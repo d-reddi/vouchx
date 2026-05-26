@@ -15,9 +15,7 @@ import {
   STORAGE_METER_CAP_BYTES,
   VERIFIED_RECORD_RETENTION_DAYS,
 } from './constants.ts';
-import {
-  normalizeTemplateId,
-} from './flair.ts';
+import { normalizeTemplateId } from './flair.ts';
 import {
   approvedIndexKey,
   approvedPrefixIndexKey,
@@ -32,7 +30,9 @@ import {
   staleRecordIndexSweepCursorKey,
   subredditConfigKey,
   userLatestKey,
+  userLatestKeyById,
   userPendingKey,
+  userPendingKeyById,
   verificationRecordKey,
 } from './keys.ts';
 import {
@@ -42,14 +42,9 @@ import {
   sanitizeSubredditId,
   sanitizeSubredditName,
 } from './normalize.ts';
-import {
-  parseDenyReason,
-  parsePendingAccountDetailsSnapshot,
-  purgeAuditLogOlderThanDays,
-  removeValidationTrackingForRecordIds,
-  userLatestKeyById,
-  userPendingKeyById,
-} from '../core.ts';
+import { parseDenyReason } from './settings.ts';
+import { parsePendingAccountDetailsSnapshot } from './submission.ts';
+import { purgeAuditLogOlderThanDays, removeValidationTrackingForRecordIds } from './retention.ts';
 
 export function getRecordUserId(record: Pick<VerificationRecord, 'userId'> | null | undefined): string {
   return normalizeUserId(record?.userId);

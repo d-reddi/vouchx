@@ -18,24 +18,18 @@ import {
   VIEWER_FLAIR_PROPAGATION_WINDOW_MS,
   VIEWER_FLAIR_RECONCILE_INTERVAL_MS,
 } from './constants.ts';
+import { subredditConfigKey } from './keys.ts';
 import {
-  subredditConfigKey,
-} from './keys.ts';
-import {
+  dedupeNonEmpty,
   errorText,
+  getCurrentSubredditNameCompat,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUserId,
   normalizeUsernameStrict,
   sanitizeSubredditName,
 } from './normalize.ts';
-import {
-  assertCanAccessModeratorSettingsTab,
-  dedupeNonEmpty,
-  getCurrentSubredditNameCompat,
-  getViewerIdentitySnapshot,
-  logModeratorLookupFailureWithCooldown,
-  looksLikeTransientRedditTransportError,
-} from '../core.ts';
+import { assertCanAccessModeratorSettingsTab, getViewerIdentitySnapshot, logModeratorLookupFailureWithCooldown } from './moderator-access.ts';
 
 export function emptyViewerFlairSnapshot(
   userId = '',

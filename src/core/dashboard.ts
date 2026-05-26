@@ -15,12 +15,11 @@ import { GLOBAL_BLOCKED_USERNAME_SETTING_NAMES } from '../shared/global-username
 import {
   createGlobalBlockedUserEntry,
   listBlockedUsers,
+  readGlobalUsernameSetting,
+  readMergedGlobalUsernameSettings,
   repairMissingAutoBlockForUser,
 } from './blocking.ts';
-import {
-  DEFAULT_REQUIRED_PHOTO_COUNT,
-  GLOBAL_SETTING_DEVELOPER_UI_USERNAMES,
-} from './constants.ts';
+import { DEFAULT_REQUIRED_PHOTO_COUNT, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES } from './constants.ts';
 import {
   checkVerificationFlair,
   configuredApprovalTemplateIds,
@@ -35,12 +34,8 @@ import {
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,
 } from './flair.ts';
-import {
-  pendingIndexKey,
-} from './keys.ts';
-import {
-  clearExpiredPendingClaim,
-} from './locks.ts';
+import { pendingIndexKey } from './keys.ts';
+import { clearExpiredPendingClaim } from './locks.ts';
 import {
   getModeratorAccessSnapshot,
   getSettingsTabRequiresConfigAccess,
@@ -51,6 +46,8 @@ import {
 } from './moderator-access.ts';
 import {
   errorText,
+  getCurrentSubredditNameCompat,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUsernameStrict,
   sanitizeSubredditId,
@@ -61,32 +58,13 @@ import {
   getLatestRecordForCurrentViewer,
   setRecord,
 } from './records.ts';
-import {
-  bumpViewerVerifiedRecordRetention,
-} from './retention.ts';
-import {
-  listPendingVerifications,
-  searchApprovedRecords,
-  searchAuditEntries,
-} from './search.ts';
-import {
-  getRuntimeConfig,
-  parseRequiredPhotoCount,
-} from './settings.ts';
-import {
-  THEME_PRESETS,
-  resolveThemePalette,
-} from './theme.ts';
-import {
-  applyApprovalFlairWithFallbacks,
-  computeUserGrade,
-  getCurrentSubredditNameCompat,
-  looksLikeTransientRedditTransportError,
-  readGlobalUsernameSetting,
-  readMergedGlobalUsernameSettings,
-  removeUserFlairWithFallbacks,
-  shouldSuppressViewerVerifiedState,
-} from '../core.ts';
+import { bumpViewerVerifiedRecordRetention } from './retention.ts';
+import { listPendingVerifications, searchApprovedRecords, searchAuditEntries } from './search.ts';
+import { getRuntimeConfig, parseRequiredPhotoCount } from './settings.ts';
+import { THEME_PRESETS, resolveThemePalette } from './theme.ts';
+import { applyApprovalFlairWithFallbacks } from './review-actions.ts';
+import { computeUserGrade } from './submission.ts';
+import { removeUserFlairWithFallbacks, shouldSuppressViewerVerifiedState } from './purge.ts';
 
 export function buildSubmitVerificationForm(data: { [key: string]: any }) {
   const formData = data as SubmitVerificationFormData;

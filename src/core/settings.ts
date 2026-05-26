@@ -50,23 +50,10 @@ import {
   validateFlairTemplateId,
   validateFlairTemplateIdAgainstTemplates,
 } from './flair.ts';
-import {
-  subredditConfigKey,
-} from './keys.ts';
-import {
-  assertCanAccessModeratorSettingsTab,
-} from './moderator-access.ts';
-import {
-  firstNonEmpty,
-  sanitizeSubredditId,
-} from './normalize.ts';
-import {
-  normalizeHexColor,
-  parseThemePreset,
-} from './theme.ts';
-import {
-  getCurrentSubredditNameCompat,
-} from '../core.ts';
+import { subredditConfigKey } from './keys.ts';
+import { assertCanAccessModeratorSettingsTab } from './moderator-access.ts';
+import { firstNonEmpty, getCurrentSubredditNameCompat, sanitizeSubredditId } from './normalize.ts';
+import { normalizeHexColor, parseThemePreset } from './theme.ts';
 
 export function parseDenyReason(value: string | undefined | null): DenyReason | null {
   if (!value) {

@@ -13,6 +13,7 @@ import { GLOBAL_BLOCKED_USERNAME_SETTING_NAMES } from '../shared/global-username
 import {
   createGlobalBlockedUserEntry,
   getStoredDenialCount,
+  readMergedGlobalUsernameSettings,
   repairMissingAutoBlockForUser,
 } from './blocking.ts';
 import {
@@ -27,12 +28,11 @@ import {
   makeVerificationId,
   pendingIndexKey,
 } from './keys.ts';
-import {
-  addPendingSubmissionModNote,
-  sendPendingSubmissionModmail,
-} from './modmail.ts';
+import { addPendingSubmissionModNote, sendPendingSubmissionModmail } from './modmail.ts';
 import {
   errorText,
+  getCurrentSubredditNameCompat,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeNonNegativeWholeNumber,
   normalizeOptionalBoolean,
@@ -50,22 +50,15 @@ import {
   setUserLatestPointer,
   setUserPendingPointer,
 } from './records.ts';
-import {
-  pruneHistoryOlderThanDays,
-} from './retention.ts';
+import { pruneHistoryOlderThanDays } from './retention.ts';
 import {
   getRuntimeConfig,
   normalizePhotoInput,
   normalizeSubmittedPhotoUrl,
   parseRequiredPhotoCount,
 } from './settings.ts';
-import {
-  autoDenyShadowbannedSubmission,
-  getCurrentSubredditNameCompat,
-  looksLikeTransientRedditTransportError,
-  readMergedGlobalUsernameSettings,
-  removeAllVerificationRecordsForUser,
-} from '../core.ts';
+import { autoDenyShadowbannedSubmission } from './review-actions.ts';
+import { removeAllVerificationRecordsForUser } from './purge.ts';
 
 export function normalizePendingBanStatus(value: unknown): PendingAccountDetailsSnapshot['banStatus'] {
   return value === 'banned' || value === 'not_banned' || value === 'unknown' ? value : 'unknown';

@@ -14,14 +14,8 @@ import type {
   SearchPhotoLinkFields,
   VerificationRecord,
 } from './types.ts';
-import {
-  APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER,
-  MAX_PENDING_TO_LOAD,
-  MILLIS_PER_DAY,
-} from './constants.ts';
-import {
-  normalizeUsernamePrefixFilter,
-} from './flair.ts';
+import { APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER, MAX_PENDING_TO_LOAD, MILLIS_PER_DAY } from './constants.ts';
+import { normalizeUsernamePrefixFilter } from './flair.ts';
 import {
   approvedIndexKey,
   approvedPrefixIndexKey,
@@ -33,26 +27,20 @@ import {
   reopenedStateByDeniedKey,
   verificationRecordKey,
 } from './keys.ts';
-import {
-  getFiniteTimestampMs,
-  normalizeUsername,
-  normalizeUsernameForLookup,
-} from './normalize.ts';
+import { getFiniteTimestampMs, normalizeUsername, normalizeUsernameForLookup } from './normalize.ts';
 import {
   addApprovedPrefixIndexEntry,
   asAuditAction,
-  clearExpiredPendingClaim,
   formatAuditEntry,
   mGetStringValuesInChunks,
-  normalizeSubmittedPhotoUrl,
   parseAuditEntry,
-  parseDenyReason,
   parseRecord,
-  pendingClaimChanged,
   removeApprovedPrefixIndexEntries,
-  removeValidationTrackingForRecordIds,
   setRecord,
-} from '../core.ts';
+} from './records.ts';
+import { clearExpiredPendingClaim, pendingClaimChanged } from './locks.ts';
+import { normalizeSubmittedPhotoUrl, parseDenyReason } from './settings.ts';
+import { removeValidationTrackingForRecordIds } from './retention.ts';
 
 export async function listPendingVerifications(context: Devvit.Context, subredditId: string): Promise<VerificationRecord[]> {
   const members = await context.redis.zRange(pendingIndexKey(subredditId), 0, MAX_PENDING_TO_LOAD - 1, {
