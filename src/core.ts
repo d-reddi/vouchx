@@ -450,6 +450,8 @@ import {
   moderatorUiUnavailableBackoffKey,
   recentViewerFlairRemovalSuppressionKey,
   updateNoticeDismissalKey,
+  userPendingKeyById,
+  userLatestKeyById,
 } from './core/keys.ts';
 import {
   sanitizeSubredditId,
@@ -944,13 +946,6 @@ function dedupeNonEmpty(values: string[]): string[] {
 
 
 
-function userPendingKeyById(subredditId: string, userId: string): string {
-  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
-}
-
-function userLatestKeyById(subredditId: string, userId: string): string {
-  return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:latest`;
-}
 
 
 
