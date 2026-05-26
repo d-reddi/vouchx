@@ -8,744 +8,187 @@ import {
   parseRedditUsernameList,
   type ParsedRedditUsernameList,
 } from './shared/global-usernames.ts';
+import type {
+  VerificationStatus,
+  DenyReason,
+  AuditAction,
+  DenyReasonConfig,
+  PublicDenyReasonConfig,
+  DenyReasonSlotDefinition,
+  BlockScope,
+  BlockedUserEntry,
+  DeveloperPanelPayload,
+  UserGrade,
+  UserGradeResult,
+  PendingAccountDetailsSnapshot,
+  VerificationRecord,
+  AuditLogEntry,
+  RuntimeConfig,
+  ApprovalFlairConfig,
+  ThemePresetName,
+  ThemeTokens,
+  ThemePalette,
+  UserSnapshot,
+  ViewerIdentityState,
+  ViewerIdentitySnapshot,
+  DashboardData,
+  FlairVerificationCheck,
+  ViewerFlairLookupState,
+  ViewerFlairSnapshot,
+  ModeratorLookupState,
+  ModeratorPermissionState,
+  ModeratorAccessSnapshot,
+  HubModeratorUiState,
+  SubmitVerificationValues,
+  SubmitVerificationFormData,
+  CreatePostValues,
+  PurgeUserDataFormValues,
+  AuditRetentionJobData,
+  RetentionReconcileSummary,
+  ValidationCheckResult,
+  RedisContext,
+  RedditRedisContext,
+  SchedulerContext,
+  ReviewActionKind,
+  ActionOutcome,
+  FlairStepResult,
+  ModmailUserSignals,
+  ModmailStepResult,
+  PendingModmailReplyEvent,
+  PendingModmailArchiveResult,
+  ModNoteStepResult,
+  ManualBlockOutcome,
+  ActionResult,
+  BatchReviewAction,
+  BatchReviewItemStatus,
+  NormalizedBatchReviewIds,
+  BatchReviewItemResult,
+  BatchReviewResult,
+  BatchReviewToast,
+  DeleteDataResult,
+  PurgeUserDataResult,
+  DeleteDataConfirmValues,
+  FlairTemplateFormValues,
+  ModmailTemplatesFormData,
+  ModmailTemplatesFormValues,
+  ThemeSettingsValues,
+  FlairTemplateValidationState,
+  ApprovalFlairOption,
+  UserFlairTemplateSummary,
+  FlairApplyResult,
+  StorageUsage,
+  PendingPanelItem,
+  PendingAccountDetailsDisplay,
+  SearchPhotoLinkFields,
+  ApprovedSearchPanelItem,
+  ApprovedSearchResponsePayload,
+  AuditSearchPanelItem,
+  AuditSearchResponsePayload,
+  ModeratorStatsRange,
+  ModeratorStatsLeader,
+  ModeratorStatsModeratorRow,
+  ModeratorStatsPayload,
+  AuditWindowCandidate,
+  HistorySearchPanelItem,
+  HistorySearchResponsePayload,
+  ModPanelStatePayload,
+  UpdateNoticeState,
+  PublicHubConfig,
+  HubStatePayload,
+  ReleaseMetadata,
+  SubmitVerificationResult,
+  ParsedVersion,
+  ContentCreatorDetection,
+  RgbColor,
+} from './core/types.ts';
 
-type VerificationStatus = 'pending' | 'approved' | 'denied' | 'removed';
-type DenyReason = 'reason_1' | 'reason_2' | 'reason_3' | 'reason_4';
-type AuditAction =
-  | 'approved'
-  | 'denied'
-  | 'reopened'
-  | 'removed_by_mod'
-  | 'self_removed'
-  | 'blocked'
-  | 'unblocked'
-  | 'audit_purged';
 
-type DenyReasonConfig = {
-  id: DenyReason;
-  label: string;
-  template: string;
-  enabled: boolean;
-};
 
-type PublicDenyReasonConfig = Pick<DenyReasonConfig, 'id' | 'label' | 'enabled'>;
 
-type DenyReasonSlotDefinition = {
-  id: DenyReason;
-  labelSettingName: string;
-  templateConfigFieldName: string;
-  defaultLabel: string;
-  defaultTemplate: string;
-};
 
-type BlockScope = 'subreddit' | 'global';
 
-type BlockedUserEntry = {
-  username: string;
-  blockedAt: string;
-  deniedCount: number;
-  reason: string;
-  scope?: BlockScope;
-};
 
-type DeveloperPanelPayload = {
-  accessGranted: true;
-  currentUsernames: string[];
-  invalidTokens: string[];
-  canonicalValue: string;
-};
 
-type UserGrade = 'trusted' | 'normal' | 'low_engagement' | 'spam_risk';
 
-type UserGradeResult = {
-  grade: UserGrade;
-  score: number;
-  reasons: string[];
-};
 
-type PendingAccountDetailsSnapshot = {
-  capturedAt: string;
-  accountCreatedAt: string | null;
-  totalKarma: number | null;
-  subredditKarma: number | null;
-  previousDeniedAttempts: number;
-  banStatus: 'banned' | 'not_banned' | 'unknown';
-  hasVerifiedEmail: boolean | null;
-  hasRedditPremium: boolean | null;
-  isShadowBanned: boolean | null;
-  recentActivityCount: number | null;
-  socialLinkCount: number;
-  isContentCreator: boolean;
-  creatorLinkTypes: string[];
-};
 
-type VerificationRecord = {
-  id: string;
-  username: string;
-  userId?: string;
-  subredditId: string;
-  subredditName: string;
-  ageAcknowledgedAt: string;
-  adultOnlySelfPhotosConfirmedAt?: string | null;
-  termsAcceptedAt?: string | null;
-  submittedAt: string;
-  photoOneUrl: string;
-  photoTwoUrl: string;
-  photoThreeUrl?: string;
-  status: VerificationStatus;
-  moderator: string | null;
-  reviewedAt: string | null;
-  denyReason: DenyReason | null;
-  denyNotes: string | null;
-  claimedBy?: string | null;
-  claimedAt?: string | null;
-  parentVerificationId?: string | null;
-  isResubmission?: boolean;
-  accountDetails?: PendingAccountDetailsSnapshot | null;
-  removedAt?: string | null;
-  removedBy?: string | null;
-  lastValidatedAt?: string | null;
-  nextValidationAt?: string | null;
-  hardExpireAt?: string | null;
-  validationFailureCount?: number;
-  terminalValidationFailureCount?: number;
-  lastTtlBumpAt?: number | null;
-  lastAppliedFlairTemplateId?: string | null;
-  lastFlairReconcileAt?: number | null;
-};
 
-type AuditLogEntry = {
-  id: string;
-  subredditId: string;
-  subredditName: string;
-  username: string;
-  action: AuditAction;
-  actor: string;
-  at: string;
-  verificationId?: string;
-  notes?: string;
-};
 
-type RuntimeConfig = {
-  verificationsEnabled: boolean;
-  verificationsDisabledMessage: string;
-  autoFlairReconcileEnabled: boolean;
-  autoDenyShadowbannedEnabled: boolean;
-  maxDenialsBeforeBlock: number;
-  requiredPhotoCount: number;
-  photoInstructions: string;
-  photoInstructionsEs: string;
-  photoInstructionsFr: string;
-  photoInstructionsPtBr: string;
-  photoInstructionsDefaultLanguage: string;
-  showPhotoInstructionsBeforeSubmit: boolean;
-  denyReasons: DenyReasonConfig[];
-  pendingTurnaroundDays: number;
-  modmailSubject: string;
-  pendingBody: string;
-  alwaysIncludeDenialNotesInModmail: boolean;
-  flairText: string;
-  flairTemplateId: string;
-  flairCssClass: string;
-  multipleApprovalFlairsEnabled: boolean;
-  additionalApprovalFlairs: ApprovalFlairConfig[];
-  flairTemplateCacheTemplateId: string;
-  flairTemplateCacheText: string;
-  flairTemplateCacheCheckedAt: number;
-  approveHeader: string;
-  approveBody: string;
-  denyHeader: string;
-  removeHeader: string;
-  removeBody: string;
-  themePreset: ThemePresetName;
-  useCustomColors: boolean;
-  customPrimary: string;
-  customAccent: string;
-  customBackground: string;
-};
 
-type ApprovalFlairConfig = {
-  templateId: string;
-  label: string;
-  text: string;
-};
 
-type ThemePresetName =
-  | 'coastal_light'
-  | 'sunset_pop'
-  | 'mint_modern'
-  | 'classic_news'
-  | 'midnight_slate'
-  | 'blue_coral'
-  | 'desert'
-  | 'colorful';
 
-type ThemeTokens = {
-  primary: string;
-  accent: string;
-  success: string;
-  danger: string;
-  bg: string;
-  surface: string;
-  text: string;
-  mutedText: string;
-  border: string;
-};
 
-type ThemePalette = {
-  light: ThemeTokens;
-  dark: ThemeTokens;
-};
 
-type UserSnapshot = {
-  accountAgeDays: number | null;
-  totalKarma: number | null;
-};
 
-type ViewerIdentityState = 'confirmed' | 'anonymous' | 'unavailable';
 
-type ViewerIdentitySnapshot = {
-  state: ViewerIdentityState;
-  userId: string;
-  username: string | null;
-  user: Awaited<ReturnType<Devvit.Context['reddit']['getCurrentUser']>> | null;
-  error: string | null;
-};
 
-type DashboardData = {
-  viewerUsername: string | null;
-  subredditName: string;
-  moderatorAccess: ModeratorAccessSnapshot;
-  isModerator: boolean;
-  canReview: boolean;
-  canManageUsers: boolean;
-  canOpenInstallSettings: boolean;
-  hasConfigAccess: boolean;
-  canAccessSettingsTab: boolean;
-  flairTemplateValidation: FlairTemplateValidationState;
-  requiresInitialSetup: boolean;
-  config: RuntimeConfig;
-  viewerSnapshot: UserSnapshot;
-  viewerShouldDisplayVerified: boolean;
-  viewerAwaitingFlairPropagation: boolean;
-  viewerVerifiedByFlair: boolean;
-  viewerFlairConfiguredTemplateId: string;
-  viewerFlairDetectedTemplateId: string;
-  viewerFlairCheckSource: string;
-  viewerFlairCheckError: string | null;
-  viewerCurrentFlairText: string;
-  viewerCurrentFlairCssClass: string;
-  userLatest: VerificationRecord | null;
-  viewerBlocked: BlockedUserEntry | null;
-  developerPanel?: DeveloperPanelPayload;
-  pendingCount: number;
-  pending: VerificationRecord[];
-  approved: ApprovedSearchPanelItem[];
-  blocked: BlockedUserEntry[];
-  auditLog: AuditSearchPanelItem[];
-  storage: StorageUsage;
-  approvedHasMore: boolean;
-  auditHasMore: boolean;
-};
 
-type FlairVerificationCheck = {
-  verified: boolean;
-  configuredTemplateId: string;
-  detectedTemplateId: string;
-  source: string;
-  error: string | null;
-};
 
-type ViewerFlairLookupState = 'confirmed_present' | 'confirmed_absent' | 'unavailable';
 
-type ViewerFlairSnapshot = {
-  flairText: string;
-  flairCssClass: string;
-  flairTemplateId: string;
-  userId: string;
-  lookupState: ViewerFlairLookupState;
-  error: string | null;
-};
 
-type ModeratorLookupState = 'confirmed' | 'cached' | 'denied' | 'unknown';
-type ModeratorPermissionState = 'confirmed' | 'cached' | 'unknown';
 
-type ModeratorAccessSnapshot = {
-  state: ModeratorLookupState;
-  permissionState: ModeratorPermissionState;
-  isModerator: boolean;
-  permissions: string[];
-};
 
-type HubModeratorUiState = {
-  buttonVisible: boolean;
-  isModerator: boolean;
-  canReview: boolean;
-  pendingCount: number;
-};
 
 const moderatorAccessRequestMemoSymbol = Symbol('vouchx.moderatorAccessRequestMemo');
 const viewerIdentityRequestMemoSymbol = Symbol('vouchx.viewerIdentityRequestMemo');
 
-type SubmitVerificationValues = {
-  is18Confirmed: boolean;
-  adultOnlySelfPhotosConfirmed: boolean;
-  termsAccepted: boolean;
-  photoOneUrl: string;
-  photoTwoUrl: string;
-  photoThreeUrl?: string;
-};
 
-type SubmitVerificationFormData = {
-  requiredPhotoCount?: number;
-};
 
-type CreatePostValues = {
-  postTitle?: string;
-};
 
-type PurgeUserDataFormValues = {
-  confirmationText?: string;
-};
 
-type AuditRetentionJobData = {
-  subredditId: string;
-  subredditName: string;
-};
 
-type RetentionReconcileSummary = {
-  processed: number;
-  validated: number;
-  purged: number;
-  retried: number;
-  nonApprovedProcessed: number;
-  nonApprovedValidated: number;
-  nonApprovedPurged: number;
-  nonApprovedRetried: number;
-  auditPurged: number;
-  staleIndexEntriesPurged: number;
-  skipped: boolean;
-};
 
-type ValidationCheckResult =
-  | { outcome: 'valid' }
-  | { outcome: 'deleted_or_suspended'; reason: string }
-  | { outcome: 'retry'; reason: string };
 
-type RedisContext = Pick<Devvit.Context, 'redis'>;
-type RedditRedisContext = Pick<Devvit.Context, 'redis' | 'reddit'>;
-type SchedulerContext = Pick<Devvit.Context, 'redis' | 'scheduler'>;
-type ReviewActionKind = 'approval' | 'denial';
-type ActionOutcome = 'completed' | 'invalid_account_removed' | 'validation_retry' | 'banned_confirmation_required';
 
-type FlairStepResult = {
-  status: 'success' | 'failed' | 'skipped';
-  reason?: string;
-};
 
-type ModmailUserSignals = {
-  isShadowBanned: boolean | null;
-  recentActivityCount: number | null;
-};
 
-type ModmailStepResult = {
-  status: 'created' | 'replied' | 'failed' | 'skipped';
-  reason?: string;
-  conversationId?: string;
-  userData?: ModmailUserSignals;
-};
 
-type PendingModmailReplyEvent = {
-  messageAuthor?: {
-    id?: string;
-    name?: string;
-  };
-  message_author?: {
-    id?: string;
-    name?: string;
-  };
-  messageAuthorType?: string;
-  message_author_type?: string;
-  conversationState?: string;
-  conversation_state?: string;
-  conversationType?: string;
-  conversation_type?: string;
-  isAutoGenerated?: boolean;
-  is_auto_generated?: boolean;
-  conversationSubreddit?: {
-    id?: string;
-    name?: string;
-  };
-  conversation_subreddit?: {
-    id?: string;
-    name?: string;
-  };
-  destinationSubreddit?: {
-    id?: string;
-    name?: string;
-  };
-  destination_subreddit?: {
-    id?: string;
-    name?: string;
-  };
-  conversationId?: string;
-  conversation_id?: string;
-  messageId?: string;
-  message_id?: string;
-};
 
-type PendingModmailArchiveResult = {
-  archived: boolean;
-  reason?: string;
-  conversationId?: string;
-  username?: string;
-  verificationId?: string;
-};
 
-type ModNoteStepResult = {
-  status: 'success' | 'failed' | 'skipped';
-  reason?: string;
-};
 
-type ManualBlockOutcome = {
-  status: 'blocked' | 'already_blocked' | 'failed';
-  username?: string;
-  reason?: string;
-};
 
-type ActionResult = {
-  outcome: ActionOutcome;
-  applied: boolean;
-  outcomeReason?: string;
-  username?: string;
-  denyReasonLabel?: string;
-  flair: FlairStepResult;
-  modmail: ModmailStepResult;
-  modNote: ModNoteStepResult;
-  userBlocked?: boolean;
-  denialCount?: number;
-  manualBlockOutcome?: ManualBlockOutcome;
-};
 
 const MAX_BATCH_REVIEW_ITEMS = 25;
 const BATCH_REVIEW_CONCURRENCY = 3;
 
-type BatchReviewAction = 'approve' | 'deny';
-type BatchReviewItemStatus =
-  | 'completed'
-  | 'failed'
-  | 'validation_retry'
-  | 'invalid_account_removed'
-  | 'banned_confirmation_required';
 
-type NormalizedBatchReviewIds = {
-  ids: string[];
-  duplicateOrEmptyCount: number;
-  truncatedCount: number;
-};
 
-type BatchReviewItemResult = {
-  verificationId: string;
-  status: BatchReviewItemStatus;
-  terminal: boolean;
-  username?: string;
-  message?: string;
-};
 
-type BatchReviewResult = {
-  action: BatchReviewAction;
-  requestedCount: number;
-  acceptedCount: number;
-  duplicateOrEmptyCount: number;
-  truncatedCount: number;
-  terminalVerificationIds: string[];
-  counts: Record<BatchReviewItemStatus, number>;
-  items: BatchReviewItemResult[];
-};
 
-type BatchReviewToast = {
-  text: string;
-  tone: 'success' | 'error' | 'info';
-};
 
-type DeleteDataResult = {
-  deletedCount: number;
-  flairRemovedFrom: string[];
-  flairRemovalFailedFor: string[];
-};
 
-type PurgeUserDataResult = DeleteDataResult & {
-  purgedAuditCount: number;
-  removedBlockCount: number;
-  removedDenialCount: number;
-  touchedSubreddits: string[];
-};
 
-type DeleteDataConfirmValues = {
-  confirmDelete?: boolean;
-};
 
-type FlairTemplateFormValues = {
-  verificationsEnabled?: boolean;
-  requiredPhotoCount?: number;
-  photoInstructions?: string;
-  photoInstructionsEs?: string;
-  photoInstructionsFr?: string;
-  photoInstructionsPtBr?: string;
-  photoInstructionsDefaultLanguage?: string;
-  flairTemplateId?: string;
-  flairCssClass?: string;
-  multipleApprovalFlairsEnabled?: boolean;
-  additionalApprovalFlairs?: ApprovalFlairConfig[];
-};
 
-type ModmailTemplatesFormData = {
-  pendingTurnaroundDays?: string;
-  modmailSubject?: string;
-  pendingBody?: string;
-  alwaysIncludeDenialNotesInModmail?: boolean;
-  approveHeader?: string;
-  approveBody?: string;
-  denyHeader?: string;
-  denyReasonTemplates?: Partial<Record<DenyReason, string>>;
-  removeHeader?: string;
-  removeBody?: string;
-};
 
-type ModmailTemplatesFormValues = ModmailTemplatesFormData;
 
-type ThemeSettingsValues = {
-  themePreset?: string;
-  useCustomColors?: boolean;
-  customPrimary?: string;
-  customAccent?: string;
-  customBackground?: string;
-};
 
-type FlairTemplateValidationState = {
-  isValid: boolean;
-  code: 'valid' | 'missing' | 'invalid_format' | 'not_found' | 'lookup_failed';
-  message: string;
-};
 
-type ApprovalFlairOption = {
-  id: string;
-  text: string;
-  label: string;
-  backgroundColor: string;
-  textColor: string;
-};
 
-type UserFlairTemplateSummary = {
-  id: string;
-  text: string;
-  modOnly: boolean;
-  backgroundColor: string;
-  textColor: string;
-};
 
-type FlairApplyResult = {
-  applied: boolean;
-  appliedTemplateId?: string;
-  error?: string;
-};
 
-type StorageUsage = {
-  estimatedBytes: number;
-  capBytes: number;
-  percent: number;
-  recordCount: number;
-  auditCount: number;
-  blockedCount: number;
-  deniedCountEntries: number;
-};
 
-type PendingPanelItem = {
-  id: string;
-  username: string;
-  submittedAt: string;
-  acknowledgedAt: string;
-  photoOneUrl: string;
-  photoTwoUrl: string;
-  photoThreeUrl?: string;
-  claimedBy?: string | null;
-  claimedAt?: string | null;
-  parentVerificationId?: string | null;
-  isResubmission?: boolean;
-  accountDetails?: PendingAccountDetailsDisplay | null;
-};
 
 // Persisted snapshot plus the advisory grade computed on display. The grade is derived
 // (never stored in Redis) so it always reflects the current scoring logic.
-type PendingAccountDetailsDisplay = PendingAccountDetailsSnapshot & UserGradeResult;
 
-type SearchPhotoLinkFields = {
-  photoOneUrl?: string;
-  photoTwoUrl?: string;
-  photoThreeUrl?: string;
-};
 
-type ApprovedSearchPanelItem = SearchPhotoLinkFields & {
-  id: string;
-  username: string;
-  approvedAt: string;
-  approvedBy: string;
-  acknowledgedAt: string;
-};
 
-type ApprovedSearchResponsePayload = {
-  items: ApprovedSearchPanelItem[];
-  offset: number;
-  hasMore: boolean;
-  requestId: number;
-};
 
-type AuditSearchPanelItem = SearchPhotoLinkFields & {
-  id: string;
-  username: string;
-  actor: string;
-  action: AuditAction;
-  line: string;
-  at: string;
-};
 
-type AuditSearchResponsePayload = {
-  items: AuditSearchPanelItem[];
-  offset: number;
-  hasMore: boolean;
-  requestId: number;
-};
 
-type ModeratorStatsRange = 'weekly' | 'monthly';
 
-type ModeratorStatsLeader = {
-  moderator: string;
-  count: number;
-};
 
-type ModeratorStatsModeratorRow = {
-  moderator: string;
-  approvals: number;
-  denials: number;
-  reopens: number;
-  totalActions: number;
-};
 
-type ModeratorStatsPayload = {
-  range: ModeratorStatsRange;
-  generatedAt: string;
-  summary: {
-    currentlyVerified: number;
-    approvals: number;
-    denials: number;
-    reopens: number;
-    activeModerators: number;
-  };
-  leaders: {
-    topApprover: ModeratorStatsLeader | null;
-    topDenier: ModeratorStatsLeader | null;
-  };
-  moderators: ModeratorStatsModeratorRow[];
-};
 
-type AuditWindowCandidate = {
-  id: string;
-  entry: AuditLogEntry | null;
-};
 
-type HistorySearchPanelItem = SearchPhotoLinkFields & {
-  id: string;
-  username: string;
-  status: VerificationStatus;
-  submittedAt: string;
-  acknowledgedAt: string;
-  reviewedAt: string | null;
-  moderator: string | null;
-  denyReason?: DenyReason | null;
-  parentVerificationId?: string | null;
-  reopenedChildId?: string | null;
-  reopenedState?: 'none' | 'yes' | 'yes_cancelled';
-};
 
-type HistorySearchResponsePayload = {
-  items: HistorySearchPanelItem[];
-  offset: number;
-  hasMore: boolean;
-  requestId: number;
-};
 
-type ModPanelStatePayload = {
-  viewerUsername: string | null;
-  subredditName: string;
-  canOpenInstallSettings: boolean;
-  hasConfigAccess: boolean;
-  canAccessSettingsTab: boolean;
-  flairTemplateValidation: FlairTemplateValidationState;
-  pendingCount: number;
-  pending: PendingPanelItem[];
-  approved: ApprovedSearchPanelItem[];
-  approvedHasMore: boolean;
-  auditLog: AuditSearchPanelItem[];
-  auditHasMore: boolean;
-  blocked: BlockedUserEntry[];
-  storage: StorageUsage;
-  config: RuntimeConfig;
-  resolvedTheme: ThemePalette;
-  themePresets: Record<ThemePresetName, ThemePalette>;
-  updateNotice?: UpdateNoticeState | null;
-};
 
-type UpdateNoticeState = {
-  targetVersion: string;
-  critical: boolean;
-  title: string | null;
-  notes: string | null;
-  linkUrl: string | null;
-};
 
-type PublicHubConfig = {
-  verificationsEnabled: boolean;
-  verificationsDisabledMessage: string;
-  photoInstructions: string;
-  photoInstructionsEs: string;
-  photoInstructionsFr: string;
-  photoInstructionsPtBr: string;
-  photoInstructionsDefaultLanguage: string;
-  showPhotoInstructionsBeforeSubmit: boolean;
-  pendingTurnaroundDays: number;
-  denyReasons: PublicDenyReasonConfig[];
-};
 
-type HubStatePayload = {
-  viewerUsername: string | null;
-  subredditName: string;
-  isModerator: boolean;
-  canReview: boolean;
-  requiresInitialSetup: boolean;
-  config: PublicHubConfig;
-  viewerShouldDisplayVerified: boolean;
-  viewerAwaitingFlairPropagation: boolean;
-  viewerVerifiedByFlair: boolean;
-  viewerFlairCheckSource: string;
-  viewerBlocked: BlockedUserEntry | null;
-  developerPanel?: DeveloperPanelPayload;
-  userLatest: VerificationRecord | null;
-  pendingCount: number;
-  resolvedTheme: ThemePalette;
-  themePresets: Record<ThemePresetName, ThemePalette>;
-};
 
-type ReleaseMetadata = {
-  version: string;
-  critical: boolean;
-  title: string | null;
-  notes: string | null;
-  linkUrl: string | null;
-};
 
-type SubmitVerificationResult = {
-  pendingModmail: ModmailStepResult;
-};
 
 const APP_KEY_PREFIX = 'photo-verification';
 const SUBREDDIT_KEY_PREFIX = 'subreddit';
@@ -1336,13 +779,6 @@ function normalizeReleaseSeverity(value: unknown): 'critical' | 'normal' | null 
   return null;
 }
 
-type ParsedVersion = {
-  major: number;
-  minor: number;
-  patch: number;
-  playtestRevision: number;
-  normalized: string;
-};
 
 function parseVersion(value: unknown): ParsedVersion | null {
   const normalized = typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
@@ -1717,11 +1153,6 @@ const CREATOR_LINK_DOMAINS: { label: string; domain: string }[] = [
   { label: 'CLIPS4SALE', domain: 'clips4sale.com' },
 ];
 
-type ContentCreatorDetection = {
-  socialLinkCount: number;
-  isContentCreator: boolean;
-  creatorLinkTypes: string[];
-};
 
 function detectContentCreator(rawLinks: unknown): ContentCreatorDetection {
   const links = Array.isArray(rawLinks) ? rawLinks : [];
@@ -9202,7 +8633,6 @@ function normalizeHexColor(input: string): string | null {
   return null;
 }
 
-type RgbColor = { r: number; g: number; b: number };
 
 function hexToRgbColor(hex: string): RgbColor | null {
   const normalized = normalizeHexColor(hex);
