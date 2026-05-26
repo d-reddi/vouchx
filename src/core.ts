@@ -101,6 +101,88 @@ import type {
   ContentCreatorDetection,
   RgbColor,
 } from './core/types.ts';
+import {
+  MAX_BATCH_REVIEW_ITEMS,
+  BATCH_REVIEW_CONCURRENCY,
+  APP_KEY_PREFIX,
+  SUBREDDIT_KEY_PREFIX,
+  MAX_PENDING_TO_LOAD,
+  SELF_DELETE_INDEX_SCAN_LIMIT,
+  MIN_MAX_DENIALS_BEFORE_BLOCK,
+  DEFAULT_MAX_DENIALS_BEFORE_BLOCK,
+  VALIDATION_CHECK_INTERVAL_DAYS,
+  VALIDATION_HARD_EXPIRY_DAYS,
+  VALIDATION_BATCH_SIZE,
+  NON_APPROVED_VALIDATION_BATCH_SIZE,
+  NON_APPROVED_VALIDATION_SCAN_MULTIPLIER,
+  STALE_RECORD_INDEX_SWEEP_BATCH_SIZE,
+  UPDATE_NOTICE_DISMISS_TTL_DAYS,
+  APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER,
+  MILLIS_PER_DAY,
+  HISTORY_RETENTION_DAYS,
+  AUDIT_RETENTION_DAYS,
+  VERIFIED_RECORD_RETENTION_DAYS,
+  VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS,
+  FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS,
+  VIEWER_FLAIR_RECONCILE_INTERVAL_MS,
+  DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
+  INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS,
+  INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
+  INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
+  INSTALL_SETTING_AUTO_ARCHIVE_PENDING_MODMAIL_ENABLED,
+  INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED,
+  INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED,
+  INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK,
+  INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT,
+  INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS,
+  GLOBAL_SETTING_LATEST_RELEASE_VERSION,
+  GLOBAL_SETTING_LATEST_RELEASE_TITLE,
+  GLOBAL_SETTING_LATEST_RELEASE_NOTES,
+  GLOBAL_SETTING_LATEST_RELEASE_LINK,
+  GLOBAL_SETTING_LATEST_RELEASE_SEVERITY,
+  GLOBAL_SETTING_DEVELOPER_UI_USERNAMES,
+  MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,
+  MAX_DENY_REASON_LABEL_LENGTH,
+  PENDING_CLAIM_TTL_MS,
+  VERIFICATION_ACTION_LOCK_TTL_MS,
+  SUBMISSION_PHOTO_ALLOWED_HOSTS,
+  MANUAL_FLAIR_SOURCE_SUBSTRING_MARKER,
+  MANUAL_FLAIR_SOURCE_LEGACY_WILDCARD_MARKER,
+  DEFAULT_GENERIC_DENY_REASON_TEMPLATE,
+  MODMAIL_DENIAL_NOTES_PREFIX,
+  DENIAL_NOTES_PLACEHOLDER_KEY,
+  LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY,
+  DENIAL_NOTES_BLOCK_MARKER,
+  DENY_REASON_INSTALL_SETTINGS,
+  MODMAIL_DEDUPE_TTL_SECONDS,
+  MODERATOR_PERMISSION_CACHE_TTL_MS,
+  MODERATOR_LOOKUP_LOG_COOLDOWN_MS,
+  MODERATOR_UI_POSITIVE_CACHE_TTL_MS,
+  MODERATOR_UI_UNAVAILABLE_BACKOFF_MS,
+  USER_VALIDATION_CRON,
+  USER_VALIDATION_JOB_NAME,
+  USER_VALIDATION_SCHEDULE_LOCK_TTL_MS,
+  USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS,
+  VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS,
+  VIEWER_FLAIR_PROPAGATION_WINDOW_MS,
+  STORAGE_METER_CAP_BYTES,
+  BLOCKED_SUBMISSION_MESSAGE,
+  VERIFICATIONS_DISABLED_MESSAGE,
+  DEFAULT_FLAIR_TEXT,
+  DEFAULT_REQUIRED_PHOTO_COUNT,
+  DEFAULT_PENDING_TURNAROUND_DAYS,
+  DEFAULT_MODMAIL_SUBJECT,
+  DEFAULT_PENDING_BODY,
+  DEFAULT_APPROVE_HEADER,
+  DEFAULT_REMOVAL_HEADER,
+  LEGACY_DEFAULT_APPROVE_BODY,
+  DEFAULT_APPROVE_BODY,
+  DEFAULT_DENY_HEADER,
+  DEFAULT_REMOVAL_BODY,
+  CONFIG_FIELD,
+  DENY_REASON_TEMPLATE_CONFIG_FIELD,
+  LEGACY_CONFIG_FIELD,
+} from './core/constants.ts';
 
 
 
@@ -148,8 +230,6 @@ const viewerIdentityRequestMemoSymbol = Symbol('vouchx.viewerIdentityRequestMemo
 
 
 
-const MAX_BATCH_REVIEW_ITEMS = 25;
-const BATCH_REVIEW_CONCURRENCY = 3;
 
 
 
@@ -190,127 +270,8 @@ const BATCH_REVIEW_CONCURRENCY = 3;
 
 
 
-const APP_KEY_PREFIX = 'photo-verification';
-const SUBREDDIT_KEY_PREFIX = 'subreddit';
 
-const MAX_PENDING_TO_LOAD = 150;
-const SELF_DELETE_INDEX_SCAN_LIMIT = 1000;
-const MIN_MAX_DENIALS_BEFORE_BLOCK = 2;
-const DEFAULT_MAX_DENIALS_BEFORE_BLOCK = 3;
-const VALIDATION_CHECK_INTERVAL_DAYS = 30;
-const VALIDATION_HARD_EXPIRY_DAYS = 45;
-const VALIDATION_BATCH_SIZE = 50;
-const NON_APPROVED_VALIDATION_BATCH_SIZE = 25;
-const NON_APPROVED_VALIDATION_SCAN_MULTIPLIER = 4;
-const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
-const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
-const APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER = 4;
-const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
-const HISTORY_RETENTION_DAYS = 45;
-const AUDIT_RETENTION_DAYS = 45;
-const VERIFIED_RECORD_RETENTION_DAYS = 90;
-const VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS = MILLIS_PER_DAY;
-const FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS = MILLIS_PER_DAY;
-const VIEWER_FLAIR_RECONCILE_INTERVAL_MS = MILLIS_PER_DAY;
-const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
-const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
-const INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE = 'verifications_disabled_message';
-const INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED = 'auto_flair_reconcile_enabled';
-const INSTALL_SETTING_AUTO_ARCHIVE_PENDING_MODMAIL_ENABLED = 'auto_archive_pending_modmail_enabled';
-const INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED = 'auto_deny_shadowbanned_enabled';
-const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flairs_enabled';
-const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
-const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';
-const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
-const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
-const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
-const GLOBAL_SETTING_LATEST_RELEASE_NOTES = 'latest_release_notes';
-const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
-const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
-const GLOBAL_SETTING_DEVELOPER_UI_USERNAMES = 'developer_ui_usernames';
-const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
-const MAX_DENY_REASON_LABEL_LENGTH = 48;
-const PENDING_CLAIM_TTL_MS = 15 * 60 * 1000;
-const VERIFICATION_ACTION_LOCK_TTL_MS = 45000;
-const SUBMISSION_PHOTO_ALLOWED_HOSTS = new Set([
-  'i.redd.it',
-  'preview.redd.it',
-  'i.reddituploads.com',
-  'reddit-uploaded-media.s3-accelerate.amazonaws.com',
-  'reddit-uploaded-media.s3.amazonaws.com',
-]);
-const MANUAL_FLAIR_SOURCE_SUBSTRING_MARKER = 'css-substring-match';
-const MANUAL_FLAIR_SOURCE_LEGACY_WILDCARD_MARKER = 'css-wildcard-match';
-const DEFAULT_GENERIC_DENY_REASON_TEMPLATE =
-  'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team';
-const MODMAIL_DENIAL_NOTES_PREFIX = 'Moderator Notes:';
-const DENIAL_NOTES_PLACEHOLDER_KEY = 'denial_notes';
-const LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY = 'reason';
-const DENIAL_NOTES_BLOCK_MARKER = '__vouchx_denial_notes_block__';
-const DENY_REASON_INSTALL_SETTINGS: readonly DenyReasonSlotDefinition[] = [
-  {
-    id: 'reason_1',
-    labelSettingName: 'deny_reason_1_label',
-    templateConfigFieldName: 'deny_reason_1_template',
-    defaultLabel: 'Altered or edited image',
-    defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification because the image appears edited.\n\nYou can resubmit with unedited photos.\n\nThe moderation team',
-  },
-  {
-    id: 'reason_2',
-    labelSettingName: 'deny_reason_2_label',
-    templateConfigFieldName: 'deny_reason_2_template',
-    defaultLabel: 'Unclear image',
-    defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification because the image was unclear.\n\nPlease resubmit with clear, well-lit photos.\n\nThe moderation team',
-  },
-  {
-    id: 'reason_3',
-    labelSettingName: 'deny_reason_3_label',
-    templateConfigFieldName: 'deny_reason_3_template',
-    defaultLabel: 'Did not follow instructions',
-    defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification because the submission did not follow the instructions.\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
-  },
-  {
-    id: 'reason_4',
-    labelSettingName: 'deny_reason_4_label',
-    templateConfigFieldName: 'deny_reason_4_template',
-    defaultLabel: 'Other',
-    defaultTemplate:
-      'Hi u/{{username}},\n\nWe could not approve your verification at this time.\n\n{{denial_notes}}\n\nPlease review the instructions and resubmit.\n\nThe moderation team',
-  },
-] as const;
-const MODMAIL_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
-const MODERATOR_PERMISSION_CACHE_TTL_MS = 15 * 60 * 1000;
-const MODERATOR_LOOKUP_LOG_COOLDOWN_MS = 15 * 60 * 1000;
-const MODERATOR_UI_POSITIVE_CACHE_TTL_MS = 30 * 60 * 1000;
-const MODERATOR_UI_UNAVAILABLE_BACKOFF_MS = 60 * 1000;
-const USER_VALIDATION_CRON = '30 3 * * *';
-const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-reconcile`;
-const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
-const USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS = 60 * 60 * 1000;
-const VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
-const VIEWER_FLAIR_PROPAGATION_WINDOW_MS = 90 * 1000;
-const STORAGE_METER_CAP_BYTES = 500 * 1024 * 1024;
-const BLOCKED_SUBMISSION_MESSAGE = "You cannot submit a verification request.";
-const VERIFICATIONS_DISABLED_MESSAGE = 'Verifications are temporarily disabled.  Please check back soon.';
 
-const DEFAULT_FLAIR_TEXT = 'Verified';
-const DEFAULT_REQUIRED_PHOTO_COUNT = 2;
-const DEFAULT_PENDING_TURNAROUND_DAYS = 3;
-const DEFAULT_MODMAIL_SUBJECT = 'Verification update from r/{{subreddit}}';
-const DEFAULT_PENDING_BODY =
-  'Hi u/{{username}},\n\nYour verification is in progress. You can check the verification app for your status, and you will receive a message when a decision has been made.\n\nCurrent estimated turn around time: {{days}}\n\nThe moderation team';
-const DEFAULT_APPROVE_HEADER = 'Verification Approved';
-const DEFAULT_REMOVAL_HEADER = 'Verification Revoked';
-const LEGACY_DEFAULT_APPROVE_BODY =
-  'Hi u/{{username}},\n\nYour verification in r/{{subreddit}} was approved and your flair has been updated.\n\nThe moderation team';
-const DEFAULT_APPROVE_BODY =
-  'Hi u/{{username}},\n\nYour verification was approved and your flair has been updated.\n\nThe moderation team';
-const DEFAULT_DENY_HEADER = 'Verification Denied';
-const DEFAULT_REMOVAL_BODY =
-  'Hi u/{{username}},\n\nYour verification in r/{{subreddit}} was revoked.\n\nReason: {{reason}}\n\nYou can resubmit if you want to be verified again.\n\nThe moderation team';
 const DEFAULT_THEME_PRESET: ThemePresetName = 'coastal_light';
 
 const THEME_PRESETS: Record<ThemePresetName, ThemePalette> = {
@@ -508,47 +469,8 @@ const THEME_PRESETS: Record<ThemePresetName, ThemePalette> = {
   },
 };
 
-const CONFIG_FIELD = {
-  verificationsEnabled: 'verifications_enabled',
-  requiredPhotoCount: 'required_photo_count',
-  photoInstructions: 'photo_instructions',
-  photoInstructionsEs: 'photo_instructions_es',
-  photoInstructionsFr: 'photo_instructions_fr',
-  photoInstructionsPtBr: 'photo_instructions_pt_br',
-  photoInstructionsDefaultLanguage: 'photo_instructions_default_language',
-  pendingTurnaroundDays: 'pending_turnaround_days',
-  modmailSubject: 'modmail_subject',
-  pendingBody: 'pending_body',
-  alwaysIncludeDenialNotesInModmail: 'always_include_denial_notes_in_modmail',
-  flairText: 'flair_text',
-  flairTemplateId: 'flair_template_id',
-  flairCssClass: 'flair_css_class',
-  additionalApprovalFlairs: 'additional_approval_flairs_json',
-  flairTemplateCacheTemplateId: 'flair_template_cache_template_id',
-  flairTemplateCacheText: 'flair_template_cache_text',
-  flairTemplateCacheCheckedAt: 'flair_template_cache_checked_at',
-  approveHeader: 'approve_header',
-  approveBody: 'approve_body',
-  denyHeader: 'deny_header',
-  removeHeader: 'remove_header',
-  removeBody: 'remove_body',
-  themePreset: 'theme_preset',
-  useCustomColors: 'theme_use_custom_colors',
-  customPrimary: 'theme_custom_primary',
-  customAccent: 'theme_custom_accent',
-  customBackground: 'theme_custom_background',
-} as const;
 
-const DENY_REASON_TEMPLATE_CONFIG_FIELD: Record<DenyReason, string> = Object.fromEntries(
-  DENY_REASON_INSTALL_SETTINGS.map((setting) => [setting.id, setting.templateConfigFieldName])
-) as Record<DenyReason, string>;
 
-const LEGACY_CONFIG_FIELD = {
-  pendingSubject: 'pending_subject',
-  approveSubject: 'approve_subject',
-  denySubject: 'deny_subject',
-  removeSubject: 'remove_subject',
-} as const;
 
 function parseDenyReason(value: string | undefined | null): DenyReason | null {
   if (!value) {
