@@ -109,7 +109,7 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.4.0
+### v1.4.1
 
 #### New Features
 
@@ -132,7 +132,6 @@ Full changelog:
 - Improved performance for flair and moderator lookups
 - Updated to Devvit 0.12.24
 - Added global blocklist support
-- Updated the Privacy Policy to disclose the additional account signals processed for the user scoring system and the optional shadowban auto-deny
 - Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied
 
 ---
