@@ -102,6 +102,32 @@ import type {
   RgbColor,
 } from './core/types.ts';
 import {
+  sanitizeSubredditId,
+  sanitizeSubredditName,
+  normalizeUserId,
+  normalizeUsername,
+  normalizeUsernameStrict,
+  normalizeUsernameForLookup,
+  primaryUsernameLookupField,
+  usernameLookupFields,
+  normalizeModmailConversationId,
+  maskUsernameForLog,
+  normalizeUsernameKey,
+  usernamesEqual,
+  addDaysIso,
+  firstNonEmpty,
+  parseVersion,
+  compareVersions,
+  parseTimestampMs,
+  getFiniteTimestampMs,
+  errorText,
+  formatTimestamp,
+  normalizeOptionalIsoTimestamp,
+  normalizeOptionalWholeNumber,
+  normalizeNonNegativeWholeNumber,
+  normalizeOptionalBoolean,
+} from './core/normalize.ts';
+import {
   MAX_BATCH_REVIEW_ITEMS,
   BATCH_REVIEW_CONCURRENCY,
   APP_KEY_PREFIX,
@@ -702,43 +728,7 @@ function normalizeReleaseSeverity(value: unknown): 'critical' | 'normal' | null 
 }
 
 
-function parseVersion(value: unknown): ParsedVersion | null {
-  const normalized = typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
-  if (!normalized) {
-    return null;
-  }
-  const parts = normalized.split('.');
-  if (parts.length !== 3 && parts.length !== 4) {
-    return null;
-  }
-  if (!parts.every((part) => /^\d+$/.test(part))) {
-    return null;
-  }
-  const [major, minor, patch, playtestRevision = 0] = parts.map((part) => Number(part));
-  if (![major, minor, patch, playtestRevision].every((part) => Number.isSafeInteger(part) && part >= 0)) {
-    return null;
-  }
-  return {
-    major,
-    minor,
-    patch,
-    playtestRevision,
-    normalized: parts.length === 4 ? `${major}.${minor}.${patch}.${playtestRevision}` : `${major}.${minor}.${patch}`,
-  };
-}
 
-function compareVersions(left: ParsedVersion, right: ParsedVersion): number {
-  if (left.major !== right.major) {
-    return left.major - right.major;
-  }
-  if (left.minor !== right.minor) {
-    return left.minor - right.minor;
-  }
-  if (left.patch !== right.patch) {
-    return left.patch - right.patch;
-  }
-  return left.playtestRevision - right.playtestRevision;
-}
 
 async function readLatestReleaseMetadata(context: Pick<Devvit.Context, 'settings'>): Promise<ReleaseMetadata | null> {
   const [rawVersion, rawSeverity, rawTitle, rawNotes, rawLink] = await Promise.all([
@@ -855,30 +845,8 @@ async function dismissModeratorUpdateNotice(
   );
 }
 
-function normalizeOptionalIsoTimestamp(value: unknown): string | null {
-  if (value instanceof Date) {
-    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
-  }
-  if (typeof value !== 'string' || !value.trim()) {
-    return null;
-  }
-  const parsedMs = new Date(value).getTime();
-  return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : null;
-}
 
-function normalizeOptionalWholeNumber(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return null;
-  }
-  return Math.trunc(value);
-}
 
-function normalizeNonNegativeWholeNumber(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.floor(value));
-}
 
 function normalizePendingBanStatus(value: unknown): PendingAccountDetailsSnapshot['banStatus'] {
   return value === 'banned' || value === 'not_banned' || value === 'unknown' ? value : 'unknown';
@@ -927,9 +895,6 @@ function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetai
   };
 }
 
-function normalizeOptionalBoolean(value: unknown): boolean | null {
-  return typeof value === 'boolean' ? value : null;
-}
 
 function normalizeCreatorLinkTypeList(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -2041,13 +2006,6 @@ function assertClaimAllowsAction(record: VerificationRecord, moderator: string):
   }
 }
 
-function parseTimestampMs(value: string | null | undefined): number {
-  if (!value) {
-    return Number.NaN;
-  }
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
-}
 
 function clearExpiredPendingClaim(record: VerificationRecord, nowMs = Date.now()): VerificationRecord {
   const claimedBy = normalizeUsernameForLookup(record.claimedBy ?? '');
@@ -6760,10 +6718,6 @@ async function getRecord(context: RedisContext, subredditId: string, verificatio
   return parsed;
 }
 
-function getFiniteTimestampMs(input: string | null | undefined, fallbackMs: number): number {
-  const parsedMs = typeof input === 'string' ? new Date(input).getTime() : Number.NaN;
-  return Number.isFinite(parsedMs) ? parsedMs : fallbackMs;
-}
 
 function getApprovedRecordRetentionAnchorMs(
   record: Pick<VerificationRecord, 'submittedAt' | 'reviewedAt' | 'lastTtlBumpAt'>,
@@ -7961,17 +7915,8 @@ function updateNoticeDismissalKey(subredditId: string, moderator: string, target
   )}:${normalizedVersion}`;
 }
 
-function sanitizeSubredditId(input: string): string {
-  return input.trim().toLowerCase();
-}
 
-function sanitizeSubredditName(input: string): string {
-  return input.trim().replace(/^\/?r\//i, '').replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
-}
 
-function normalizeUserId(input: string | null | undefined): string {
-  return typeof input === 'string' ? input.trim() : '';
-}
 
 async function getCurrentSubredditNameCompat(
   context: Pick<Devvit.Context, 'reddit'> & { subredditName?: string | null }
@@ -7997,49 +7942,11 @@ async function getCurrentSubredditNameCompat(
   return sanitizeSubredditName(typeof subreddit?.name === 'string' ? subreddit.name : '');
 }
 
-function normalizeUsername(input: string): string {
-  return normalizeLooseRedditUsername(input);
-}
 
-function normalizeUsernameStrict(input: string): string {
-  return normalizeStrictRedditUsername(input);
-}
 
-function normalizeUsernameForLookup(input: string): string {
-  return normalizeUsernameStrict(input) || normalizeUsername(input);
-}
 
-function primaryUsernameLookupField(input: string): string {
-  return normalizeUsernameStrict(input) || normalizeUsername(input);
-}
 
-function usernameLookupFields(input: string): string[] {
-  const compatibility = normalizeUsername(input);
-  const strict = normalizeUsernameStrict(input);
-  return Array.from(
-    new Set(
-      [
-        compatibility,
-        strict,
-        strict ? `u/${strict}` : '',
-        strict ? `/u/${strict}` : '',
-        strict ? `/user/${strict}` : '',
-        strict ? `/user/${strict}/` : '',
-        strict ? `https://www.reddit.com/user/${strict}` : '',
-        strict ? `https://www.reddit.com/user/${strict}/` : '',
-        strict ? `https://www.reddit.com/user/${strict}/about/` : '',
-      ].filter((value) => typeof value === 'string' && value.trim())
-    )
-  );
-}
 
-function normalizeModmailConversationId(value: string | null | undefined): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  const normalized = value.trim();
-  return normalized.replace(/^ModmailConversation[_:]/i, '');
-}
 
 function normalizeModeratorPermissions(permissions: string[]): string[] {
   return dedupeNonEmpty(permissions.map((permission) => String(permission ?? '').trim()));
@@ -8336,27 +8243,8 @@ async function removeApprovedPrefixIndexEntries(
   }
 }
 
-function maskUsernameForLog(input: string | null | undefined): string {
-  const normalized = normalizeUsernameForLookup(input ?? '');
-  if (!normalized) {
-    return '<redacted-user>';
-  }
-  if (normalized.length <= 2) {
-    return `${normalized.slice(0, 1)}*`;
-  }
-  if (normalized.length <= 4) {
-    return `${normalized.slice(0, 1)}***`;
-  }
-  return `${normalized.slice(0, 2)}***${normalized.slice(-1)}`;
-}
 
-function normalizeUsernameKey(input: string): string {
-  return normalizeUsername(input);
-}
 
-function usernamesEqual(left: string, right: string): boolean {
-  return normalizeUsernameForLookup(left) === normalizeUsernameForLookup(right);
-}
 
 function isApprovedRetentionBumpDue(record: VerificationRecord, nowMs = Date.now()): boolean {
   if (record.status !== 'approved') {
@@ -8372,9 +8260,6 @@ function isApprovedRetentionBumpDue(record: VerificationRecord, nowMs = Date.now
   return true;
 }
 
-function addDaysIso(days: number, fromMs: number): string {
-  return new Date(fromMs + days * 24 * 60 * 60 * 1000).toISOString();
-}
 
 async function bumpViewerVerifiedRecordRetention(
   context: RedisContext,
@@ -8515,14 +8400,6 @@ async function backfillValidationTracking(
   await context.redis.set(validationBackfillCursorKey(subredditId), `${cursor + members.length}`);
 }
 
-function firstNonEmpty(...values: Array<string | undefined | null>): string | undefined {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim()) {
-      return value;
-    }
-  }
-  return undefined;
-}
 
 function parseThemePreset(value: string | undefined): ThemePresetName {
   if (!value) {
@@ -8900,27 +8777,7 @@ function formatPendingTurnaroundDays(days: number): string {
   return `${normalizedDays} ${normalizedDays === 1 ? 'day' : 'days'}`;
 }
 
-function errorText(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
 
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return iso;
-  }
-  return date.toLocaleString();
-}
 
 function formatAuditEntry(entry: AuditLogEntry): string {
   const actor = entry.actor ? `u/${entry.actor}` : 'system';
