@@ -102,6 +102,48 @@ import type {
   RgbColor,
 } from './core/types.ts';
 import {
+  makeVerificationId,
+  subredditScopePrefix,
+  verificationRecordKey,
+  pendingIndexKey,
+  approvedIndexKey,
+  approvedPrefixIndexKey,
+  historyDateIndexKey,
+  historyByUserIndexKey,
+  historyByModeratorIndexKey,
+  userPendingKey,
+  userLatestKey,
+  blockedUsersKey,
+  denialCountKey,
+  auditDateIndexKey,
+  auditEntryKey,
+  subredditConfigKey,
+  validationDueIndexKey,
+  validationHardExpireIndexKey,
+  validationRunLockKey,
+  validationScheduleLockKey,
+  validationSchedulePresentKey,
+  verificationActionLockKey,
+  validationBackfillCursorKey,
+  validationNonApprovedCursorKey,
+  validationNonApprovedFailureCountKey,
+  staleRecordIndexSweepCursorKey,
+  modmailThreadByUserKey,
+  modmailThreadByUserEntryKey,
+  pendingModmailConversationKey,
+  reopenedChildByDeniedKey,
+  reopenedStateByDeniedKey,
+  reopenedAuditByReopenedKey,
+  modmailDedupeKey,
+  modmailLockKey,
+  moderatorPermissionCacheKey,
+  moderatorLookupLogCooldownKey,
+  moderatorUiPositiveCacheKey,
+  moderatorUiUnavailableBackoffKey,
+  recentViewerFlairRemovalSuppressionKey,
+  updateNoticeDismissalKey,
+} from './core/keys.ts';
+import {
   sanitizeSubredditId,
   sanitizeSubredditName,
   normalizeUserId,
@@ -7743,50 +7785,16 @@ function parseAuditEntry(payload: string): AuditLogEntry | null {
   }
 }
 
-function makeVerificationId(date: Date): string {
-  const random = Math.random().toString(36).slice(2, 10);
-  return `${date.getTime()}-${random}`;
-}
 
-function subredditScopePrefix(subredditId: string): string {
-  return `${SUBREDDIT_KEY_PREFIX}:${sanitizeSubredditId(subredditId)}`;
-}
 
-function verificationRecordKey(subredditId: string, id: string): string {
-  return `${subredditScopePrefix(subredditId)}:verification:${id}`;
-}
 
-function pendingIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:pending`;
-}
 
-function approvedIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:approved`;
-}
 
-function approvedPrefixIndexKey(subredditId: string, prefix3: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:approved:prefix3:v1:${normalizeUsername(prefix3).slice(0, 3)}`;
-}
 
-function historyDateIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:history:date`;
-}
 
-function historyByUserIndexKey(subredditId: string, normalizedUsername: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:history:user:${normalizeUsername(normalizedUsername)}`;
-}
 
-function historyByModeratorIndexKey(subredditId: string, normalizedModerator: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:history:mod:${normalizeUsername(normalizedModerator)}`;
-}
 
-function userPendingKey(subredditId: string, normalizedUsername: string): string {
-  return `${subredditScopePrefix(subredditId)}:user:${normalizeUsername(normalizedUsername)}:pending`;
-}
 
-function userLatestKey(subredditId: string, normalizedUsername: string): string {
-  return `${subredditScopePrefix(subredditId)}:user:${normalizeUsername(normalizedUsername)}:latest`;
-}
 
 function userPendingKeyById(subredditId: string, userId: string): string {
   return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
@@ -7796,124 +7804,34 @@ function userLatestKeyById(subredditId: string, userId: string): string {
   return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:latest`;
 }
 
-function blockedUsersKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:blocked`;
-}
 
-function denialCountKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:denials`;
-}
 
-function auditDateIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:audit:date`;
-}
 
-function auditEntryKey(subredditId: string, id: string): string {
-  return `${subredditScopePrefix(subredditId)}:audit:${id}`;
-}
 
-function subredditConfigKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:config`;
-}
 
-function validationDueIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:validation:due`;
-}
 
-function validationHardExpireIndexKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:idx:validation:hard-expire`;
-}
 
-function validationRunLockKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:lock`;
-}
 
-function validationScheduleLockKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:schedule-lock`;
-}
 
-function validationSchedulePresentKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:schedule-present`;
-}
 
-function verificationActionLockKey(subredditId: string, verificationId: string): string {
-  return `${subredditScopePrefix(subredditId)}:verification-action-lock:${verificationId.trim()}`;
-}
 
-function validationBackfillCursorKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:backfill-cursor`;
-}
 
-function validationNonApprovedCursorKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:non-approved-cursor`;
-}
 
-function validationNonApprovedFailureCountKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:validation:non-approved-failures`;
-}
 
-function staleRecordIndexSweepCursorKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:cleanup:stale-record-index-cursor`;
-}
 
-function modmailThreadByUserKey(subredditId: string): string {
-  return `${subredditScopePrefix(subredditId)}:modmail:thread-by-user`;
-}
 
-function modmailThreadByUserEntryKey(subredditId: string, normalizedUsername: string): string {
-  return `${modmailThreadByUserKey(subredditId)}:${normalizeUsername(normalizedUsername)}`;
-}
 
-function pendingModmailConversationKey(subredditId: string, conversationId: string): string {
-  return `${subredditScopePrefix(subredditId)}:modmail:pending-conversation:${normalizeModmailConversationId(conversationId)}`;
-}
 
-function reopenedChildByDeniedKey(subredditId: string, deniedVerificationId: string): string {
-  return `${subredditScopePrefix(subredditId)}:reopened-by-denied:${deniedVerificationId.trim()}`;
-}
 
-function reopenedStateByDeniedKey(subredditId: string, deniedVerificationId: string): string {
-  return `${subredditScopePrefix(subredditId)}:reopened-state-by-denied:${deniedVerificationId.trim()}`;
-}
 
-function reopenedAuditByReopenedKey(subredditId: string, reopenedVerificationId: string): string {
-  return `${subredditScopePrefix(subredditId)}:reopened-audit-by-reopened:${reopenedVerificationId.trim()}`;
-}
 
-function modmailDedupeKey(subredditId: string, eventId: string): string {
-  return `${subredditScopePrefix(subredditId)}:modmail:dedupe:${eventId}`;
-}
 
-function modmailLockKey(subredditId: string, eventId: string): string {
-  return `${subredditScopePrefix(subredditId)}:modmail:lock:${eventId}`;
-}
 
-function moderatorPermissionCacheKey(subredditId: string, username: string): string {
-  return `${subredditScopePrefix(subredditId)}:moderator:permissions:${normalizeUsername(username)}`;
-}
 
-function moderatorLookupLogCooldownKey(subredditId: string, scope: string, username: string): string {
-  return `${subredditScopePrefix(subredditId)}:moderator:lookup-log:${scope}:${normalizeUsername(username) || 'unknown'}`;
-}
 
-function moderatorUiPositiveCacheKey(subredditId: string, userId: string): string {
-  return `${subredditScopePrefix(subredditId)}:moderator-ui:positive:${normalizeUserId(userId) || 'unknown'}`;
-}
 
-function moderatorUiUnavailableBackoffKey(subredditId: string, userId: string): string {
-  return `${subredditScopePrefix(subredditId)}:moderator-ui:unavailable:${normalizeUserId(userId) || 'unknown'}`;
-}
 
-function recentViewerFlairRemovalSuppressionKey(subredditId: string, username: string): string {
-  return `${subredditScopePrefix(subredditId)}:viewer-flair-removal-suppress:${normalizeUsername(username) || 'unknown'}`;
-}
 
-function updateNoticeDismissalKey(subredditId: string, moderator: string, targetVersion: string): string {
-  const normalizedVersion = parseVersion(targetVersion)?.normalized ?? targetVersion.trim().toLowerCase();
-  return `${subredditScopePrefix(subredditId)}:moderator:update-dismissed:${normalizeUsername(
-    moderator
-  )}:${normalizedVersion}`;
-}
 
 
 
