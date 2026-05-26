@@ -118,7 +118,7 @@ Full changelog:
 - Added batch queue actions for moderators
 - Added a user scoring system that assigns an advisory grade — Spam Risk, Limited History, Standard, or Established — to each pending verification, shown as a badge on the queue card. Grades are derived from account signals, with a per-signal breakdown available in the account details "stats" on the pending car
 - Added a Content Creator badge that flags pending submissions whose Reddit profile links to a known content-creator platform (informational only; does not affect the grade)
-- Added an optional setting to automatically deny submissions from shadowbanned accounts, Configurable in **Install Settings** (off by default). 
+- Added an optional setting to automatically deny submissions from shadowbanned accounts, Configurable in Install Settings (off by default). 
 - Added optional auto-archive support for pending-user modmail replies, Configurable in **Install Settings**
 - Added Markdown helper controls and placeholder insertion menus to:
   - Photo Instructions
