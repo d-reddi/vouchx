@@ -27,9 +27,11 @@ import {
   DENY_REASON_TEMPLATE_CONFIG_FIELD,
   INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED,
   INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,
+  INSTALL_SETTING_CONTENT_CREATOR_BADGE_ENABLED,
   INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK,
   INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED,
   INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT,
+  INSTALL_SETTING_USER_ADVISORY_SCORE_BADGE_ENABLED,
   INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE,
   LEGACY_CONFIG_FIELD,
   LEGACY_DEFAULT_APPROVE_BODY,
@@ -345,6 +347,12 @@ export async function getRuntimeConfig(context: Devvit.Context, subredditId: str
   const rawMultipleApprovalFlairsEnabled = await context.settings.get<boolean | string>(
     INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED
   );
+  const rawUserAdvisoryScoreBadgeEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_USER_ADVISORY_SCORE_BADGE_ENABLED
+  );
+  const rawContentCreatorBadgeEnabled = await context.settings.get<boolean | string>(
+    INSTALL_SETTING_CONTENT_CREATOR_BADGE_ENABLED
+  );
   const rawMaxDenialsBeforeBlock = await context.settings.get<number | string>(INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK);
   const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
     INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
@@ -366,6 +374,14 @@ export async function getRuntimeConfig(context: Devvit.Context, subredditId: str
     typeof rawMultipleApprovalFlairsEnabled === 'boolean'
       ? rawMultipleApprovalFlairsEnabled
       : parseBooleanString(rawMultipleApprovalFlairsEnabled, false);
+  const userAdvisoryScoreBadgeEnabled =
+    typeof rawUserAdvisoryScoreBadgeEnabled === 'boolean'
+      ? rawUserAdvisoryScoreBadgeEnabled
+      : parseBooleanString(rawUserAdvisoryScoreBadgeEnabled, true);
+  const contentCreatorBadgeEnabled =
+    typeof rawContentCreatorBadgeEnabled === 'boolean'
+      ? rawContentCreatorBadgeEnabled
+      : parseBooleanString(rawContentCreatorBadgeEnabled, true);
   const maxDenialsBeforeBlock = normalizeMaxDenialsBeforeBlockSetting(rawMaxDenialsBeforeBlock);
   const showPhotoInstructionsBeforeSubmit =
     typeof rawShowPhotoInstructionsBeforeSubmit === 'boolean'
@@ -399,6 +415,8 @@ export async function getRuntimeConfig(context: Devvit.Context, subredditId: str
     autoFlairReconcileEnabled,
     autoDenyShadowbannedEnabled,
     maxDenialsBeforeBlock,
+    userAdvisoryScoreBadgeEnabled,
+    contentCreatorBadgeEnabled,
     requiredPhotoCount,
     photoInstructions: normalizeOptionalSettingText(stored[CONFIG_FIELD.photoInstructions]),
     photoInstructionsEs,

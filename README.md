@@ -109,24 +109,28 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.4.2
+### v1.4.3
 
 #### New Features
 
-- Photo Instructions now support multiple languages: English, Spanish, and French, Configured in **Mod Panel > Photo Instructions**
-- History & Audit records now include links to view submitted photos for approved verifications
+- Photo Instructions now support English, Spanish, French, and Portuguese (Brazil), configurable in **Mod Panel → Photo Instructions** (translation required)
+- History & Audit records now include links to submitted photos for approved verifications
 - Added batch queue actions for moderators
-- Added a user scoring system that assigns an advisory grade — Spam Risk, Limited History, Standard, or Established — to each pending verification, shown as a badge on the queue card. Grades are derived from account signals, with a per-signal breakdown available in the account details "stats" on the pending card
-- Added a Content Creator badge that flags pending submissions whose Reddit profile links to a known content-creator platform (informational only; does not affect the grade)
-- Added an optional setting to automatically deny submissions from shadowbanned accounts, Configurable in Install Settings (off by default). 
-- Added optional auto-archive support for pending-user modmail replies, Configurable in **Install Settings**
-- Added Markdown helper controls and placeholder insertion menus to:
-  - Photo Instructions
-    - Added `{{username}}` placeholder to display the viewing user as `u/username`
-    - Added Android-specific “scroll down” pill message to help users find the full instructions
-    - Added “Caps” helper button to transform selected text to ALL CAPS
-  - Modmail template inputs
-- Mod Panel on Desktop now has expanded view (full screen view)
+- Added advisory user scoring badges for pending verifications (Spam Risk, Limited History, Standard, Established) based on account signals including overall & subreddit karma, previous denials, verified email, Reddit Premium, shadowban status, and recent activity. Individual signal results are available in the pending card **Stats** section to help moderators make informed decisions, configurable in Install Settings *(enabled by default)*
+- Added Content Creator badge for users who may be adult content creators, configurable in Install Settings *(enabled by default)*
+- Added optional automatic denial of shadowbanned accounts, configurable in Install Settings *(disabled by default)*
+- Added optional auto-archive support for pending-user modmail replies, configurable in Install Settings *(enabled by default)*
+- Added Markdown helper controls and placeholder insertion menus to photo instructions and modmail templates
+
+#### Photo Instructions Improvements
+
+- Added `{{username}}` placeholder support (`u/username`)
+- Added Android-specific “scroll down” helper pill
+- Added “Caps” helper button for ALL CAPS formatting
+
+#### Mod Panel Improvements
+
+- Desktop Mod Panel now supports expanded full-screen view
 
 #### Back-End / Technical Changes
 

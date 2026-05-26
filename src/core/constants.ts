@@ -63,6 +63,10 @@ export const INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED = 'auto_deny_shadowb
 
 export const INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED = 'multiple_approval_flairs_enabled';
 
+export const INSTALL_SETTING_USER_ADVISORY_SCORE_BADGE_ENABLED = 'user_advisory_score_badge_enabled';
+
+export const INSTALL_SETTING_CONTENT_CREATOR_BADGE_ENABLED = 'content_creator_badge_enabled';
+
 export const INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK = 'max_denials_before_block';
 
 export const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo_instructions_before_submit';

@@ -279,6 +279,18 @@
         "helpText": "When enabled, moderators can configure additional approval flair template IDs and choose one per approval in the queue.",
         "defaultValue": false
       },
+      "user_advisory_score_badge_enabled": {
+        "type": "boolean",
+        "label": "Show user advisory score badge",
+        "helpText": "When enabled, pending profile cards show the advisory score badge based on account signals. Turn off to keep account details visible without showing the score badge.",
+        "defaultValue": true
+      },
+      "content_creator_badge_enabled": {
+        "type": "boolean",
+        "label": "Show content creator badge",
+        "helpText": "When enabled, pending profile cards show the content creator badge when account links match known adult creator platforms. Turn off to keep account details visible without showing the creator badge.",
+        "defaultValue": true
+      },
       "show_photo_instructions_before_submit": {
         "type": "boolean",
         "label": "Show photo instructions before verification submission",

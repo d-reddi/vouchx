@@ -133,7 +133,7 @@ export function toModPanelState(dashboard: DashboardData): ModPanelStatePayload 
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
     flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
-    pending: dashboard.pending.map((record) => toPendingPanelItem(record)),
+    pending: dashboard.pending.map((record) => toPendingPanelItem(record, dashboard.config)),
     approved: dashboard.approved,
     approvedHasMore: dashboard.approvedHasMore,
     auditLog: dashboard.auditLog,
@@ -189,8 +189,23 @@ export function toHubState(dashboard: DashboardData): HubStatePayload {
   return state;
 }
 
-export function toPendingPanelItem(record: VerificationRecord): PendingPanelItem {
+export function toPendingPanelItem(
+  record: VerificationRecord,
+  config?: Pick<RuntimeConfig, 'userAdvisoryScoreBadgeEnabled' | 'contentCreatorBadgeEnabled'>
+): PendingPanelItem {
   const normalizedRecord = clearExpiredPendingClaim(record);
+  const shouldIncludeAdvisoryScore = config?.userAdvisoryScoreBadgeEnabled !== false;
+  const shouldIncludeContentCreatorBadge = config?.contentCreatorBadgeEnabled !== false;
+  const accountDetails = normalizedRecord.accountDetails
+    ? {
+        ...(shouldIncludeContentCreatorBadge
+          ? normalizedRecord.accountDetails
+          : (({ isContentCreator: _isContentCreator, creatorLinkTypes: _creatorLinkTypes, ...details }) => details)(
+              normalizedRecord.accountDetails
+            )),
+        ...(shouldIncludeAdvisoryScore ? computeUserGrade(normalizedRecord.accountDetails) : {}),
+      }
+    : null;
   return {
     id: normalizedRecord.id,
     username: normalizedRecord.username,
@@ -203,9 +218,7 @@ export function toPendingPanelItem(record: VerificationRecord): PendingPanelItem
     claimedAt: normalizedRecord.claimedAt ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
-    accountDetails: normalizedRecord.accountDetails
-      ? { ...normalizedRecord.accountDetails, ...computeUserGrade(normalizedRecord.accountDetails) }
-      : null,
+    accountDetails,
   };
 }
 

@@ -1114,10 +1114,11 @@ export async function reopenDeniedVerification(
       console.log(`Audit log write failed (reopened): ${errorText(error)}`);
     }
 
+    const config = await getRuntimeConfig(context, subredditId);
     return {
       reopenedId,
       username: reopenedRecord.username,
-      pendingItem: toPendingPanelItem(reopenedRecord),
+      pendingItem: toPendingPanelItem(reopenedRecord, config),
       deniedId: deniedRecord.id,
     };
   });

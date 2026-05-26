@@ -11,6 +11,7 @@ import {
   usernamesEqual,
 } from './normalize.ts';
 import { getRecord, setRecord } from './records.ts';
+import { getRuntimeConfig } from './settings.ts';
 import { toPendingPanelItem } from './dashboard.ts';
 
 export function assertClaimAllowsAction(record: VerificationRecord, moderator: string): void {
@@ -174,5 +175,6 @@ export async function setPendingClaimState(
   }
 
   const pendingCount = await context.redis.zCard(pendingIndexKey(subredditId));
-  return { item: toPendingPanelItem(updatedRecord), changed, pendingCount };
+  const config = await getRuntimeConfig(context, subredditId);
+  return { item: toPendingPanelItem(updatedRecord, config), changed, pendingCount };
 }

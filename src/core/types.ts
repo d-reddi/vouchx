@@ -125,6 +125,8 @@ export type RuntimeConfig = {
   autoFlairReconcileEnabled: boolean;
   autoDenyShadowbannedEnabled: boolean;
   maxDenialsBeforeBlock: number;
+  userAdvisoryScoreBadgeEnabled: boolean;
+  contentCreatorBadgeEnabled: boolean;
   requiredPhotoCount: number;
   photoInstructions: string;
   photoInstructionsEs: string;
@@ -568,7 +570,12 @@ export type PendingPanelItem = {
   accountDetails?: PendingAccountDetailsDisplay | null;
 };
 
-export type PendingAccountDetailsDisplay = PendingAccountDetailsSnapshot & UserGradeResult;
+export type PendingAccountDetailsDisplay = Omit<
+  PendingAccountDetailsSnapshot,
+  'isContentCreator' | 'creatorLinkTypes'
+> &
+  Partial<Pick<PendingAccountDetailsSnapshot, 'isContentCreator' | 'creatorLinkTypes'>> &
+  Partial<UserGradeResult>;
 
 export type SearchPhotoLinkFields = {
   photoOneUrl?: string;

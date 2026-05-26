@@ -128,6 +128,8 @@ function buildRuntimeConfig(): RuntimeConfig {
     autoFlairReconcileEnabled: true,
     autoDenyShadowbannedEnabled: false,
     maxDenialsBeforeBlock: 3,
+    userAdvisoryScoreBadgeEnabled: true,
+    contentCreatorBadgeEnabled: true,
     requiredPhotoCount: 2,
     photoInstructions: 'Follow the instructions.',
     photoInstructionsEs: 'Sigue las instrucciones.',
@@ -631,6 +633,8 @@ function createFlairSettingsSaveContext(options?: {
     textColor?: string;
   }>;
   multipleApprovalFlairsEnabled?: boolean | string;
+  userAdvisoryScoreBadgeEnabled?: boolean | string;
+  contentCreatorBadgeEnabled?: boolean | string;
   settingsTabRequiresConfigAccess?: boolean;
 }) {
   const hashStore = new Map<string, Map<string, string>>();
@@ -669,6 +673,12 @@ function createFlairSettingsSaveContext(options?: {
           }
           if (key === 'multiple_approval_flairs_enabled') {
             return options?.multipleApprovalFlairsEnabled ?? false;
+          }
+          if (key === 'user_advisory_score_badge_enabled') {
+            return options?.userAdvisoryScoreBadgeEnabled;
+          }
+          if (key === 'content_creator_badge_enabled') {
+            return options?.contentCreatorBadgeEnabled;
           }
           if (key === 'verifications_disabled_message') {
             return 'Disabled';
@@ -2127,6 +2137,42 @@ test('getRuntimeConfig defaults translated photo instructions to empty strings a
   assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'en');
 });
 
+test('getRuntimeConfig defaults the user advisory score badge install setting on', async () => {
+  const saveContext = createFlairSettingsSaveContext();
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.userAdvisoryScoreBadgeEnabled, true);
+});
+
+test('getRuntimeConfig reads disabled user advisory score badge install setting', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    userAdvisoryScoreBadgeEnabled: false,
+  });
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.userAdvisoryScoreBadgeEnabled, false);
+});
+
+test('getRuntimeConfig defaults the content creator badge install setting on', async () => {
+  const saveContext = createFlairSettingsSaveContext();
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.contentCreatorBadgeEnabled, true);
+});
+
+test('getRuntimeConfig reads disabled content creator badge install setting', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    contentCreatorBadgeEnabled: false,
+  });
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.contentCreatorBadgeEnabled, false);
+});
+
 test('onSaveFlairTemplateValues still updates verificationsEnabled when explicitly provided', async () => {
   const saveContext = createFlairSettingsSaveContext({
     storedConfig: {
@@ -2839,6 +2885,47 @@ test('toModPanelState includes account details on pending items', () => {
     ...accountDetails,
     ...computeUserGrade(accountDetails),
   });
+});
+
+test('toModPanelState omits advisory score fields from pending items when disabled', () => {
+  const accountDetails = buildPendingAccountDetailsSnapshot({
+    isContentCreator: true,
+    creatorLinkTypes: ['onlyfans'],
+  });
+  const modState = toModPanelState(
+    buildDashboardData({
+      config: { ...buildRuntimeConfig(), userAdvisoryScoreBadgeEnabled: false },
+      pendingCount: 1,
+      pending: [buildRecord({ accountDetails }) as never],
+    })
+  );
+
+  assert.equal(modState.pending.length, 1);
+  const pendingAccountDetails = modState.pending[0].accountDetails as Record<string, unknown> | null | undefined;
+  assert.deepEqual(pendingAccountDetails, accountDetails);
+  assert.equal(Object.prototype.hasOwnProperty.call(pendingAccountDetails ?? {}, 'grade'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(pendingAccountDetails ?? {}, 'score'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(pendingAccountDetails ?? {}, 'reasons'), false);
+});
+
+test('toModPanelState omits content creator badge fields from pending items when disabled', () => {
+  const accountDetails = buildPendingAccountDetailsSnapshot({
+    isContentCreator: true,
+    creatorLinkTypes: ['onlyfans'],
+  });
+  const modState = toModPanelState(
+    buildDashboardData({
+      config: { ...buildRuntimeConfig(), contentCreatorBadgeEnabled: false },
+      pendingCount: 1,
+      pending: [buildRecord({ accountDetails }) as never],
+    })
+  );
+
+  assert.equal(modState.pending.length, 1);
+  const pendingAccountDetails = modState.pending[0].accountDetails as Record<string, unknown> | null | undefined;
+  assert.equal(Object.prototype.hasOwnProperty.call(pendingAccountDetails ?? {}, 'isContentCreator'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(pendingAccountDetails ?? {}, 'creatorLinkTypes'), false);
+  assert.equal(pendingAccountDetails?.grade, computeUserGrade(accountDetails).grade);
 });
 
 test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
