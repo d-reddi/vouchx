@@ -109,14 +109,14 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.4.1
+### v1.4.2
 
 #### New Features
 
 - Photo Instructions now support multiple languages: English, Spanish, and French, Configured in **Mod Panel > Photo Instructions**
 - History & Audit records now include links to view submitted photos for approved verifications
 - Added batch queue actions for moderators
-- Added a user scoring system that assigns an advisory grade — Spam Risk, Limited History, Standard, or Established — to each pending verification, shown as a badge on the queue card. Grades are derived from account signals, with a per-signal breakdown available in the account details "stats" on the pending car
+- Added a user scoring system that assigns an advisory grade — Spam Risk, Limited History, Standard, or Established — to each pending verification, shown as a badge on the queue card. Grades are derived from account signals, with a per-signal breakdown available in the account details "stats" on the pending card
 - Added a Content Creator badge that flags pending submissions whose Reddit profile links to a known content-creator platform (informational only; does not affect the grade)
 - Added an optional setting to automatically deny submissions from shadowbanned accounts, Configurable in Install Settings (off by default). 
 - Added optional auto-archive support for pending-user modmail replies, Configurable in **Install Settings**
@@ -126,6 +126,7 @@ Full changelog:
     - Added Android-specific “scroll down” pill message to help users find the full instructions
     - Added “Caps” helper button to transform selected text to ALL CAPS
   - Modmail template inputs
+- Mod Panel on Desktop now has expanded view (full screen view)
 
 #### Back-End / Technical Changes
 
