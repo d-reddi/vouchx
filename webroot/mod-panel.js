@@ -427,6 +427,31 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS = 2500;
   const STATS_AUTO_REFRESH_INTERVAL_MS = 20 * 1000;
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
+
+  // Friendly display labels for the theme presets. The underlying preset KEYS
+  // stay unchanged for backward compatibility (saved configs keep resolving);
+  // only the label shown in the picker is friendlier. Unknown/legacy keys fall
+  // back to a humanized version of the key.
+  const THEME_PRESET_LABELS = {
+    coastal_light: 'Ocean',
+    sunset_pop: 'Coral',
+    mint_modern: 'Emerald',
+    classic_news: 'Editorial',
+    midnight_slate: 'Indigo',
+    blue_coral: 'Slate Coral',
+    desert: 'Desert',
+    colorful: 'Vibrant',
+  };
+
+  function formatThemePresetLabel(presetKey) {
+    const key = String(presetKey || '');
+    if (Object.prototype.hasOwnProperty.call(THEME_PRESET_LABELS, key)) {
+      return THEME_PRESET_LABELS[key];
+    }
+    return key
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
   const prefersDarkMedia =
     typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -3205,6 +3230,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     card.appendChild(titleRow);
 
+    const metaGroup = document.createElement('div');
+    metaGroup.className = 'pending-meta';
+
     const submitted = document.createElement('p');
     submitted.className = 'item-meta';
     if (item.parentVerificationId) {
@@ -3217,26 +3245,33 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     } else {
       submitted.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
     }
-    card.appendChild(submitted);
-    card.appendChild(createPendingAccountAgeMeta(item));
+    metaGroup.appendChild(submitted);
+    metaGroup.appendChild(createPendingAccountAgeMeta(item));
 
-    appendSubmissionAcknowledgementMeta(card, item);
+    appendSubmissionAcknowledgementMeta(metaGroup, item);
 
     if (isClaimed && !isClaimedByOther) {
       const claimMeta = document.createElement('p');
-      claimMeta.className = 'item-meta';
-      claimMeta.style.color = 'var(--danger)';
+      claimMeta.className = 'item-meta pending-claim-meta';
       claimMeta.textContent = 'Locked by you';
-      card.appendChild(claimMeta);
+      metaGroup.appendChild(claimMeta);
     }
 
     if (isClaimedByOther) {
       const claimLockMeta = document.createElement('p');
-      claimLockMeta.className = 'item-meta';
-      claimLockMeta.style.color = 'var(--danger)';
+      claimLockMeta.className = 'item-meta pending-claim-meta';
       claimLockMeta.textContent = `This request is locked by u/${String(item.claimedBy || '').replace(/^u\//i, '')}`;
-      card.appendChild(claimLockMeta);
+      metaGroup.appendChild(claimLockMeta);
     }
+
+    card.appendChild(metaGroup);
+
+    const decision = document.createElement('div');
+    decision.className = 'pending-decision';
+    const photoCol = document.createElement('div');
+    photoCol.className = 'pending-photo-col';
+    const controlsCol = document.createElement('div');
+    controlsCol.className = 'pending-decision-controls';
 
     const imageGrid = document.createElement('div');
     imageGrid.className = 'image-grid';
@@ -3251,13 +3286,16 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
         imageGrid.appendChild(createPhotoWrap(safeUrl, photo.label));
       }
     }
-    card.appendChild(imageGrid);
+    photoCol.appendChild(imageGrid);
 
     let denyReason = null;
     let denyNotes = null;
     let denyBlockRow = null;
     let denyBlockCheckbox = null;
+    let denySection = null;
     if (!isClaimedByOther && !isReReview) {
+      denySection = document.createElement('div');
+      denySection.className = 'pending-deny hidden';
       const configuredReasons = getEnabledDenyReasons();
       denyReason = document.createElement('select');
       denyReason.className = 'field-select';
@@ -3278,13 +3316,13 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       denyReason.selectedIndex = 0;
       denyReason.value = '';
       denyReason.disabled = configuredReasons.length === 0;
-      card.appendChild(denyReason);
+      denySection.appendChild(denyReason);
 
       if (configuredReasons.length === 0) {
         const noReasonsMeta = document.createElement('p');
         noReasonsMeta.className = 'item-meta';
         noReasonsMeta.textContent = 'Enable at least one denial reason in install settings to deny requests.';
-        card.appendChild(noReasonsMeta);
+        denySection.appendChild(noReasonsMeta);
       }
 
       denyNotes = document.createElement('textarea');
@@ -3292,7 +3330,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       denyNotes.rows = 3;
       denyNotes.placeholder =
         'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
-      card.appendChild(denyNotes);
+      denySection.appendChild(denyNotes);
 
       denyBlockRow = document.createElement('label');
       denyBlockRow.className = 'toggle-row';
@@ -3304,6 +3342,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       const denyBlockText = document.createElement('span');
       denyBlockText.textContent = 'Block user';
       denyBlockRow.append(denyBlockCheckbox, denyBlockText);
+      denySection.appendChild(denyBlockRow);
 
       const syncDenyBlockVisibility = () => {
         const showBlockToggle = Boolean(denyReason && denyReason.value);
@@ -3322,7 +3361,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
 
     const row = document.createElement('div');
-    row.className = 'row';
+    row.className = 'row pending-actions';
     const approvalsAllowed = canApprovePendingItems();
     const approvalFlairChoices = getConfiguredApprovalFlairChoices();
     let approvalChoiceSelect = null;
@@ -3378,6 +3417,20 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
             showToast('No denial reasons are enabled in install settings.', 'error');
             return;
           }
+          // First click reveals the (collapsed) denial options; the moderator
+          // then picks a reason and clicks Deny again to submit.
+          if (denySection && denySection.classList.contains('hidden')) {
+            denySection.classList.remove('hidden');
+            denyBtn.classList.add('is-armed');
+            if (denyReason) {
+              try {
+                denyReason.focus();
+              } catch (_error) {
+                // focus is best-effort
+              }
+            }
+            return;
+          }
           if (!denyReason || !denyReason.value) {
             showToast('Select a denial reason before denying.', 'error');
             return;
@@ -3412,10 +3465,6 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       row.appendChild(claimBtn);
     }
 
-    if (denyBlockRow && !isClaimedByOther && !isReReview) {
-      row.appendChild(denyBlockRow);
-    }
-
     if (item.parentVerificationId && !isClaimedByOther) {
       const cancelReopenBtn = document.createElement('button');
       cancelReopenBtn.className = 'btn btn-secondary';
@@ -3426,7 +3475,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       row.appendChild(cancelReopenBtn);
     }
 
-    card.appendChild(row);
+    controlsCol.appendChild(row);
+
+    if (denySection) {
+      controlsCol.appendChild(denySection);
+    }
+
+    if (imageGrid.childElementCount > 0) {
+      decision.appendChild(photoCol);
+    }
+    decision.appendChild(controlsCol);
+    card.appendChild(decision);
     return card;
   }
 
@@ -4464,7 +4523,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       btn.className = `theme-card ${presetKey === selectedThemePreset ? 'theme-card-active' : ''}`;
       btn.dataset.preset = presetKey;
       btn.innerHTML = `
-        <span class="theme-card-title">${presetKey.replaceAll('_', ' ')}</span>
+        <span class="theme-card-title">${formatThemePresetLabel(presetKey)}</span>
         <span class="theme-swatch-row">
           <span class="theme-swatch" style="background:${tokens.primary}"></span>
           <span class="theme-swatch" style="background:${tokens.accent}"></span>
@@ -4586,7 +4645,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (!state) {
       return;
     }
-    const activeTokens = themeDarkTokens(state.resolvedTheme);
+    const activeTokens = themeTokensForMode(state.resolvedTheme);
     if (activeTokens) {
       applyModeratorThemeVariables(document.documentElement, activeTokens);
       persistThemeSnapshot(state.resolvedTheme);
@@ -4638,20 +4697,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     img.src = safeUrl;
     img.alt = alt;
     img.loading = 'lazy';
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.setAttribute('aria-label', `Open ${alt}`);
     img.addEventListener('click', () => openImage(safeUrl));
-    wrap.appendChild(img);
-
-    const row = document.createElement('div');
-    row.className = 'row';
-
-    const openBtn = document.createElement('button');
-    openBtn.className = 'btn btn-secondary';
-    openBtn.textContent = 'Open';
-    openBtn.addEventListener('click', () => {
-      post({ type: 'openExternalUrl', url: safeUrl });
+    img.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openImage(safeUrl);
+      }
     });
-    row.appendChild(openBtn);
-    wrap.appendChild(row);
+    wrap.appendChild(img);
 
     return wrap;
   }
@@ -4975,9 +5031,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     statsModal.classList.add('hidden');
   }
 
-  function appendAcknowledgementMeta(container, label, iso) {
+  function appendAcknowledgementMeta(container, label, iso, extraClass) {
     const meta = document.createElement('p');
-    meta.className = 'item-meta';
+    meta.className = extraClass ? `item-meta ${extraClass}` : 'item-meta';
     meta.textContent = `${label}: ${iso ? formatTime(iso) : 'Not recorded'}`;
     container.appendChild(meta);
   }
@@ -4986,7 +5042,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     appendAcknowledgementMeta(
       container,
       'Terms accepted and 18+ confirmed at',
-      item.acknowledgedAt || null
+      item.acknowledgedAt || null,
+      'pending-ack-meta'
     );
   }
 

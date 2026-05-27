@@ -85,8 +85,8 @@ function createShell(root, inline) {
       <div data-el="main" class="hub-main hidden">
         <section class="hub-surface">
           <header class="hub-hero">
-            <div class="hub-brand">
-              <div class="hub-title-row">
+            <div class="hub-hero-bar">
+              <div class="hub-brand">
                 <div class="hub-brand-mark">
                   <img
                     data-el="brand-logo"
@@ -95,39 +95,39 @@ function createShell(root, inline) {
                     alt="VouchX logo"
                   />
                 </div>
-                <div class="hub-title-copy">
-                  <p class="hub-kicker">VouchX</p>
-                  <h1>Verification Hub</h1>
-                  ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
-                </div>
+                <p class="hub-brand-name">VouchX</p>
+                ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
               </div>
+              <div class="hub-hero-actions">
+                <span data-el="pending-badge" class="badge hidden"></span>
+                <button data-el="mod-panel-btn" class="btn-secondary hub-toolbar-btn hidden" type="button">Mod Panel</button>
+              </div>
+            </div>
+
+            <div class="hub-status-head">
+              <p data-el="meta-status" class="status-line"></p>
+              <details class="hub-status-help">
+                <summary class="hub-status-help-button" aria-label="Explain current verification status">?</summary>
+                <div data-el="status-tooltip" class="hub-status-tooltip" role="note"></div>
+              </details>
+            </div>
+
+            <h1 data-el="command-title" class="hub-headline">Review the instructions, then submit your verification.</h1>
+            <p data-el="info-msg" class="info-msg hidden"></p>
+
+            <ol data-el="hub-flow" class="hub-flow hub-flow-hub hidden" aria-hidden="true">
+              <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">1</span>Review instructions</span></li>
+              <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">2</span>Submit photos</span></li>
+              <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">3</span>Mod review</span></li>
+            </ol>
+
+            <div class="hub-meta">
               <p data-el="meta-username" class="meta"></p>
               <p data-el="meta-subreddit" class="meta"></p>
-              <div class="hub-brand-status">
-                <div class="hub-status-head">
-                  <p class="hub-status-kicker">Current status</p>
-                  <details class="hub-status-help">
-                    <summary class="hub-status-help-button" aria-label="Explain current verification status">?</summary>
-                    <div data-el="status-tooltip" class="hub-status-tooltip" role="note"></div>
-                  </details>
-                </div>
-                <p data-el="meta-status" class="status-line"></p>
-              </div>
             </div>
-            <div class="hub-hero-actions">
-              <span data-el="pending-badge" class="badge hidden"></span>
-              <button data-el="mod-panel-btn" class="btn-secondary hub-toolbar-btn hidden" type="button">Mod Panel</button>
-            </div>
-          </header>
 
-          <section class="hub-command">
-            <div class="hub-command-copy">
-              <p class="hub-kicker">Actions</p>
-              <h2 data-el="command-title">Review the instructions, then submit your verification.</h2>
-            </div>
-            <p data-el="info-msg" class="info-msg hidden"></p>
             <div data-el="action-row" class="row hub-action-dock"></div>
-          </section>
+          </header>
 
           <details data-el="developer-panel" class="hub-developer hidden">
             <summary class="hub-developer-summary">
@@ -219,7 +219,25 @@ function createShell(root, inline) {
       </div>
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
-        <div class="hub-modal-card">
+        <div class="hub-modal-card hub-photo-card">
+          <header class="hub-photo-head">
+            <div class="hub-photo-brand"><span class="hub-photo-logo">V</span>VouchX</div>
+          </header>
+          <ol class="hub-flow" aria-hidden="true">
+            <li class="hub-flow-step is-current">
+              <span class="hub-flow-bar"></span>
+              <span class="hub-flow-label"><span class="hub-flow-num">1</span>Review instructions</span>
+            </li>
+            <li class="hub-flow-step">
+              <span class="hub-flow-bar"></span>
+              <span class="hub-flow-label"><span class="hub-flow-num">2</span>Submit photos</span>
+            </li>
+            <li class="hub-flow-step">
+              <span class="hub-flow-bar"></span>
+              <span class="hub-flow-label"><span class="hub-flow-num">3</span>Mod review</span>
+            </li>
+          </ol>
+          <p class="hub-photo-eyebrow">Step 1 of 3</p>
           <h2 data-el="photo-instructions-title">Photo Requirements</h2>
           <p data-el="photo-instructions-subtitle" class="meta">
             Review these instructions carefully before submitting your photos.
@@ -234,7 +252,7 @@ function createShell(root, inline) {
             <div data-el="photo-instructions-body" class="markdown-body hub-modal-copy"></div>
             <div data-el="photo-instructions-scroll-hint" class="hub-scroll-hint hidden" aria-hidden="true">Scroll Down ↓</div>
           </div>
-          <div class="row">
+          <div class="row hub-photo-actions">
             <button data-el="photo-instructions-continue" class="btn-primary hidden" type="button">Continue to Submission</button>
             <button data-el="photo-instructions-close" class="btn-secondary" type="button">Close</button>
           </div>
@@ -255,6 +273,7 @@ function createShell(root, inline) {
     pendingBadge: root.querySelector('[data-el="pending-badge"]'),
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
+    hubFlow: root.querySelector('[data-el="hub-flow"]'),
     actionRow: root.querySelector('[data-el="action-row"]'),
     developerPanel: root.querySelector('[data-el="developer-panel"]'),
     developerCurrentList: root.querySelector('[data-el="developer-current-list"]'),
@@ -1685,6 +1704,49 @@ export function mountHub(options = {}) {
     });
   }
 
+  function renderHubFlow(state, { isVerified, isRestricted, awaitingFlairPropagation }) {
+    const flow = refs.hubFlow;
+    if (!flow) {
+      return;
+    }
+    const steps = flow.querySelectorAll('.hub-flow-step');
+    if (steps.length < 3) {
+      flow.classList.add('hidden');
+      return;
+    }
+
+    const canSubmitNow =
+      !isVerified &&
+      !isRestricted &&
+      !awaitingFlairPropagation &&
+      !state.requiresInitialSetup &&
+      state.config.verificationsEnabled &&
+      !(state.userLatest && state.userLatest.status === 'pending');
+    const isPendingReview = !isVerified && !isRestricted && state.userLatest?.status === 'pending';
+
+    // -1 hides the onboarding flow (verified / blocked / setup / disabled states
+    // are communicated by the status hero instead).
+    let currentIndex = -1;
+    if (isPendingReview) {
+      currentIndex = 2;
+    } else if (canSubmitNow) {
+      currentIndex = 0;
+    }
+
+    if (currentIndex < 0) {
+      flow.classList.add('hidden');
+      return;
+    }
+    flow.classList.remove('hidden');
+    steps.forEach((step, index) => {
+      step.classList.toggle('is-done', index < currentIndex);
+      step.classList.toggle('is-current', index === currentIndex);
+      // While awaiting moderator review the current step reads as "waiting"
+      // (amber) rather than an active/done step.
+      step.classList.toggle('is-waiting', isPendingReview && index === currentIndex);
+    });
+  }
+
   function renderState(state) {
     if (!state) {
       return;
@@ -1741,8 +1803,9 @@ export function mountHub(options = {}) {
     refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
     refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
 
-    let commandTitle = 'Review the instructions, then submit your verification.';
-    let infoText = '';
+    const subredditLabel = state.subredditName ? `r/${state.subredditName}` : 'this community';
+    let commandTitle = `Get verified in ${subredditLabel}`;
+    let infoText = 'Review the photo requirements, then submit your verification for moderator review.';
     if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
@@ -1763,9 +1826,7 @@ export function mountHub(options = {}) {
         : 'This restriction is only for this subreddit and is based on your activity or verification history.';
     } else if (isVerified) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
-      if (state.userLatest?.reviewedAt) {
-        infoText = `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.`;
-      }
+      infoText = state.userLatest?.reviewedAt ? `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.` : '';
     } else if (state.userLatest?.status === 'denied') {
       commandTitle = 'Denied - Resubmit your photo(s)';
       const parts = [];
@@ -1778,9 +1839,7 @@ export function mountHub(options = {}) {
       infoText = parts.join('\n');
     } else if (state.userLatest?.status === 'removed') {
       commandTitle = 'Verification removed';
-      if (state.userLatest.removedAt) {
-        infoText = `Removed ${formatTimestamp(state.userLatest.removedAt)}.`;
-      }
+      infoText = state.userLatest.removedAt ? `Removed ${formatTimestamp(state.userLatest.removedAt)}.` : '';
     } else if (state.requiresInitialSetup) {
       commandTitle = 'Setup required';
       infoText = state.canReview
@@ -1791,6 +1850,8 @@ export function mountHub(options = {}) {
     refs.commandTitle.textContent = commandTitle;
     refs.infoMsg.textContent = infoText;
     refs.infoMsg.classList.toggle('hidden', !infoText);
+
+    renderHubFlow(state, { isVerified, isRestricted, awaitingFlairPropagation });
 
     refs.actionRow.innerHTML = '';
     renderDeveloperPanel();
