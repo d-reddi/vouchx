@@ -1,7 +1,47 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/inter-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/inter-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/inter-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/inter-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("fonts/inter-800.woff2") format("woff2");
+}
+
 :root {
-  color-scheme: dark;
-  --font-display: "Avenir Next", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --font-body: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  color-scheme: light dark;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  /* Light defaults; dark overrides live in the prefers-color-scheme block. */
+  --ink: #16191e;
+  --ink-contrast: #ffffff;
 
   --theme-primary: #23b3dc;
   --theme-primary-strong: #45c4e7;
@@ -14,26 +54,55 @@
   --theme-muted: #9cb9c8;
   --theme-border: #214153;
 
-  --panel-bg: color-mix(in srgb, #03090f 82%, var(--theme-bg) 18%);
-  --panel-surface: color-mix(in srgb, #0b1218 84%, var(--theme-surface) 16%);
-  --panel-surface-strong: color-mix(in srgb, #101922 76%, var(--theme-surface) 24%);
-  --panel-surface-soft: color-mix(in srgb, #081118 88%, var(--theme-surface) 12%);
-  --panel-divider: color-mix(in srgb, #25313d 76%, var(--theme-border) 24%);
-  --panel-border: color-mix(in srgb, #364757 70%, var(--theme-border) 30%);
-  --panel-border-strong: color-mix(in srgb, #4b5d70 62%, var(--theme-border) 38%);
-  --text: color-mix(in srgb, #f4f8fb 80%, var(--theme-text) 20%);
-  --muted: color-mix(in srgb, #90a6b5 72%, var(--theme-muted) 28%);
-  --primary: color-mix(in srgb, #d4f6ff 10%, var(--theme-primary) 90%);
-  --primary-strong: color-mix(in srgb, #ffffff 18%, var(--theme-primary) 82%);
-  --accent: color-mix(in srgb, #ffe0bf 12%, var(--theme-accent) 88%);
-  --success: color-mix(in srgb, #c9ffea 10%, var(--theme-success) 90%);
-  --danger: color-mix(in srgb, #ffd3db 8%, var(--theme-danger) 92%);
-  --primary-soft: color-mix(in srgb, var(--theme-primary) 14%, transparent);
-  --accent-soft: color-mix(in srgb, var(--theme-accent) 10%, transparent);
-  --success-soft: color-mix(in srgb, var(--theme-success) 12%, transparent);
+  /* ---- Light (default) Minimal palette ---- */
+  --panel-bg: color-mix(in srgb, #eef0f3 94%, var(--theme-bg) 6%);
+  --panel-surface: #ffffff;
+  --panel-surface-strong: color-mix(in srgb, #f5f6f8 92%, var(--theme-surface) 8%);
+  --panel-surface-soft: color-mix(in srgb, #f8f9fb 95%, var(--theme-surface) 5%);
+  --panel-divider: color-mix(in srgb, #e9ecf0 84%, var(--theme-border) 16%);
+  --panel-border: color-mix(in srgb, #e6e9ee 84%, var(--theme-border) 16%);
+  --panel-border-strong: color-mix(in srgb, #d3d8df 74%, var(--theme-border) 26%);
+  --text: color-mix(in srgb, #181b21 84%, var(--theme-text) 16%);
+  --muted: color-mix(in srgb, #5c6573 72%, var(--theme-muted) 28%);
+  --primary: color-mix(in srgb, var(--theme-primary) 88%, #06222b 12%);
+  --primary-strong: color-mix(in srgb, var(--theme-primary) 74%, #05202a 26%);
+  --accent: color-mix(in srgb, var(--theme-accent) 90%, #3a1c00 10%);
+  --success: color-mix(in srgb, var(--theme-success) 86%, #04231a 14%);
+  --danger: color-mix(in srgb, var(--theme-danger) 90%, #2c0710 10%);
+  --primary-soft: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  --accent-soft: color-mix(in srgb, var(--theme-accent) 12%, transparent);
+  --success-soft: color-mix(in srgb, var(--theme-success) 14%, transparent);
   --danger-soft: color-mix(in srgb, var(--theme-danger) 12%, transparent);
-  --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
-  --card-shadow-soft: 0 10px 24px rgba(0, 0, 0, 0.16);
+  --card-shadow: none;
+  --card-shadow-soft: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f3f6f9;
+    --ink-contrast: #0b1117;
+
+    --panel-bg: color-mix(in srgb, #03090f 82%, var(--theme-bg) 18%);
+    --panel-surface: color-mix(in srgb, #0b1218 84%, var(--theme-surface) 16%);
+    --panel-surface-strong: color-mix(in srgb, #101922 76%, var(--theme-surface) 24%);
+    --panel-surface-soft: color-mix(in srgb, #081118 88%, var(--theme-surface) 12%);
+    --panel-divider: color-mix(in srgb, #25313d 76%, var(--theme-border) 24%);
+    --panel-border: color-mix(in srgb, #364757 70%, var(--theme-border) 30%);
+    --panel-border-strong: color-mix(in srgb, #4b5d70 62%, var(--theme-border) 38%);
+    --text: color-mix(in srgb, #f4f8fb 80%, var(--theme-text) 20%);
+    --muted: color-mix(in srgb, #90a6b5 72%, var(--theme-muted) 28%);
+    --primary: color-mix(in srgb, #d4f6ff 10%, var(--theme-primary) 90%);
+    --primary-strong: color-mix(in srgb, #ffffff 18%, var(--theme-primary) 82%);
+    --accent: color-mix(in srgb, #ffe0bf 12%, var(--theme-accent) 88%);
+    --success: color-mix(in srgb, #c9ffea 10%, var(--theme-success) 90%);
+    --danger: color-mix(in srgb, #ffd3db 8%, var(--theme-danger) 92%);
+    --primary-soft: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+    --accent-soft: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+    --success-soft: color-mix(in srgb, var(--theme-success) 12%, transparent);
+    --danger-soft: color-mix(in srgb, var(--theme-danger) 12%, transparent);
+    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+    --card-shadow-soft: 0 10px 24px rgba(0, 0, 0, 0.16);
+  }
 }
 
 *,
@@ -52,10 +121,7 @@ body.mod-panel-page {
   color: var(--text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--theme-primary) 10%, transparent), transparent 34%),
-    radial-gradient(circle at top right, color-mix(in srgb, var(--theme-accent) 7%, transparent), transparent 28%),
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-bg) 94%, #000000 6%), var(--panel-bg));
+  background: var(--panel-bg);
 }
 
 body.mod-panel-page.batch-review-floating-active {
@@ -461,14 +527,17 @@ textarea {
 
 .content-card {
   position: relative;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-surface-strong) 84%, var(--primary-soft) 16%), var(--panel-surface));
-  border: 1px solid color-mix(in srgb, var(--panel-border) 72%, transparent);
-  border-radius: 20px;
+  background: var(--panel-surface);
+  border: 1px solid transparent;
+  border-radius: 16px;
   padding: 18px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 10px 24px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--card-shadow);
+}
+
+@media (prefers-color-scheme: dark) {
+  .content-card {
+    border-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
+  }
 }
 
 .panel-warning {
@@ -654,9 +723,51 @@ textarea {
   align-items: start;
 }
 
+/* Unified settings surface: each panel reads as one cohesive card with
+   hairline-divided sections instead of a grid of separate floating tiles. */
 .settings-panel {
-  display: grid;
-  gap: 18px;
+  display: block;
+  background: var(--panel-surface);
+  border: 1px solid transparent;
+  border-radius: 16px;
+  padding: 2px 20px 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-panel {
+    border-color: color-mix(in srgb, var(--panel-border) 70%, transparent);
+  }
+}
+
+.settings-panel .settings-grid {
+  display: block;
+}
+
+.settings-panel .content-card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 20px 0;
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 52%, transparent);
+}
+
+.settings-panel > .content-card:first-child,
+.settings-panel > .settings-grid:first-child > .content-card:first-child {
+  border-top: 0;
+  padding-top: 18px;
+}
+
+.settings-panel .card-head {
+  border-bottom: 0;
+  padding-bottom: 2px;
+  margin-bottom: 12px;
+}
+
+.settings-panel .panel-footer {
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 52%, transparent);
+  margin-top: 0;
+  padding: 16px 0 8px;
 }
 
 .settings-language-panel {
@@ -784,9 +895,9 @@ textarea {
 .field-select,
 .field-textarea {
   width: 100%;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 66%, transparent);
-  border-radius: 12px;
-  background-color: color-mix(in srgb, var(--panel-surface-soft) 88%, black 12%);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 78%, transparent);
+  border-radius: 10px;
+  background-color: var(--panel-surface-soft);
   color: var(--text);
   padding: 10px 12px;
   min-height: 40px;
@@ -984,14 +1095,14 @@ textarea {
 }
 
 .btn-primary {
-  border-color: color-mix(in srgb, var(--primary) 16%, var(--panel-border) 84%);
-  background: color-mix(in srgb, var(--primary) 12%, var(--panel-surface-strong) 88%);
-  color: color-mix(in srgb, var(--primary) 82%, white 18%);
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--ink-contrast);
 }
 
 .btn-primary:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--primary) 24%, var(--panel-border) 76%);
-  background: color-mix(in srgb, var(--primary) 16%, var(--panel-surface-strong) 84%);
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 88%, var(--ink-contrast) 12%);
 }
 
 .btn-secondary {
@@ -1318,17 +1429,20 @@ textarea {
 
 .pending-stats-btn {
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-surface-soft) 86%, transparent);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 600;
   line-height: 1;
-  padding: 6px 9px;
+  padding: 4px 2px;
   white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  text-underline-offset: 3px;
 }
 
 .pending-stats-btn:hover {
@@ -1338,23 +1452,138 @@ textarea {
 
 .pending-account-meta {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.pending-account-age-chip {
-  display: inline-flex;
+/* Quieter terms/18+ confirmation line so it doesn't compete with controls */
+.pending-ack-meta {
+  margin-top: 3px;
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+}
+
+/* Mobile-first vertical review flow: header -> compact meta -> photo ->
+   actions -> (collapsible) denial options. One cohesive card, no inner boxes. */
+.pending-meta {
+  margin-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pending-meta .item-meta {
+  margin-top: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.pending-claim-meta {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pending-actions {
+  margin-top: 0;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  min-height: 22px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);
-  background: color-mix(in srgb, var(--panel-surface-soft) 88%, transparent);
-  color: var(--text);
-  font-size: 0.76rem;
+  gap: 8px;
+}
+
+/* Photo + decision controls: single column (mobile-first), two columns on
+   wider screens so desktop uses the extra width and the photo can be larger. */
+.pending-decision {
+  margin-top: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.pending-photo-col {
+  min-width: 0;
+}
+
+.pending-decision-controls {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 720px) {
+  .pending-decision {
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+    align-items: start;
+    gap: 22px;
+  }
+
+  .pending-photo-col .image-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}
+
+/* Approve is the primary path; Deny and Lock stay available but quieter. */
+.pending-actions .btn-success {
+  background: var(--success);
+  color: #fff;
+  border-color: transparent;
   font-weight: 700;
-  line-height: 1.35;
+}
+
+.pending-actions .btn-success:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 90%, black 10%);
+  border-color: transparent;
+}
+
+.pending-actions .btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.pending-actions .btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+/* Once Deny is clicked (options revealed) it becomes the solid confirm action. */
+.pending-actions .btn-danger.is-armed {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+}
+
+.pending-actions .btn-secondary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.pending-actions .btn-secondary:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-surface-soft);
+  border-color: transparent;
+}
+
+/* Collapsible denial options: separated by a hairline, not a box. */
+.pending-deny {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pending-deny .field-textarea {
+  min-height: 78px;
+}
+
+.pending-account-age-chip {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
 }
 
 .pending-account-age-chip-warn {
@@ -1481,16 +1710,19 @@ textarea {
 
 .image-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  /* Flexible max (1fr) so multiple photos pack side-by-side and fill the row;
+     a single photo stretches but is capped by .photo-wrap max-width so it
+     never balloons. Tap a photo to open it (no Open button). */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .photo-wrap {
-  padding: 8px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-  background: color-mix(in srgb, var(--panel-surface-soft) 88%, black 12%);
+  padding: 0;
+  border: 0;
+  background: none;
+  max-width: 260px;
 }
 
 .photo {
@@ -1500,6 +1732,28 @@ textarea {
   border-radius: 12px;
   object-fit: cover;
   cursor: zoom-in;
+  background: var(--panel-surface-soft);
+}
+
+/* "Open" under each photo is a quiet, low-emphasis control */
+.photo-wrap .row {
+  margin: 0;
+}
+
+.photo-wrap .row .btn {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.photo-wrap .row .btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-surface-soft);
+  border-color: transparent;
 }
 
 .form-section {
@@ -1840,12 +2094,13 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 18px;
-  border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 86%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%), var(--panel-surface));
-  box-shadow: var(--card-shadow);
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  background: var(--panel-surface);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.06),
+    0 24px 60px rgba(16, 24, 40, 0.24);
 }
 
 .dialog-card h3 {
@@ -1991,7 +2246,7 @@ textarea {
 }
 
 .team-stats-overview-title {
-  color: color-mix(in srgb, var(--muted) 76%, white 24%);
+  color: var(--muted);
   font-family: var(--font-display);
   font-size: 0.8rem;
   font-weight: 760;
@@ -2039,7 +2294,7 @@ textarea {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 3;
+  z-index: 30;
   width: min(260px, calc(100vw - 48px));
   padding: 10px 11px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 72%, transparent);
@@ -2047,6 +2302,24 @@ textarea {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--panel-surface-strong) 92%, var(--primary-soft) 8%), color-mix(in srgb, var(--panel-surface) 96%, black 4%));
   box-shadow: var(--card-shadow-soft);
+}
+
+/* On narrow screens the help button can sit anywhere in a form row, so an
+   absolutely-positioned tooltip clips off the edge. Pin it as a bottom-anchored
+   popover (full width minus margins) so it can never run off-screen. */
+@media (max-width: 600px) {
+  .team-stats-help-tooltip {
+    position: fixed;
+    inset: auto 14px calc(14px + env(safe-area-inset-bottom, 0px)) 14px;
+    top: auto;
+    width: auto;
+    max-height: 62vh;
+    overflow-y: auto;
+    border-radius: 14px;
+    box-shadow:
+      0 1px 2px rgba(6, 36, 52, 0.08),
+      0 18px 44px rgba(6, 36, 52, 0.28);
+  }
 }
 
 .team-stats-help-tooltip p + p {
@@ -2080,7 +2353,7 @@ textarea {
 }
 
 .team-stats-card-label {
-  color: color-mix(in srgb, var(--muted) 42%, white 58%);
+  color: var(--muted);
   font-size: 0.7rem;
   font-weight: 820;
   letter-spacing: 0.08em;
@@ -2103,25 +2376,25 @@ textarea {
 }
 
 .team-stats-card-verified .team-stats-card-label {
-  color: color-mix(in srgb, var(--primary) 74%, white 26%);
+  color: var(--primary);
 }
 
 .team-stats-card-approvals .team-stats-card-label,
 .team-stats-top-row-approvals .team-stats-card-label {
-  color: color-mix(in srgb, var(--success) 76%, white 24%);
+  color: var(--success);
 }
 
 .team-stats-card-denials .team-stats-card-label,
 .team-stats-top-row-denials .team-stats-card-label {
-  color: color-mix(in srgb, var(--danger) 74%, white 26%);
+  color: var(--danger);
 }
 
 .team-stats-card-reopens .team-stats-card-label {
-  color: color-mix(in srgb, var(--accent) 78%, white 22%);
+  color: var(--accent);
 }
 
 .team-stats-card-active-mods .team-stats-card-label {
-  color: color-mix(in srgb, var(--theme-text) 56%, white 44%);
+  color: var(--muted);
 }
 
 .team-stats-card:not(.team-stats-card-primary):nth-child(even) {
@@ -2649,10 +2922,6 @@ textarea {
 
   .pending-badge-row {
     justify-content: flex-start;
-  }
-
-  .image-grid {
-    grid-template-columns: 1fr;
   }
 
 }
