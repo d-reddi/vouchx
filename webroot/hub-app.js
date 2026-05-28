@@ -220,9 +220,6 @@ function createShell(root, inline) {
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card hub-photo-card">
-          <header class="hub-photo-head">
-            <div class="hub-photo-brand"><span class="hub-photo-logo">V</span>VouchX</div>
-          </header>
           <ol class="hub-flow" aria-hidden="true">
             <li class="hub-flow-step is-current">
               <span class="hub-flow-bar"></span>
