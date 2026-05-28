@@ -910,34 +910,6 @@ button:not(:disabled):hover {
 }
 
 /* ── Photo-instructions: Minimal flow header ── */
-.hub-photo-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.hub-photo-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: var(--text);
-}
-
-.hub-photo-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--ink);
-  color: var(--ink-contrast);
-  display: grid;
-  place-items: center;
-  font-size: 0.82rem;
-  font-weight: 800;
-}
-
 .hub-flow {
   display: flex;
   gap: 8px;
@@ -1044,6 +1016,68 @@ button:not(:disabled):hover {
   line-height: 1.5;
 }
 
+/* Mobile: compress the photo-instructions header chrome so the scrollable
+   instructions get the most space possible. */
+@media (max-width: 560px) {
+  .hub-photo-card .hub-flow {
+    margin: 0 0 12px;
+  }
+
+  .hub-photo-card .hub-flow-bar {
+    height: 3px;
+  }
+
+  .hub-photo-card .hub-flow-label {
+    font-size: 0.66rem;
+    line-height: 1.2;
+  }
+
+  .hub-photo-card .hub-flow-num {
+    width: 15px;
+    height: 15px;
+    font-size: 0.58rem;
+  }
+
+  /* The stepper already shows "step 1", so the eyebrow is redundant here. */
+  .hub-photo-card .hub-photo-eyebrow {
+    display: none;
+  }
+
+  .hub-photo-card h2[data-el="photo-instructions-title"] {
+    font-size: 1.28rem;
+  }
+
+  .hub-photo-card [data-el="photo-instructions-subtitle"] {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+
+  .hub-photo-card .hub-language-switcher {
+    margin-top: 10px;
+  }
+
+  .hub-photo-card .hub-language-switcher-btn {
+    padding: 5px 11px;
+    font-size: 0.7rem;
+  }
+
+  .hub-photo-card .hub-scroll-shell {
+    margin-top: 10px;
+  }
+
+  .hub-photo-card .markdown-body {
+    font-size: 0.95rem;
+  }
+
+  .hub-photo-card .markdown-body p,
+  .hub-photo-card .markdown-body ul,
+  .hub-photo-card .markdown-body ol,
+  .hub-photo-card .markdown-body blockquote {
+    margin: 0 0 9px;
+  }
+}
+
 /* Centered modal (desktop / non-Android inline): keep the card within the
    embed height so the flow header + buttons stay pinned and only the body
    scrolls. The full-screen step mode (mobile/Android) is excluded — it scrolls
@@ -1076,44 +1110,46 @@ button:not(:disabled):hover {
   margin-top: 16px;
 }
 
+/* Compact segmented control: small footprint, clearly a one-of chooser. */
 .hub-language-switcher {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 16px;
-  color: var(--muted);
-  font-size: 0.86rem;
+  gap: 2px;
+  margin-top: 14px;
+  padding: 2px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 999px;
   line-height: 1;
 }
 
 .hub-language-switcher-btn {
-  border: 1px solid color-mix(in srgb, var(--line) 86%, var(--text) 14%);
-  background: var(--card);
+  border: 0;
+  background: transparent;
   color: var(--muted);
-  padding: 6px 13px;
   margin: 0;
+  padding: 4px 11px;
   font: inherit;
-  font-weight: 600;
-  font-size: 0.74rem;
+  font-weight: 700;
+  font-size: 0.72rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   border-radius: 999px;
   cursor: pointer;
   transition:
     color 120ms ease,
-    border-color 120ms ease;
+    background-color 120ms ease;
 }
 
 .hub-language-switcher-btn:hover,
 .hub-language-switcher-btn:focus-visible {
   color: var(--text);
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--line) 60%);
 }
 
 .hub-language-switcher-btn.is-active {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
   color: var(--text);
-  border-color: var(--primary);
 }
 
 .hub-language-switcher-separator {
