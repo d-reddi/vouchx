@@ -125,6 +125,8 @@ function buildRuntimeConfig(): RuntimeConfig {
   return {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
+    verificationRequiredToPost: false,
+    verificationRequiredToComment: false,
     autoFlairReconcileEnabled: true,
     autoDenyShadowbannedEnabled: false,
     maxDenialsBeforeBlock: 3,
@@ -2074,6 +2076,52 @@ test('onSaveFlairTemplateValues preserves verificationsEnabled when it is omitte
   assert.ok(saveContext.setFieldsCalls.every((entries) => !('verifications_enabled' in entries)));
 });
 
+test('onSaveFlairTemplateValues saves verification requirement toggles', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      flair_template_id: 'ABC-123',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: '',
+      requiredPhotoCount: 2,
+      verificationRequiredToPost: true,
+      verificationRequiredToComment: true,
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verification_required_to_post'), 'true');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verification_required_to_comment'), 'true');
+});
+
+test('onSaveFlairTemplateValues preserves verification requirement toggles when omitted', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    storedConfig: {
+      verification_required_to_post: 'true',
+      verification_required_to_comment: 'true',
+      flair_template_id: 'OLD-123',
+    },
+  });
+
+  await onSaveFlairTemplateValues(
+    {
+      flairTemplateId: 'ABC-123',
+      flairCssClass: '',
+      requiredPhotoCount: 2,
+    },
+    saveContext.context as never
+  );
+
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verification_required_to_post'), 'true');
+  assert.equal(saveContext.hashStore.get(saveContext.configKey)?.get('verification_required_to_comment'), 'true');
+  assert.ok(saveContext.setFieldsCalls.every((entries) => !('verification_required_to_post' in entries)));
+  assert.ok(saveContext.setFieldsCalls.every((entries) => !('verification_required_to_comment' in entries)));
+});
+
 test('onSaveFlairTemplateValues saves translated photo instructions with the primary instructions', async () => {
   const saveContext = createFlairSettingsSaveContext({
     storedConfig: {
@@ -2135,6 +2183,15 @@ test('getRuntimeConfig defaults translated photo instructions to empty strings a
   assert.equal(runtimeConfig.photoInstructionsFr, '');
   assert.equal(runtimeConfig.photoInstructionsPtBr, '');
   assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'en');
+});
+
+test('getRuntimeConfig defaults verification requirement toggles off when unset', async () => {
+  const saveContext = createFlairSettingsSaveContext();
+
+  const runtimeConfig = await getRuntimeConfig(saveContext.context as never, 't5_example');
+
+  assert.equal(runtimeConfig.verificationRequiredToPost, false);
+  assert.equal(runtimeConfig.verificationRequiredToComment, false);
 });
 
 test('getRuntimeConfig defaults the user advisory score badge install setting on', async () => {
@@ -4926,6 +4983,8 @@ test('toPublicHubConfig omits moderator-only template content', () => {
   assert.deepEqual(publicConfig, {
     verificationsEnabled: true,
     verificationsDisabledMessage: 'Disabled',
+    verificationRequiredToPost: false,
+    verificationRequiredToComment: false,
     photoInstructions: 'Follow the instructions.',
     photoInstructionsEs: 'Sigue las instrucciones.',
     photoInstructionsFr: 'Suivez les instructions.',

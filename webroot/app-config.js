@@ -6,3 +6,6 @@ export const MODERATOR_QUICK_START_URL = 'https://www.reddit.com/r/vouchx/wiki/g
 
 // Set this to your bug tracker or contact form to show a low-emphasis footer link in the mod panel.
 export const BUG_REPORT_URL = 'https://github.com/d-reddi/vouchx/issues/new?template=app_bug_report.yml';
+
+// Set true temporarily to review the app data usage warning below the threshold.
+export const FORCE_APP_DATA_USAGE_WARNING_VISIBLE = false;

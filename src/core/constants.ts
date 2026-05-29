@@ -207,6 +207,8 @@ export const DEFAULT_REMOVAL_BODY =
 
 export const CONFIG_FIELD = {
   verificationsEnabled: 'verifications_enabled',
+  verificationRequiredToPost: 'verification_required_to_post',
+  verificationRequiredToComment: 'verification_required_to_comment',
   requiredPhotoCount: 'required_photo_count',
   photoInstructions: 'photo_instructions',
   photoInstructionsEs: 'photo_instructions_es',

@@ -115,10 +115,21 @@ function createShell(root, inline) {
             <h1 data-el="command-title" class="hub-headline">Review the instructions, then submit your verification.</h1>
             <p data-el="info-msg" class="info-msg hidden"></p>
 
-            <ol data-el="hub-flow" class="hub-flow hub-flow-hub hidden" aria-hidden="true">
+            <ol data-el="hub-flow" class="hub-flow hub-flow-hub hidden" aria-label="Verification steps">
               <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">1</span>Review instructions</span></li>
               <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">2</span>Submit photos</span></li>
               <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">3</span>Mod review</span></li>
+              <li data-el="participation-step" class="hub-flow-step hidden">
+                <span class="hub-flow-bar"></span>
+                <span class="hub-flow-label">
+                  <span class="hub-flow-num">4</span>
+                  <span data-el="participation-step-label">Participation unlocked</span>
+                  <details data-el="participation-step-help" class="hub-flow-help">
+                    <summary class="hub-flow-help-button" aria-label="Explain participation requirement">?</summary>
+                    <div data-el="participation-step-tooltip" class="hub-flow-tooltip" role="note"></div>
+                  </details>
+                </span>
+              </li>
             </ol>
 
             <div class="hub-meta">
@@ -220,7 +231,7 @@ function createShell(root, inline) {
 
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card hub-photo-card">
-          <ol class="hub-flow" aria-hidden="true">
+          <ol data-el="photo-instructions-flow" class="hub-flow" aria-label="Verification steps">
             <li class="hub-flow-step is-current">
               <span class="hub-flow-bar"></span>
               <span class="hub-flow-label"><span class="hub-flow-num">1</span>Review instructions</span>
@@ -233,8 +244,19 @@ function createShell(root, inline) {
               <span class="hub-flow-bar"></span>
               <span class="hub-flow-label"><span class="hub-flow-num">3</span>Mod review</span>
             </li>
+            <li data-el="photo-instructions-participation-step" class="hub-flow-step hidden">
+              <span class="hub-flow-bar"></span>
+              <span class="hub-flow-label">
+                <span class="hub-flow-num">4</span>
+                <span data-el="photo-instructions-participation-step-label">Participation unlocked</span>
+                <details data-el="photo-instructions-participation-step-help" class="hub-flow-help">
+                  <summary class="hub-flow-help-button" aria-label="Explain participation requirement">?</summary>
+                  <div data-el="photo-instructions-participation-step-tooltip" class="hub-flow-tooltip" role="note"></div>
+                </details>
+              </span>
+            </li>
           </ol>
-          <p class="hub-photo-eyebrow">Step 1 of 3</p>
+          <p data-el="photo-instructions-eyebrow" class="hub-photo-eyebrow">Step 1 of 3</p>
           <h2 data-el="photo-instructions-title">Photo Requirements</h2>
           <p data-el="photo-instructions-subtitle" class="meta">
             Review these instructions carefully before submitting your photos.
@@ -271,6 +293,10 @@ function createShell(root, inline) {
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
     hubFlow: root.querySelector('[data-el="hub-flow"]'),
+    participationStep: root.querySelector('[data-el="participation-step"]'),
+    participationStepLabel: root.querySelector('[data-el="participation-step-label"]'),
+    participationStepHelp: root.querySelector('[data-el="participation-step-help"]'),
+    participationStepTooltip: root.querySelector('[data-el="participation-step-tooltip"]'),
     actionRow: root.querySelector('[data-el="action-row"]'),
     developerPanel: root.querySelector('[data-el="developer-panel"]'),
     developerCurrentList: root.querySelector('[data-el="developer-current-list"]'),
@@ -291,6 +317,16 @@ function createShell(root, inline) {
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
+    photoInstructionsFlow: root.querySelector('[data-el="photo-instructions-flow"]'),
+    photoInstructionsEyebrow: root.querySelector('[data-el="photo-instructions-eyebrow"]'),
+    photoInstructionsParticipationStep: root.querySelector('[data-el="photo-instructions-participation-step"]'),
+    photoInstructionsParticipationStepLabel: root.querySelector(
+      '[data-el="photo-instructions-participation-step-label"]'
+    ),
+    photoInstructionsParticipationStepHelp: root.querySelector('[data-el="photo-instructions-participation-step-help"]'),
+    photoInstructionsParticipationStepTooltip: root.querySelector(
+      '[data-el="photo-instructions-participation-step-tooltip"]'
+    ),
     photoInstructionsTitle: root.querySelector('[data-el="photo-instructions-title"]'),
     photoInstructionsSubtitle: root.querySelector('[data-el="photo-instructions-subtitle"]'),
     photoInstructionsLanguageToggle: root.querySelector('[data-el="photo-instructions-language-toggle"]'),
@@ -476,6 +512,68 @@ function getDenyReasonLabel(state, reasonId) {
   const match = state.config.denyReasons.find((item) => item && item.id === reasonId);
   const label = match && typeof match.label === 'string' ? match.label.trim() : '';
   return label || formatDenyReasonSlot(reasonId);
+}
+
+function getVerificationRequirementLabel(config) {
+  const requiredToPost = config?.verificationRequiredToPost === true;
+  const requiredToComment = config?.verificationRequiredToComment === true;
+  if (requiredToPost && requiredToComment) {
+    return 'Participation unlocked';
+  }
+  if (requiredToPost) {
+    return 'Posting unlocked';
+  }
+  if (requiredToComment) {
+    return 'Commenting unlocked';
+  }
+  return '';
+}
+
+function getVerificationRequirementTooltip(config) {
+  const requiredToPost = config?.verificationRequiredToPost === true;
+  const requiredToComment = config?.verificationRequiredToComment === true;
+  if (requiredToPost && requiredToComment) {
+    return 'Verification is required to post and comment in this community.';
+  }
+  if (requiredToPost) {
+    return 'Verification is required to post in this community.';
+  }
+  if (requiredToComment) {
+    return 'Verification is required to comment in this community.';
+  }
+  return '';
+}
+
+function getVerificationRequirementAccessText(config) {
+  const requiredToPost = config?.verificationRequiredToPost === true;
+  const requiredToComment = config?.verificationRequiredToComment === true;
+  if (requiredToPost && requiredToComment) {
+    return 'posting and commenting access';
+  }
+  if (requiredToPost) {
+    return 'posting access';
+  }
+  if (requiredToComment) {
+    return 'commenting access';
+  }
+  return '';
+}
+
+function syncVerificationRequirementStep(config, stepRefs) {
+  const participationLabel = getVerificationRequirementLabel(config);
+  if (stepRefs.step) {
+    stepRefs.step.classList.toggle('hidden', !participationLabel);
+  }
+  if (stepRefs.label) {
+    stepRefs.label.textContent = participationLabel || 'Participation unlocked';
+  }
+  if (stepRefs.tooltip) {
+    stepRefs.tooltip.textContent = getVerificationRequirementTooltip(config);
+  }
+  if (!participationLabel && stepRefs.help?.open) {
+    stepRefs.help.open = false;
+  }
+  return participationLabel;
 }
 
 function renderInlineMarkdown(value) {
@@ -674,6 +772,7 @@ function buildStatusTooltipHtml(content) {
 }
 
 function getStatusTooltipHtml(state, options) {
+  const requiredAccessText = getVerificationRequirementAccessText(state?.config);
   const isRestricted = Boolean(state?.viewerBlocked && !options.isVerified);
   if (isRestricted) {
     if (state?.viewerBlocked?.scope === 'global') {
@@ -698,15 +797,28 @@ function getStatusTooltipHtml(state, options) {
   }
 
   if (options.isVerified || options.awaitingFlairPropagation) {
+    if (requiredAccessText) {
+      return buildStatusTooltipHtml([
+        "You're verified and recognized as approved in this community.",
+        `Approved users may unlock ${requiredAccessText}, depending on this subreddit's rules.`,
+      ]);
+    }
     return buildStatusTooltipHtml([
       "You're verified and recognized as a trusted member.",
-      'You stand out with a verified flair and may have additional access where enabled.',
+      "Verified users may stand out with a unique flair, build credibility, and show they've completed this community's review process.",
+    ]);
+  }
+
+  if (requiredAccessText) {
+    return buildStatusTooltipHtml([
+      "Get verified to show you're approved and trusted in this community.",
+      `Approved users may unlock ${requiredAccessText}, depending on this subreddit's rules.`,
     ]);
   }
 
   return buildStatusTooltipHtml([
     "Get verified to show you're approved and trusted in this community.",
-    'Verified users stand out with a unique flair, build credibility, and may unlock full participation depending on subreddit rules.',
+    "Verified users may stand out with a unique flair, build credibility, and show they've completed this community's review process.",
   ]);
 }
 
@@ -1353,6 +1465,7 @@ export function mountHub(options = {}) {
       const availableLanguages = getAvailablePhotoInstructionLanguages(hubState);
       let selectedLanguage = getDefaultPhotoInstructionLanguage(hubState);
       const renderPhotoInstructionsContent = () => {
+        renderPhotoInstructionsFlow(hubState);
         const source = getPhotoInstructionContent(hubState?.config, selectedLanguage);
         const heading = getPhotoInstructionHeading(selectedLanguage);
         if (refs.photoInstructionsTitle) {
@@ -1711,6 +1824,12 @@ export function mountHub(options = {}) {
       flow.classList.add('hidden');
       return;
     }
+    const participationLabel = syncVerificationRequirementStep(state.config, {
+      step: refs.participationStep,
+      label: refs.participationStepLabel,
+      help: refs.participationStepHelp,
+      tooltip: refs.participationStepTooltip,
+    });
 
     const canSubmitNow =
       !isVerified &&
@@ -1724,7 +1843,9 @@ export function mountHub(options = {}) {
     // -1 hides the onboarding flow (verified / blocked / setup / disabled states
     // are communicated by the status hero instead).
     let currentIndex = -1;
-    if (isPendingReview) {
+    if (isVerified && participationLabel) {
+      currentIndex = steps.length;
+    } else if (isPendingReview) {
       currentIndex = 2;
     } else if (canSubmitNow) {
       currentIndex = 0;
@@ -1741,6 +1862,31 @@ export function mountHub(options = {}) {
       // While awaiting moderator review the current step reads as "waiting"
       // (amber) rather than an active/done step.
       step.classList.toggle('is-waiting', isPendingReview && index === currentIndex);
+    });
+  }
+
+  function renderPhotoInstructionsFlow(state) {
+    const flow = refs.photoInstructionsFlow;
+    if (!flow) {
+      return;
+    }
+    const steps = flow.querySelectorAll('.hub-flow-step');
+    if (steps.length < 3) {
+      return;
+    }
+    const participationLabel = syncVerificationRequirementStep(state?.config, {
+      step: refs.photoInstructionsParticipationStep,
+      label: refs.photoInstructionsParticipationStepLabel,
+      help: refs.photoInstructionsParticipationStepHelp,
+      tooltip: refs.photoInstructionsParticipationStepTooltip,
+    });
+    if (refs.photoInstructionsEyebrow) {
+      refs.photoInstructionsEyebrow.textContent = `Step 1 of ${participationLabel ? '4' : '3'}`;
+    }
+    steps.forEach((step, index) => {
+      step.classList.toggle('is-done', false);
+      step.classList.toggle('is-current', index === 0);
+      step.classList.toggle('is-waiting', false);
     });
   }
 
@@ -1849,6 +1995,7 @@ export function mountHub(options = {}) {
     refs.infoMsg.classList.toggle('hidden', !infoText);
 
     renderHubFlow(state, { isVerified, isRestricted, awaitingFlairPropagation });
+    renderPhotoInstructionsFlow(state);
 
     refs.actionRow.innerHTML = '';
     renderDeveloperPanel();
