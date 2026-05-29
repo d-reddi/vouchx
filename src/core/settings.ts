@@ -194,6 +194,12 @@ export async function onSaveFlairTemplateValues(
     ...(values.verificationsEnabled === undefined
       ? {}
       : { [CONFIG_FIELD.verificationsEnabled]: `${values.verificationsEnabled !== false}` }),
+    ...(values.verificationRequiredToPost === undefined
+      ? {}
+      : { [CONFIG_FIELD.verificationRequiredToPost]: `${values.verificationRequiredToPost === true}` }),
+    ...(values.verificationRequiredToComment === undefined
+      ? {}
+      : { [CONFIG_FIELD.verificationRequiredToComment]: `${values.verificationRequiredToComment === true}` }),
     [CONFIG_FIELD.requiredPhotoCount]: `${requiredPhotoCount}`,
     [CONFIG_FIELD.photoInstructions]: photoInstructions,
     [CONFIG_FIELD.photoInstructionsEs]: photoInstructionsEs,
@@ -209,6 +215,14 @@ export async function onSaveFlairTemplateValues(
   const refreshedConfig: RuntimeConfig = {
     ...existingConfig,
     verificationsEnabled: values.verificationsEnabled === undefined ? existingConfig.verificationsEnabled : values.verificationsEnabled !== false,
+    verificationRequiredToPost:
+      values.verificationRequiredToPost === undefined
+        ? existingConfig.verificationRequiredToPost
+        : values.verificationRequiredToPost === true,
+    verificationRequiredToComment:
+      values.verificationRequiredToComment === undefined
+        ? existingConfig.verificationRequiredToComment
+        : values.verificationRequiredToComment === true,
     requiredPhotoCount,
     photoInstructions,
     photoInstructionsEs,
@@ -412,6 +426,8 @@ export async function getRuntimeConfig(context: Devvit.Context, subredditId: str
   return {
     verificationsEnabled: parseBooleanString(stored[CONFIG_FIELD.verificationsEnabled], true),
     verificationsDisabledMessage,
+    verificationRequiredToPost: parseBooleanString(stored[CONFIG_FIELD.verificationRequiredToPost], false),
+    verificationRequiredToComment: parseBooleanString(stored[CONFIG_FIELD.verificationRequiredToComment], false),
     autoFlairReconcileEnabled,
     autoDenyShadowbannedEnabled,
     maxDenialsBeforeBlock,

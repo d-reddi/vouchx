@@ -150,6 +150,8 @@ export function toPublicHubConfig(config: RuntimeConfig): PublicHubConfig {
   return {
     verificationsEnabled: config.verificationsEnabled,
     verificationsDisabledMessage: config.verificationsDisabledMessage,
+    verificationRequiredToPost: config.verificationRequiredToPost,
+    verificationRequiredToComment: config.verificationRequiredToComment,
     photoInstructions: config.photoInstructions,
     photoInstructionsEs: config.photoInstructionsEs,
     photoInstructionsFr: config.photoInstructionsFr,

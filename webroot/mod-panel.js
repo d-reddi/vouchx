@@ -1,8 +1,10 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
-import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
+import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 (function () {
+  const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
+
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
   const settingsPrimaryTabButton =
     tabButtons.find((button) => String(button.dataset.tab || '') === 'settings') || null;
@@ -100,6 +102,7 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const teamStatsBreakdown = document.getElementById('team-stats-breakdown');
   const blockedList = document.getElementById('blocked-list');
   const blockedSearchInput = document.getElementById('blocked-search');
+  const storageWarning = document.getElementById('storage-warning');
   const storageMeterFill = document.getElementById('storage-meter-fill');
   const storagePercent = document.getElementById('storage-percent');
   const storageSummary = document.getElementById('storage-summary');
@@ -133,6 +136,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
   const approvalFlairThirdPreview = document.getElementById('approval-flair-third-preview');
   const approvalFlairThirdPreviewChip = document.getElementById('approval-flair-third-preview-chip');
   const verificationsEnabledInput = document.getElementById('verifications-enabled');
+  const verificationRequiredToPostInput = document.getElementById('verification-required-to-post');
+  const verificationRequiredToCommentInput = document.getElementById('verification-required-to-comment');
   const verificationsDisabledMessageHint = document.getElementById('verifications-disabled-message-hint');
   const installSettingsRow = document.getElementById('install-settings-row');
   const installSettingsLink = document.getElementById('install-settings-link');
@@ -1863,6 +1868,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
           additionalApprovalFlairs,
           requiredPhotoCount: requiredPhotoCountInput ? Number(requiredPhotoCountInput.value || 2) : 2,
+          verificationRequiredToPost: verificationRequiredToPostInput
+            ? Boolean(verificationRequiredToPostInput.checked)
+            : false,
+          verificationRequiredToComment: verificationRequiredToCommentInput
+            ? Boolean(verificationRequiredToCommentInput.checked)
+            : false,
           photoInstructionsDefaultLanguage: photoInstructionsDefaultLanguageInput
             ? photoInstructionsDefaultLanguageInput.value
             : 'en',
@@ -1948,6 +1959,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       additionalApprovalFlairSecond: stringInputValue(approvalFlairSecondSelect),
       additionalApprovalFlairThird: stringInputValue(approvalFlairThirdSelect),
       verificationsEnabled: boolInputValue(verificationsEnabledInput),
+      verificationRequiredToPost: boolInputValue(verificationRequiredToPostInput),
+      verificationRequiredToComment: boolInputValue(verificationRequiredToCommentInput),
       requiredPhotoCount: stringInputValue(requiredPhotoCountInput),
       photoInstructionsDefaultLanguage: stringInputValue(photoInstructionsDefaultLanguageInput) || 'en',
       photoInstructions: stringInputValue(photoInstructionsInput),
@@ -1964,6 +1977,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       normalizeTemplateIdValue(draft.additionalApprovalFlairThird) !==
       normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '') ||
       draft.verificationsEnabled !== (state.config.verificationsEnabled !== false) ||
+      draft.verificationRequiredToPost !== (state.config.verificationRequiredToPost === true) ||
+      draft.verificationRequiredToComment !== (state.config.verificationRequiredToComment === true) ||
       draft.requiredPhotoCount !== savedRequiredPhotoCount ||
       draft.photoInstructionsDefaultLanguage !== String(state.config.photoInstructionsDefaultLanguage || 'en') ||
       draft.photoInstructions !== String(state.config.photoInstructions || '') ||
@@ -2106,6 +2121,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     }
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = draft.verificationsEnabled;
+    }
+    if (verificationRequiredToPostInput) {
+      verificationRequiredToPostInput.checked = draft.verificationRequiredToPost === true;
+    }
+    if (verificationRequiredToCommentInput) {
+      verificationRequiredToCommentInput.checked = draft.verificationRequiredToComment === true;
     }
     if (requiredPhotoCountInput) {
       requiredPhotoCountInput.value = draft.requiredPhotoCount;
@@ -4124,9 +4145,17 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = state.config.verificationsEnabled !== false;
     }
+    if (verificationRequiredToPostInput) {
+      verificationRequiredToPostInput.checked = state.config.verificationRequiredToPost === true;
+    }
+    if (verificationRequiredToCommentInput) {
+      verificationRequiredToCommentInput.checked = state.config.verificationRequiredToComment === true;
+    }
     if (verificationsDisabledMessageHint) {
-      const message = String(state.config.verificationsDisabledMessage || '').trim();
-      verificationsDisabledMessageHint.textContent = `When disabled, users see: "${message}" You can change it in this subreddit's install settings.`;
+      verificationsDisabledMessageHint.textContent =
+        state.config.verificationsEnabled === false
+          ? 'Submission form is closed. Disabled message is managed in Install Settings.'
+          : 'Users can submit requests from the hub.';
     }
     if (installSettingsRow) {
       installSettingsRow.classList.toggle('hidden', !(state.canOpenInstallSettings === true));
@@ -4611,6 +4640,9 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
   function renderStorage() {
     if (!state || !state.storage) {
+      if (storageWarning) {
+        storageWarning.classList.add('hidden');
+      }
       return;
     }
     const usedBytes = Number(state.storage.estimatedBytes || 0);
@@ -4622,6 +4654,12 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
           ? (usedBytes / capBytes) * 100
           : 0;
     const percent = Math.max(0, Math.min(100, percentRaw));
+    const shouldShowStorageWarning =
+      FORCE_APP_DATA_USAGE_WARNING_VISIBLE === true || percent >= STORAGE_WARNING_THRESHOLD_PERCENT;
+
+    if (storageWarning) {
+      storageWarning.classList.toggle('hidden', !shouldShowStorageWarning);
+    }
 
     if (storageMeterFill) {
       storageMeterFill.style.width = `${percent}%`;
@@ -4630,7 +4668,8 @@ import { BUG_REPORT_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
       storagePercent.textContent = `${percent.toFixed(1)}%`;
     }
     if (storageSummary) {
-      storageSummary.textContent = `${formatBytes(usedBytes)} used of ${formatBytes(capBytes || 0)}`;
+      storageSummary.textContent =
+        `${formatBytes(usedBytes)} used of ${formatBytes(capBytes || 0)} Redis app data limit.`;
     }
     if (storageBreakdown) {
       storageBreakdown.textContent =

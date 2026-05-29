@@ -122,6 +122,8 @@ export type AuditLogEntry = {
 export type RuntimeConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
+  verificationRequiredToPost: boolean;
+  verificationRequiredToComment: boolean;
   autoFlairReconcileEnabled: boolean;
   autoDenyShadowbannedEnabled: boolean;
   maxDenialsBeforeBlock: number;
@@ -482,6 +484,8 @@ export type DeleteDataConfirmValues = {
 
 export type FlairTemplateFormValues = {
   verificationsEnabled?: boolean;
+  verificationRequiredToPost?: boolean;
+  verificationRequiredToComment?: boolean;
   requiredPhotoCount?: number;
   photoInstructions?: string;
   photoInstructionsEs?: string;
@@ -704,6 +708,8 @@ export type UpdateNoticeState = {
 export type PublicHubConfig = {
   verificationsEnabled: boolean;
   verificationsDisabledMessage: string;
+  verificationRequiredToPost: boolean;
+  verificationRequiredToComment: boolean;
   photoInstructions: string;
   photoInstructionsEs: string;
   photoInstructionsFr: string;

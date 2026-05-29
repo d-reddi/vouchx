@@ -363,23 +363,6 @@
           </div>
 
           <div id="settings-panel-general" class="settings-panel">
-            <div class="settings-grid">
-              <div class="content-card">
-                <div class="card-head">
-                  <div>
-                    <h3 class="section-heading">Storage</h3>
-                    <p class="section-copy muted small">Estimated Reddit storage usage for verification data in this subreddit. Verification records and moderator audit events are tracked separately and may not match.</p>
-                  </div>
-                  <p id="storage-percent" class="storage-percent">0.0%</p>
-                </div>
-                <div class="storage-meter">
-                  <div id="storage-meter-fill" class="storage-meter-fill"></div>
-                </div>
-                <p id="storage-summary" class="item-meta">Estimating usage...</p>
-                <p id="storage-breakdown" class="muted small"></p>
-              </div>
-            </div>
-
             <div class="content-card">
               <div class="card-head">
                 <div>
@@ -390,14 +373,16 @@
 
               <div class="form-section">
                 <h4 class="minor-heading">Submission access</h4>
-                <label class="field-label" for="verifications-enabled">Verifications enabled</label>
-                <label class="toggle-row">
+                <label class="toggle-row switch-row switch-row-compact">
                   <input id="verifications-enabled" type="checkbox" />
-                  <span>Allow users to submit verifications</span>
+                  <span class="toggle-switch" aria-hidden="true"></span>
+                  <span class="toggle-copy">
+                    <span class="toggle-title">Enable verification submissions</span>
+                    <span id="verifications-disabled-message-hint" class="toggle-description muted small">
+                      Users can submit requests from the hub.
+                    </span>
+                  </span>
                 </label>
-                <p id="verifications-disabled-message-hint" class="muted small">
-                  When disabled, users see: "" You can change it in this subreddit's install settings.
-                </p>
               </div>
 
               <div class="form-section">
@@ -442,8 +427,7 @@
                     </div>
                   </div>
                 </div>
-                <div class="form-section">
-                <div id="flair-css-class-wrap" class="field-stack">
+                <div id="flair-css-class-wrap" class="field-stack flair-css-class-stack">
                   <div class="field-label-row">
                     <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
                     <details class="team-stats-help">
@@ -459,7 +443,6 @@
                   </div>
                   <input id="flair-css-class" class="field-input" type="text" />
                 </div>
-              </div>
               </div>
 
               <div class="form-section">
@@ -477,6 +460,27 @@
                 <p class="muted small field-help">Controls how many upload fields users see in the submit form.</p>
               </div>
 
+              <div class="form-section">
+                <h4 class="minor-heading">Verification requirement messaging</h4>
+                <p class="muted small field-help">Controls what VouchX tells users they unlock after approval. VouchX does not enforce posting or commenting access. Enable these only if your subreddit already requires verified approval for posting or commenting through AutoModerator or another mod tool.</p>
+                <div class="requirement-toggle-grid">
+                  <label class="toggle-row switch-row switch-row-compact">
+                    <input id="verification-required-to-post" type="checkbox" />
+                    <span class="toggle-switch" aria-hidden="true"></span>
+                    <span class="toggle-copy">
+                      <span class="toggle-title">Show posting unlock step</span>
+                    </span>
+                  </label>
+                  <label class="toggle-row switch-row switch-row-compact">
+                    <input id="verification-required-to-comment" type="checkbox" />
+                    <span class="toggle-switch" aria-hidden="true"></span>
+                    <span class="toggle-copy">
+                      <span class="toggle-title">Show commenting unlock step</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <div class="row section-actions">
                 <button id="save-flair-btn" class="btn btn-primary">Save settings</button>
               </div>
@@ -484,6 +488,23 @@
                 Install settings for this subreddit are available here:
                 <a id="install-settings-link" href="#" target="_blank" rel="noopener noreferrer">Open install settings</a>
               </p>
+            </div>
+
+            <div id="storage-warning" class="content-card panel-warning panel-warning-info storage-warning-card hidden" role="status">
+              <div class="panel-warning-body">
+                <div class="storage-warning-head">
+                  <div>
+                    <p class="panel-warning-title">App data usage</p>
+                    <p class="panel-warning-copy">VouchX app data is approaching this subreddit's Redis storage limit.</p>
+                  </div>
+                  <p id="storage-percent" class="storage-percent">0.0%</p>
+                </div>
+                <div class="storage-meter">
+                  <div id="storage-meter-fill" class="storage-meter-fill"></div>
+                </div>
+                <p id="storage-summary" class="item-meta">Estimating usage...</p>
+                <p id="storage-breakdown" class="muted small"></p>
+              </div>
             </div>
           </div>
 
