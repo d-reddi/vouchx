@@ -99,17 +99,11 @@ function createShell(root, inline) {
                 ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
               </div>
               <div class="hub-hero-actions">
-                <span data-el="pending-badge" class="badge hidden"></span>
-                <button data-el="mod-panel-btn" class="btn-secondary hub-toolbar-btn hidden" type="button">Mod Panel</button>
+                <div data-el="mod-panel-group" class="hub-mod-action hidden">
+                  <button data-el="mod-panel-btn" class="btn-secondary hub-toolbar-btn" type="button">Mod Panel</button>
+                  <span data-el="pending-badge" class="badge hub-mod-pip hidden"></span>
+                </div>
               </div>
-            </div>
-
-            <div class="hub-status-head">
-              <p data-el="meta-status" class="status-line"></p>
-              <details class="hub-status-help">
-                <summary class="hub-status-help-button" aria-label="Explain current verification status">?</summary>
-                <div data-el="status-tooltip" class="hub-status-tooltip" role="note"></div>
-              </details>
             </div>
 
             <h1 data-el="command-title" class="hub-headline">Review the instructions, then submit your verification.</h1>
@@ -122,12 +116,11 @@ function createShell(root, inline) {
               <li data-el="participation-step" class="hub-flow-step hidden">
                 <span class="hub-flow-bar"></span>
                 <span class="hub-flow-label">
-                  <span class="hub-flow-num">4</span>
-                  <span data-el="participation-step-label">Participation unlocked</span>
-                  <details data-el="participation-step-help" class="hub-flow-help">
-                    <summary class="hub-flow-help-button" aria-label="Explain participation requirement">?</summary>
+                  <details data-el="participation-step-help" class="hub-flow-help hub-flow-num-help">
+                    <summary class="hub-flow-num hub-flow-num-trigger" aria-label="Explain participation requirement">4</summary>
                     <div data-el="participation-step-tooltip" class="hub-flow-tooltip" role="note"></div>
                   </details>
+                  <span data-el="participation-step-label">Participation unlocked</span>
                 </span>
               </li>
             </ol>
@@ -247,12 +240,11 @@ function createShell(root, inline) {
             <li data-el="photo-instructions-participation-step" class="hub-flow-step hidden">
               <span class="hub-flow-bar"></span>
               <span class="hub-flow-label">
-                <span class="hub-flow-num">4</span>
-                <span data-el="photo-instructions-participation-step-label">Participation unlocked</span>
-                <details data-el="photo-instructions-participation-step-help" class="hub-flow-help">
-                  <summary class="hub-flow-help-button" aria-label="Explain participation requirement">?</summary>
+                <details data-el="photo-instructions-participation-step-help" class="hub-flow-help hub-flow-num-help">
+                  <summary class="hub-flow-num hub-flow-num-trigger" aria-label="Explain participation requirement">4</summary>
                   <div data-el="photo-instructions-participation-step-tooltip" class="hub-flow-tooltip" role="note"></div>
                 </details>
+                <span data-el="photo-instructions-participation-step-label">Participation unlocked</span>
               </span>
             </li>
           </ol>
@@ -286,11 +278,10 @@ function createShell(root, inline) {
     brandLogo: root.querySelector('[data-el="brand-logo"]'),
     metaUsername: root.querySelector('[data-el="meta-username"]'),
     metaSubreddit: root.querySelector('[data-el="meta-subreddit"]'),
-    metaStatus: root.querySelector('[data-el="meta-status"]'),
-    statusTooltip: root.querySelector('[data-el="status-tooltip"]'),
     commandTitle: root.querySelector('[data-el="command-title"]'),
     pendingBadge: root.querySelector('[data-el="pending-badge"]'),
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
+    modPanelGroup: root.querySelector('[data-el="mod-panel-group"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
     hubFlow: root.querySelector('[data-el="hub-flow"]'),
     participationStep: root.querySelector('[data-el="participation-step"]'),
@@ -765,61 +756,6 @@ function getPhotoInstructionHeading(language) {
 
 function hasAnyConfiguredPhotoInstructions(config) {
   return PHOTO_INSTRUCTION_LANGUAGE_OPTIONS.some((option) => Boolean(getPhotoInstructionContent(config, option.id)));
-}
-
-function buildStatusTooltipHtml(content) {
-  return content.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join('');
-}
-
-function getStatusTooltipHtml(state, options) {
-  const requiredAccessText = getVerificationRequirementAccessText(state?.config);
-  const isRestricted = Boolean(state?.viewerBlocked && !options.isVerified);
-  if (isRestricted) {
-    if (state?.viewerBlocked?.scope === 'global') {
-      return buildStatusTooltipHtml([
-        'Your access to the VouchX app is currently restricted.',
-        'Per the VouchX Terms and Conditions, the developer may restrict access for violations of the Terms and Conditions or at their discretion.',
-        'This restriction applies across every subreddit using VouchX.',
-      ]);
-    }
-    return buildStatusTooltipHtml([
-      "You're blocked from submitting verification in this subreddit right now.",
-      'This is a subreddit-specific restriction based on your verification history or moderator actions.',
-    ]);
-  }
-
-  if (state?.userLatest?.status === 'pending') {
-    return buildStatusTooltipHtml([
-      "You're in the verification queue.",
-      `Most requests are reviewed within ${formatPendingTurnaroundDays(state?.config?.pendingTurnaroundDays)}. No further action is needed - we'll update you soon.`,
-      'Need to cancel? Use the Withdraw Verification button.',
-    ]);
-  }
-
-  if (options.isVerified || options.awaitingFlairPropagation) {
-    if (requiredAccessText) {
-      return buildStatusTooltipHtml([
-        "You're verified and recognized as approved in this community.",
-        `Approved users may unlock ${requiredAccessText}, depending on this subreddit's rules.`,
-      ]);
-    }
-    return buildStatusTooltipHtml([
-      "You're verified and recognized as a trusted member.",
-      "Verified users may stand out with a unique flair, build credibility, and show they've completed this community's review process.",
-    ]);
-  }
-
-  if (requiredAccessText) {
-    return buildStatusTooltipHtml([
-      "Get verified to show you're approved and trusted in this community.",
-      `Approved users may unlock ${requiredAccessText}, depending on this subreddit's rules.`,
-    ]);
-  }
-
-  return buildStatusTooltipHtml([
-    "Get verified to show you're approved and trusted in this community.",
-    "Verified users may stand out with a unique flair, build credibility, and show they've completed this community's review process.",
-  ]);
 }
 
 function isAndroidWebViewClient() {
@@ -1908,45 +1844,19 @@ export function mountHub(options = {}) {
       : 'Username: not signed in';
     refs.metaSubreddit.textContent = state.subredditName ? `Subreddit: r/${state.subredditName}` : '';
 
-    refs.metaStatus.className = 'status-line';
-    let statusText = 'Not verified';
-    let statusClass = 'status-neutral';
-    if (isVerified) {
-      statusText = isManualSource(state.viewerFlairCheckSource) ? 'Verified (Manual)' : 'Verified';
-      statusClass = 'status-verified';
-    } else if (awaitingFlairPropagation) {
-      statusText = 'Approved (Syncing)';
-      statusClass = 'status-warning';
-    } else if (isRestricted) {
-      statusText = isGlobalRestriction ? 'Restricted' : 'Blocked';
-      statusClass = 'status-blocked';
-    } else if (state.userLatest?.status === 'pending' && state.userLatest?.parentVerificationId) {
-      statusText = 'Pending Re-review';
-      statusClass = 'status-warning';
-    } else if (state.userLatest?.status === 'pending') {
-      statusText = 'Pending Review';
-      statusClass = 'status-warning';
-    } else if (state.userLatest?.status === 'denied') {
-      statusText = 'Denied';
-      statusClass = 'status-danger';
-    } else if (state.userLatest?.status === 'removed') {
-      statusText = 'Verification Removed';
-      statusClass = 'status-danger';
-    }
-    refs.metaStatus.classList.add(statusClass);
-    refs.metaStatus.textContent = statusText;
-    if (refs.statusTooltip) {
-      refs.statusTooltip.innerHTML = getStatusTooltipHtml(state, {
-        isVerified,
-        awaitingFlairPropagation,
-      });
-    }
-
     refs.pendingBadge.textContent = state.pendingCount > 99 ? '99+' : String(state.pendingCount || 0);
     refs.pendingBadge.classList.toggle('hidden', !(state.canReview && state.pendingCount > 0));
-    refs.modPanelBtn.classList.toggle('hidden', !state.canReview);
+    if (refs.modPanelGroup) {
+      refs.modPanelGroup.classList.toggle('hidden', !state.canReview);
+    }
 
-    const subredditLabel = state.subredditName ? `r/${state.subredditName}` : 'this community';
+    // TEMP DEBUG: simulate a long subreddit name in the headline. Revert before commit.
+    const DEBUG_LONG_SUB = 'really_long_subreddit_name_for_testing';
+    const subredditLabel = DEBUG_LONG_SUB
+      ? `r/${DEBUG_LONG_SUB}`
+      : state.subredditName
+        ? `r/${state.subredditName}`
+        : 'this community';
     let commandTitle = `Get verified in ${subredditLabel}`;
     let infoText = 'Review the photo requirements, then submit your verification for moderator review.';
     if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
