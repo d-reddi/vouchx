@@ -973,6 +973,105 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
   }
 
+  function setTemplateSubtab(name) {
+    const buttons = document.querySelectorAll('.template-subtab-btn');
+    const panels = document.querySelectorAll('.template-subpanel');
+    let resolved = name;
+    let matched = false;
+    buttons.forEach((button) => {
+      if (String(button.dataset.templateSubtab || '') === name) {
+        matched = true;
+      }
+    });
+    if (!matched) {
+      resolved = 'pending';
+    }
+    buttons.forEach((button) => {
+      const isActive = String(button.dataset.templateSubtab || '') === resolved;
+      button.classList.toggle('template-subtab-btn-active', isActive);
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    panels.forEach((panel) => {
+      const isActive = String(panel.dataset.templateSubpanel || '') === resolved;
+      panel.classList.toggle('hidden', !isActive);
+    });
+  }
+
+  function initTemplateSubtabs() {
+    const buttons = document.querySelectorAll('.template-subtab-btn');
+    if (!buttons.length) {
+      return;
+    }
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        setTemplateSubtab(String(button.dataset.templateSubtab || 'pending'));
+      });
+    });
+  }
+
+  let activeDenyReasonChip = '';
+
+  function setActiveDenyReasonChip(reasonId) {
+    activeDenyReasonChip = reasonId;
+    const chipsContainer = document.getElementById('deny-reason-chips');
+    if (chipsContainer) {
+      chipsContainer.querySelectorAll('[data-deny-reason-chip]').forEach((chip) => {
+        const isActive = String(chip.dataset.denyReasonChip || '') === reasonId;
+        chip.classList.toggle('btn-primary', isActive);
+        chip.classList.toggle('btn-secondary', !isActive);
+        chip.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+    }
+    for (const control of denyReasonTemplateControls) {
+      if (!control.wrapper) {
+        continue;
+      }
+      const enabled = getEnabledDenyReasons().some((item) => item.id === control.id);
+      const isActive = enabled && control.id === reasonId;
+      control.wrapper.classList.toggle('hidden', !isActive);
+    }
+  }
+
+  function renderDenyReasonChips() {
+    const chipsContainer = document.getElementById('deny-reason-chips');
+    if (!chipsContainer) {
+      return;
+    }
+    const enabled = getEnabledDenyReasons();
+    chipsContainer.textContent = '';
+    if (enabled.length <= 1) {
+      chipsContainer.classList.add('hidden');
+    } else {
+      chipsContainer.classList.remove('hidden');
+    }
+    for (const reason of enabled) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'btn btn-secondary';
+      chip.dataset.denyReasonChip = reason.id;
+      chip.setAttribute('role', 'tab');
+      chip.textContent = getDenyReasonLabel(reason.id);
+      chipsContainer.appendChild(chip);
+    }
+    const firstEnabled = enabled[0] ? enabled[0].id : '';
+    const stillEnabled = enabled.some((item) => item.id === activeDenyReasonChip);
+    setActiveDenyReasonChip(stillEnabled ? activeDenyReasonChip : firstEnabled);
+  }
+
+  function initDenyReasonChips() {
+    const chipsContainer = document.getElementById('deny-reason-chips');
+    if (!chipsContainer) {
+      return;
+    }
+    chipsContainer.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target.closest('[data-deny-reason-chip]') : null;
+      if (!target) {
+        return;
+      }
+      setActiveDenyReasonChip(String(target.dataset.denyReasonChip || ''));
+    });
+  }
+
   function themeLightTokens(value) {
     const palette = normalizeThemePalette(value);
     return palette ? palette.light : null;
@@ -1988,6 +2087,10 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return dirty ? draft : null;
   }
 
+  function hasTemplatesChanges() {
+    return captureTemplatesDraft() !== null;
+  }
+
   function hasInstructionSettingsChanges() {
     if (!state) {
       return false;
@@ -2452,6 +2555,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
     if (saveInstructionsBtn) {
       saveInstructionsBtn.disabled = isBusy || isSavingFlairSettings || !hasInstructionSettingsChanges();
+    }
+    if (saveTemplatesBtn) {
+      saveTemplatesBtn.disabled = isBusy || isSavingFlairSettings || !hasTemplatesChanges();
     }
   }
 
@@ -4217,33 +4323,20 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     denyHeaderInput.value = state.config.denyHeader || '';
     for (const control of denyReasonTemplateControls) {
       const label = getDenyReasonLabel(control.id);
-      const enabled = getEnabledDenyReasons().some((item) => item.id === control.id);
-      if (control.wrapper) {
-        control.wrapper.classList.toggle('hidden', !enabled);
-      }
       if (control.label) {
         control.label.textContent = `Denial body: ${label}`;
       }
       if (control.input) {
         control.input.value = getDenyReasonTemplate(control.id) || '';
       }
-    }
-    let hasShownDenialBodyHelp = false;
-    for (const control of denyReasonTemplateControls) {
-      if (!control.help) {
-        continue;
+      if (control.help) {
+        control.help.classList.remove('hidden');
       }
-      const isVisible = Boolean(control.wrapper && !control.wrapper.classList.contains('hidden'));
-      const shouldShowHelp = isVisible && !hasShownDenialBodyHelp;
-      control.help.classList.toggle('hidden', !shouldShowHelp);
-      if (!shouldShowHelp) {
-        control.help.open = false;
-        continue;
-      }
-      hasShownDenialBodyHelp = true;
     }
+    renderDenyReasonChips();
     removeHeaderInput.value = state.config.removeHeader || '';
     removeBodyInput.value = state.config.removeBody || '';
+    syncSaveFlairButtonState();
   }
 
   function normalizeHex(value) {
@@ -5537,6 +5630,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     bindTextareaHelperToolbar(toolbar);
   });
 
+  initTemplateSubtabs();
+  initDenyReasonChips();
+
   [
     photoInstructionsInput,
     photoInstructionsEsInput,
@@ -5553,6 +5649,31 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   if (photoInstructionsDefaultLanguageInput) {
     photoInstructionsDefaultLanguageInput.addEventListener('change', () => {
+      syncSaveFlairButtonState();
+    });
+  }
+
+  [
+    pendingTurnaroundDaysInput,
+    modmailSubjectInput,
+    pendingBodyInput,
+    approveHeaderInput,
+    approveBodyInput,
+    denyHeaderInput,
+    removeHeaderInput,
+    removeBodyInput,
+    ...denyReasonTemplateControls.map((control) => control.input),
+  ].forEach((input) => {
+    if (!input) {
+      return;
+    }
+    input.addEventListener('input', () => {
+      syncSaveFlairButtonState();
+    });
+  });
+
+  if (alwaysIncludeDenialNotesInModmailInput) {
+    alwaysIncludeDenialNotesInModmailInput.addEventListener('change', () => {
       syncSaveFlairButtonState();
     });
   }

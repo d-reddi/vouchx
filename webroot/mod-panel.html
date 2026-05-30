@@ -604,8 +604,14 @@
           </div>
 
           <div id="settings-panel-templates" class="settings-panel hidden">
-            <div class="settings-grid template-settings-grid">
-              <div class="content-card">
+            <div class="template-subtabs" id="template-subtabs" role="tablist" aria-label="Modmail templates">
+              <button class="template-subtab-btn template-subtab-btn-active" data-template-subtab="pending" type="button" role="tab" aria-selected="true">Pending</button>
+              <button class="template-subtab-btn" data-template-subtab="approval" type="button" role="tab" aria-selected="false">Approval</button>
+              <button class="template-subtab-btn" data-template-subtab="denial" type="button" role="tab" aria-selected="false">Denial</button>
+              <button class="template-subtab-btn" data-template-subtab="revoked" type="button" role="tab" aria-selected="false">Revoked</button>
+            </div>
+            <div class="template-subpanels">
+              <div id="template-subpanel-pending" class="content-card template-subpanel" data-template-subpanel="pending">
                 <div class="card-head">
                   <div>
                     <h3 class="section-heading">Pending review</h3>
@@ -636,20 +642,22 @@
                 <div class="field-label-row">
                   <label class="field-label" for="pending-body">Pending body</label>
                   <details class="team-stats-help">
-                    <summary class="team-stats-help-button" aria-label="Explain pending body Markdown and placeholders">?</summary>
+                    <summary class="team-stats-help-button" aria-label="Explain pending body purpose">?</summary>
                     <div class="team-stats-help-tooltip" role="note">
-                      <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                      <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
-                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      <p>Message sent to the user via modmail confirming their verification was received and is awaiting moderator review.</p>
+                      <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>. <code>{{days}}</code> includes the unit (e.g. <code>3 days</code>).</p>
                       <p>The app automatically appends the 18+ and terms confirmation timestamp below this message.</p>
                     </div>
                   </details>
                 </div>
-                <div class="textarea-helper-toolbar" data-textarea-helper="pending-body" aria-label="Pending body template helpers"></div>
-                <textarea id="pending-body" class="field-textarea" rows="5"></textarea>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="pending-body" aria-label="Pending body template helpers"></div>
+                </details>
+                <textarea id="pending-body" class="field-textarea field-textarea-tall" rows="14"></textarea>
               </div>
 
-              <div class="content-card">
+              <div id="template-subpanel-approval" class="content-card template-subpanel hidden" data-template-subpanel="approval">
                 <div class="card-head">
                   <div>
                     <h3 class="section-heading">Approval</h3>
@@ -673,19 +681,21 @@
                 <div class="field-label-row">
                   <label class="field-label" for="approve-body">Approval body</label>
                   <details class="team-stats-help">
-                    <summary class="team-stats-help-button" aria-label="Explain approval body Markdown and placeholders">?</summary>
+                    <summary class="team-stats-help-button" aria-label="Explain approval body purpose">?</summary>
                     <div class="team-stats-help-tooltip" role="note">
-                      <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                      <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
-                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      <p>Message sent to the user via modmail when their verification is approved.</p>
+                      <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>. <code>{{days}}</code> includes the unit (e.g. <code>3 days</code>).</p>
                     </div>
                   </details>
                 </div>
-                <div class="textarea-helper-toolbar" data-textarea-helper="approve-body" aria-label="Approval body template helpers"></div>
-                <textarea id="approve-body" class="field-textarea" rows="5"></textarea>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="approve-body" aria-label="Approval body template helpers"></div>
+                </details>
+                <textarea id="approve-body" class="field-textarea field-textarea-tall" rows="14"></textarea>
               </div>
 
-              <div class="content-card content-card-span-2">
+              <div id="template-subpanel-denial" class="content-card template-subpanel hidden" data-template-subpanel="denial">
                 <div class="card-head">
                   <div>
                     <h3 class="section-heading">Denial</h3>
@@ -694,6 +704,27 @@
                     </p>
                   </div>
                 </div>
+                <label class="toggle-row switch-row switch-row-compact deny-notes-toggle">
+                  <input id="always-include-denial-notes-in-modmail" type="checkbox" />
+                  <span class="toggle-switch" aria-hidden="true"></span>
+                  <span class="toggle-copy">
+                    <span class="toggle-title">Auto-append moderator denial notes</span>
+                  </span>
+                  <details class="team-stats-help">
+                    <summary class="team-stats-help-button" aria-label="Explain denial notes behavior">?</summary>
+                    <div class="team-stats-help-tooltip" role="note">
+                      <p>Applies to <strong>all</strong> denial reasons below.</p>
+                      <p><strong>Enabled:</strong> moderator denial notes are appended automatically unless your denial header or body already uses <code>{{denial_notes}}</code>.</p>
+                      <p><strong>Disabled:</strong> moderator notes appear only where you place <code>{{denial_notes}}</code> in the denial templates.</p>
+                    </div>
+                  </details>
+                </label>
+
+                <div class="deny-reason-segment-wrap">
+                  <span class="group-kicker deny-reason-segment-label">Denial reason</span>
+                  <div class="subtabs segmented-control deny-reason-segment" id="deny-reason-chips" role="tablist" aria-label="Denial reason"></div>
+                </div>
+
                 <div class="field-stack">
                   <div class="field-label-row">
                     <label class="field-label" for="deny-header">Denial header</label>
@@ -708,87 +739,85 @@
                   </div>
                   <input id="deny-header" class="field-input" type="text" />
                 </div>
-                <div class="field-label-row field-label-row-spaced">
-                  <label class="field-label" for="always-include-denial-notes-in-modmail">Denial notes behavior</label>
-                  <details class="team-stats-help">
-                    <summary class="team-stats-help-button" aria-label="Explain denial notes behavior">?</summary>
-                    <div class="team-stats-help-tooltip" role="note">
-                      <p><strong>Enabled:</strong> moderator denial notes are appended automatically unless your denial header or body already uses <code>{{denial_notes}}</code>.</p>
-                      <p><strong>Disabled:</strong> moderator notes appear only where you place <code>{{denial_notes}}</code> in the denial templates.</p>
-                    </div>
-                  </details>
-                </div>
-                <label class="toggle-row">
-                  <input id="always-include-denial-notes-in-modmail" type="checkbox" />
-                  <span>Always include moderator denial notes in denial modmail</span>
-                </label>
 
                 <div id="deny-template-reason-1-wrap" class="template-reason-block hidden">
                   <div class="field-label-row">
                     <label id="deny-body-reason-1-label" class="field-label" for="deny-body-reason-1">Denial body</label>
                     <details id="deny-body-reason-1-help" class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain denial body Markdown and placeholders">?</summary>
+                      <summary class="team-stats-help-button" aria-label="Explain denial body purpose">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
-                        <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
-                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                        <p>Message sent to the user via modmail when their verification is denied for this reason.</p>
+                        <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>.</p>
+                        <p>Include <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them — otherwise the toggle at the top of this panel controls whether they're auto-appended.</p>
                       </div>
                     </details>
                   </div>
-                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-1" aria-label="Denial body reason 1 template helpers"></div>
-                  <textarea id="deny-body-reason-1" class="field-textarea" rows="4"></textarea>
+                  <details class="textarea-formatting">
+                    <summary>Formatting tools</summary>
+                    <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-1" aria-label="Denial body reason 1 template helpers"></div>
+                  </details>
+                  <textarea id="deny-body-reason-1" class="field-textarea field-textarea-tall" rows="12"></textarea>
                 </div>
 
                 <div id="deny-template-reason-2-wrap" class="template-reason-block hidden">
                   <div class="field-label-row">
                     <label id="deny-body-reason-2-label" class="field-label" for="deny-body-reason-2">Denial body</label>
                     <details id="deny-body-reason-2-help" class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain denial body Markdown and placeholders">?</summary>
+                      <summary class="team-stats-help-button" aria-label="Explain denial body purpose">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
-                        <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
-                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                        <p>Message sent to the user via modmail when their verification is denied for this reason.</p>
+                        <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>.</p>
+                        <p>Include <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them — otherwise the toggle at the top of this panel controls whether they're auto-appended.</p>
                       </div>
                     </details>
                   </div>
-                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-2" aria-label="Denial body reason 2 template helpers"></div>
-                  <textarea id="deny-body-reason-2" class="field-textarea" rows="4"></textarea>
+                  <details class="textarea-formatting">
+                    <summary>Formatting tools</summary>
+                    <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-2" aria-label="Denial body reason 2 template helpers"></div>
+                  </details>
+                  <textarea id="deny-body-reason-2" class="field-textarea field-textarea-tall" rows="12"></textarea>
                 </div>
 
                 <div id="deny-template-reason-3-wrap" class="template-reason-block hidden">
                   <div class="field-label-row">
                     <label id="deny-body-reason-3-label" class="field-label" for="deny-body-reason-3">Denial body</label>
                     <details id="deny-body-reason-3-help" class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain denial body Markdown and placeholders">?</summary>
+                      <summary class="team-stats-help-button" aria-label="Explain denial body purpose">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
-                        <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
-                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                        <p>Message sent to the user via modmail when their verification is denied for this reason.</p>
+                        <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>.</p>
+                        <p>Include <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them — otherwise the toggle at the top of this panel controls whether they're auto-appended.</p>
                       </div>
                     </details>
                   </div>
-                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-3" aria-label="Denial body reason 3 template helpers"></div>
-                  <textarea id="deny-body-reason-3" class="field-textarea" rows="4"></textarea>
+                  <details class="textarea-formatting">
+                    <summary>Formatting tools</summary>
+                    <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-3" aria-label="Denial body reason 3 template helpers"></div>
+                  </details>
+                  <textarea id="deny-body-reason-3" class="field-textarea field-textarea-tall" rows="12"></textarea>
                 </div>
 
                 <div id="deny-template-reason-4-wrap" class="template-reason-block hidden">
                   <div class="field-label-row">
                     <label id="deny-body-reason-4-label" class="field-label" for="deny-body-reason-4">Denial body</label>
                     <details id="deny-body-reason-4-help" class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain denial body Markdown and placeholders">?</summary>
+                      <summary class="team-stats-help-button" aria-label="Explain denial body purpose">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
-                        <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
-                        <p>Use <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them to appear.</p>
+                        <p>Message sent to the user via modmail when their verification is denied for this reason.</p>
+                        <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code>.</p>
+                        <p>Include <code>{{denial_notes}}</code> to place moderator-entered notes exactly where you want them — otherwise the toggle at the top of this panel controls whether they're auto-appended.</p>
                       </div>
                     </details>
                   </div>
-                  <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-4" aria-label="Denial body reason 4 template helpers"></div>
-                  <textarea id="deny-body-reason-4" class="field-textarea" rows="4"></textarea>
+                  <details class="textarea-formatting">
+                    <summary>Formatting tools</summary>
+                    <div class="textarea-helper-toolbar" data-textarea-helper="deny-body-reason-4" aria-label="Denial body reason 4 template helpers"></div>
+                  </details>
+                  <textarea id="deny-body-reason-4" class="field-textarea field-textarea-tall" rows="12"></textarea>
                 </div>
               </div>
 
-              <div class="content-card">
+              <div id="template-subpanel-revoked" class="content-card template-subpanel hidden" data-template-subpanel="revoked">
                 <div class="card-head">
                   <div>
                     <h3 class="section-heading">Revoked verification</h3>
@@ -812,16 +841,18 @@
                 <div class="field-label-row">
                   <label class="field-label" for="remove-body">Revoked verification body</label>
                   <details class="team-stats-help">
-                    <summary class="team-stats-help-button" aria-label="Explain revoked verification body Markdown and placeholders">?</summary>
+                    <summary class="team-stats-help-button" aria-label="Explain revoked verification body purpose">?</summary>
                     <div class="team-stats-help-tooltip" role="note">
-                      <p>Markdown is supported: bold, italic, links, quotes, headings, and lists.</p>
-                      <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{reason}}</code></p>
-                      <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                      <p>Message sent to the user via modmail when a previously approved verification is removed.</p>
+                      <p>Use <strong>Formatting tools</strong> below to apply Markdown or insert placeholders like <code>{{username}}</code> or <code>{{reason}}</code>. <code>{{days}}</code> includes the unit (e.g. <code>3 days</code>).</p>
                     </div>
                   </details>
                 </div>
-                <div class="textarea-helper-toolbar" data-textarea-helper="remove-body" aria-label="Revoked verification body template helpers"></div>
-                <textarea id="remove-body" class="field-textarea" rows="4"></textarea>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="remove-body" aria-label="Revoked verification body template helpers"></div>
+                </details>
+                <textarea id="remove-body" class="field-textarea field-textarea-tall" rows="12"></textarea>
               </div>
             </div>
 
