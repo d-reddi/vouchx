@@ -2847,9 +2847,10 @@ test('submitVerification rejects globally blocked usernames', async () => {
 test('clearExpiredPendingClaim clears stale claims', () => {
   const staleRecord = buildRecord({
     claimedBy: 'mod_one',
-    claimedAt: '2026-03-11T11:00:00.000Z',
+    claimedAt: '2026-03-10T11:00:00.000Z',
   });
 
+  // 25 hours after the claim — past the 24h TTL.
   const cleared = clearExpiredPendingClaim(staleRecord, Date.parse('2026-03-11T12:00:00.000Z'));
   assert.equal(cleared.claimedBy, null);
   assert.equal(cleared.claimedAt, null);
@@ -2858,12 +2859,13 @@ test('clearExpiredPendingClaim clears stale claims', () => {
 test('clearExpiredPendingClaim keeps active claims', () => {
   const activeRecord = buildRecord({
     claimedBy: 'mod_one',
-    claimedAt: '2026-03-11T11:55:00.000Z',
+    claimedAt: '2026-03-10T13:00:00.000Z',
   });
 
+  // 23 hours after the claim — still inside the 24h TTL.
   const result = clearExpiredPendingClaim(activeRecord, Date.parse('2026-03-11T12:00:00.000Z'));
   assert.equal(result.claimedBy, 'mod_one');
-  assert.equal(result.claimedAt, '2026-03-11T11:55:00.000Z');
+  assert.equal(result.claimedAt, '2026-03-10T13:00:00.000Z');
 });
 
 test('parseRecord preserves valid pending account details snapshots', () => {
