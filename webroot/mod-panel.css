@@ -3252,3 +3252,214 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* Templates panel: secondary tab strip — true equal columns via grid */
+.template-subtabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 14px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: 12px;
+}
+
+.template-subtab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 80%, var(--text) 20%);
+  font-size: 0.85rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.template-subtab-btn:hover {
+  background: color-mix(in srgb, var(--panel-surface) 80%, transparent);
+  color: var(--text);
+}
+
+.template-subtab-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 64%, transparent);
+}
+
+.template-subtab-btn-active {
+  background: color-mix(in srgb, var(--panel-surface-strong) 86%, var(--primary-soft) 14%);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+.template-subpanels {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.template-subpanel {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.template-subpanel .field-textarea,
+.template-subpanel .field-input {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Collapsible formatting helpers */
+.textarea-formatting {
+  margin: 6px 0 6px;
+}
+
+.textarea-formatting > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 80%, transparent);
+  color: color-mix(in srgb, var(--muted) 78%, var(--text) 22%);
+  font-size: 0.74rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.textarea-formatting > summary::-webkit-details-marker {
+  display: none;
+}
+
+.textarea-formatting > summary::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 0.7rem;
+  transition: transform 140ms ease;
+}
+
+.textarea-formatting[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.textarea-formatting > summary:hover {
+  background: color-mix(in srgb, var(--panel-surface) 88%, transparent);
+  color: var(--text);
+}
+
+.textarea-formatting[open] > summary {
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--panel-border) 62%);
+  color: var(--text);
+}
+
+.textarea-formatting .textarea-helper-toolbar {
+  margin-top: 8px;
+}
+
+/* Bigger template textareas */
+.field-textarea-tall {
+  min-height: 260px;
+}
+
+/* Denial subpanel: compact global notes toggle (low-emphasis) */
+.deny-notes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 16px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 55%, transparent);
+}
+
+.deny-notes-toggle .toggle-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--text) 92%, var(--muted) 8%);
+}
+
+.deny-notes-toggle .team-stats-help {
+  margin-left: auto;
+}
+
+/* Denial reason picker — segmented control */
+.deny-reason-segment-wrap {
+  margin: 0 0 14px;
+}
+
+.deny-reason-segment-label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.subtabs.deny-reason-segment {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 0;
+  gap: 4px;
+}
+
+.subtabs.deny-reason-segment .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.deny-reason-chip {
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 64%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 80%, transparent);
+  color: color-mix(in srgb, var(--muted) 78%, var(--text) 22%);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.deny-reason-chip:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--panel-border-strong) 60%);
+  color: var(--text);
+}
+
+.deny-reason-chip:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--primary) 64%, var(--panel-border) 36%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-soft) 54%, transparent);
+}
+
+.deny-reason-chip-active {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 62%, var(--panel-border) 38%);
+  color: var(--text);
+}
