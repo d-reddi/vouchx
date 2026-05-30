@@ -1668,16 +1668,34 @@ textarea {
 
 /* Collapsible denial options: separated by a hairline, not a box. */
 .pending-deny {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--panel-divider) 60%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .pending-deny .field-textarea {
   min-height: 78px;
+}
+
+.pending-deny-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.pending-deny-actions .btn {
+  flex: 0 0 auto;
+}
+
+.pending-deny-confirm-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .pending-account-age-chip {

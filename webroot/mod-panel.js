@@ -364,6 +364,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   let batchDenyReasonDraft = '';
   let batchDenyNotesDraft = '';
   let batchDenyOptionsExpanded = false;
+  // Per-verification in-progress denial drafts, preserved across re-renders
+  // (realtime refresh, state updates) so opening the deny form isn't wiped.
+  const pendingDenialDrafts = new Map();
   let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
@@ -3420,6 +3423,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     let denyBlockRow = null;
     let denyBlockCheckbox = null;
     let denySection = null;
+    let denyCancelBtn = null;
+    let denyConfirmBtn = null;
+    let syncDenyConfirmState = null;
     if (!isClaimedByOther && !isReReview) {
       denySection = document.createElement('div');
       denySection.className = 'pending-deny hidden';
@@ -3485,6 +3491,61 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       };
       denyReason.addEventListener('change', syncDenyBlockVisibility);
       syncDenyBlockVisibility();
+
+      const writeDenyDraft = () => {
+        if (!pendingDenialDrafts.has(item.id)) {
+          return;
+        }
+        pendingDenialDrafts.set(item.id, {
+          reason: denyReason ? denyReason.value : '',
+          notes: denyNotes ? denyNotes.value : '',
+          block: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
+        });
+      };
+      denyReason.addEventListener('change', writeDenyDraft);
+      if (denyNotes) {
+        denyNotes.addEventListener('input', writeDenyDraft);
+      }
+      if (denyBlockCheckbox) {
+        denyBlockCheckbox.addEventListener('change', writeDenyDraft);
+      }
+
+      const denyActionRow = document.createElement('div');
+      denyActionRow.className = 'row pending-deny-actions';
+
+      denyCancelBtn = document.createElement('button');
+      denyCancelBtn.type = 'button';
+      denyCancelBtn.className = 'btn btn-secondary';
+      denyCancelBtn.textContent = 'Cancel';
+
+      denyConfirmBtn = document.createElement('button');
+      denyConfirmBtn.type = 'button';
+      denyConfirmBtn.className = 'btn btn-danger pending-deny-confirm-btn';
+      denyConfirmBtn.disabled = true;
+
+      denyActionRow.append(denyCancelBtn, denyConfirmBtn);
+      denySection.appendChild(denyActionRow);
+
+      syncDenyConfirmState = () => {
+        if (!denyReason || !denyConfirmBtn) {
+          return;
+        }
+        const reasonId = denyReason.value;
+        denyConfirmBtn.disabled = !reasonId;
+        denyConfirmBtn.textContent = 'Confirm denial';
+        denyConfirmBtn.title = reasonId ? '' : 'Pick a denial reason first';
+      };
+      denyReason.addEventListener('change', syncDenyConfirmState);
+      syncDenyConfirmState();
+
+      if (denyNotes) {
+        denyNotes.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' && !event.shiftKey && denyReason && denyReason.value) {
+            event.preventDefault();
+            denyConfirmBtn.click();
+          }
+        });
+      }
     }
 
     const row = document.createElement('div');
@@ -3539,37 +3600,89 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
         const denyBtn = document.createElement('button');
         denyBtn.className = 'btn btn-danger';
         denyBtn.textContent = 'Deny';
+
+        const setDenyMode = (active) => {
+          if (!denySection) {
+            return;
+          }
+          denySection.classList.toggle('hidden', !active);
+          approveBtn.classList.toggle('hidden', active);
+          denyBtn.classList.toggle('hidden', active);
+          if (approvalChoiceSelect) {
+            approvalChoiceSelect.classList.toggle('hidden', active);
+          }
+        };
+
         denyBtn.addEventListener('click', () => {
           if (!getEnabledDenyReasons().length) {
             showToast('No denial reasons are enabled in install settings.', 'error');
             return;
           }
-          // First click reveals the (collapsed) denial options; the moderator
-          // then picks a reason and clicks Deny again to submit.
-          if (denySection && denySection.classList.contains('hidden')) {
-            denySection.classList.remove('hidden');
-            denyBtn.classList.add('is-armed');
-            if (denyReason) {
-              try {
-                denyReason.focus();
-              } catch (_error) {
-                // focus is best-effort
-              }
-            }
-            return;
-          }
-          if (!denyReason || !denyReason.value) {
-            showToast('Select a denial reason before denying.', 'error');
-            return;
-          }
-          postWithBusy({
-            type: 'deny',
-            verificationId: item.id,
-            reason: denyReason.value,
-            moderatorNotes: denyNotes ? denyNotes.value : '',
-            blockUser: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
+          pendingDenialDrafts.set(item.id, {
+            reason: denyReason ? denyReason.value : '',
+            notes: denyNotes ? denyNotes.value : '',
+            block: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
           });
+          setDenyMode(true);
+          if (denyReason) {
+            try {
+              denyReason.focus();
+            } catch (_error) {
+              // focus is best-effort
+            }
+          }
         });
+
+        if (denyCancelBtn) {
+          denyCancelBtn.addEventListener('click', () => {
+            pendingDenialDrafts.delete(item.id);
+            setDenyMode(false);
+            if (denyReason) {
+              denyReason.value = '';
+              denyReason.dispatchEvent(new Event('change'));
+            }
+            if (denyNotes) {
+              denyNotes.value = '';
+            }
+            if (denyBlockCheckbox) {
+              denyBlockCheckbox.checked = false;
+            }
+          });
+        }
+
+        if (denyConfirmBtn) {
+          denyConfirmBtn.addEventListener('click', () => {
+            if (!denyReason || !denyReason.value) {
+              showToast('Select a denial reason before denying.', 'error');
+              return;
+            }
+            pendingDenialDrafts.delete(item.id);
+            postWithBusy({
+              type: 'deny',
+              verificationId: item.id,
+              reason: denyReason.value,
+              moderatorNotes: denyNotes ? denyNotes.value : '',
+              blockUser: denyBlockCheckbox ? denyBlockCheckbox.checked : false,
+            });
+          });
+        }
+
+        // Restore in-progress denial draft (preserved across re-renders).
+        const draft = pendingDenialDrafts.get(item.id);
+        if (draft) {
+          setDenyMode(true);
+          if (denyReason) {
+            denyReason.value = draft.reason || '';
+            denyReason.dispatchEvent(new Event('change'));
+          }
+          if (denyNotes) {
+            denyNotes.value = draft.notes || '';
+          }
+          if (denyBlockCheckbox && draft.reason) {
+            denyBlockCheckbox.checked = Boolean(draft.block);
+          }
+        }
+
         row.appendChild(denyBtn);
       }
     }
@@ -3644,6 +3757,16 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
     pruneSelectedPendingIds();
+    if (pendingDenialDrafts.size > 0) {
+      const activeIds = new Set(
+        state && Array.isArray(state.pending) ? state.pending.map((entry) => entry && entry.id).filter(Boolean) : []
+      );
+      for (const id of Array.from(pendingDenialDrafts.keys())) {
+        if (!activeIds.has(id)) {
+          pendingDenialDrafts.delete(id);
+        }
+      }
+    }
     const hasPendingItems = Boolean(state && Array.isArray(state.pending) && state.pending.length > 0);
     if (pendingLayout) {
       pendingLayout.dataset.mobilePriority = hasPendingItems ? 'list' : 'filters';
