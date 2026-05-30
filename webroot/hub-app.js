@@ -1850,13 +1850,7 @@ export function mountHub(options = {}) {
       refs.modPanelGroup.classList.toggle('hidden', !state.canReview);
     }
 
-    // TEMP DEBUG: simulate a long subreddit name in the headline. Revert before commit.
-    const DEBUG_LONG_SUB = 'really_long_subreddit_name_for_testing';
-    const subredditLabel = DEBUG_LONG_SUB
-      ? `r/${DEBUG_LONG_SUB}`
-      : state.subredditName
-        ? `r/${state.subredditName}`
-        : 'this community';
+    const subredditLabel = state.subredditName ? `r/${state.subredditName}` : 'this community';
     let commandTitle = `Get verified in ${subredditLabel}`;
     let infoText = 'Review the photo requirements, then submit your verification for moderator review.';
     if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
