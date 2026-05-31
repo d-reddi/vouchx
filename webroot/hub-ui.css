@@ -386,6 +386,28 @@ button:not(:disabled):hover {
   color: #fff;
 }
 
+/* Low-emphasis destructive action: used on the approved screen so "Remove
+   verification" stays accessible without dominating the completion state. */
+.hub-remove-verification-btn {
+  background: transparent;
+  color: color-mix(in srgb, var(--danger) 78%, var(--muted) 22%);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line) 72%);
+  font-weight: 600;
+  font-size: 0.86rem;
+  padding-inline: 12px;
+}
+
+.hub-remove-verification-btn:not(:disabled):hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line) 48%);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.hub-remove-verification-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  outline-offset: 2px;
+}
+
 .hub-command {
   position: relative;
   z-index: 1;
@@ -607,19 +629,30 @@ button:not(:disabled):hover {
   justify-self: stretch;
 }
 
+/* Legal/help row: present but quiet. Sits at the end of the surface as a
+   recessive utility strip rather than a website-style footer. */
 .legal-links {
   display: flex;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 10px 14px;
   flex-wrap: wrap;
   padding: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
 
 .legal-link {
-  color: var(--muted);
-  font-size: 0.92rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--muted) 48%, transparent);
+  padding-bottom: 1px;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease;
 }
 
 @media (max-width: 560px) {
@@ -693,11 +726,20 @@ button:not(:disabled):hover {
 }
 
 .legal-link:hover {
-  color: var(--primary);
+  color: color-mix(in srgb, var(--text) 78%, var(--muted) 22%);
+  border-bottom-color: color-mix(in srgb, var(--primary) 48%, var(--muted) 52%);
+}
+
+.legal-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 38%, transparent);
+  outline-offset: 3px;
+  border-radius: 2px;
 }
 
 .legal-link-disabled {
-  opacity: 0.7;
+  opacity: 0.55;
+  cursor: default;
+  border-bottom-style: dashed;
 }
 
 .hub-modal {
@@ -864,6 +906,111 @@ button:not(:disabled):hover {
 
 .hub-flow-step.is-waiting .hub-flow-label {
   color: color-mix(in srgb, var(--accent) 78%, var(--text) 22%);
+}
+
+/* Failed: the previous attempt was denied at this step. */
+.hub-flow-step.is-failed .hub-flow-bar {
+  background: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
+.hub-flow-step.is-failed .hub-flow-num {
+  background: color-mix(in srgb, var(--danger) 16%, var(--card));
+  color: var(--danger);
+  font-size: 0;
+  position: relative;
+}
+
+.hub-flow-step.is-failed .hub-flow-num::before {
+  content: "✕";
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.hub-flow-step.is-failed .hub-flow-label {
+  color: var(--danger);
+}
+
+/* Locked: step the user hasn't reached yet — neutral and de-emphasised. */
+.hub-flow-step.is-locked .hub-flow-bar {
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.hub-flow-step.is-locked .hub-flow-num {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 88%, var(--muted) 12%);
+}
+
+.hub-flow-step.is-locked .hub-flow-label {
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+
+/* Done: explicit checkmark replaces the digit. */
+.hub-flow-step.is-done .hub-flow-num {
+  font-size: 0;
+  position: relative;
+}
+
+.hub-flow-step.is-done .hub-flow-num::before {
+  content: "✓";
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Step 4 is the verification destination/reward — slightly elevated framing
+   so it reads as the goal even when still locked. */
+.hub-flow-step.is-outcome .hub-flow-bar {
+  height: 5px;
+}
+
+.hub-flow-step.is-outcome .hub-flow-num {
+  width: 18px;
+  height: 18px;
+}
+
+.hub-flow-step.is-outcome .hub-flow-label {
+  font-weight: 700;
+}
+
+/* Outcome achieved: celebratory treatment when the user is verified. */
+.hub-flow-step.is-outcome-achieved .hub-flow-bar {
+  background: var(--success);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 32%, transparent);
+}
+
+.hub-flow-step.is-outcome-achieved .hub-flow-num {
+  background: var(--success);
+  color: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.hub-flow-step.is-outcome-achieved .hub-flow-num::before {
+  color: #fff;
+}
+
+.hub-flow-step.is-outcome-achieved .hub-flow-label {
+  color: var(--success);
+  font-weight: 800;
+}
+
+/* Completed-journey hook (kept available for future tweaks). No background
+   tint — the green checks and bars already communicate success without
+   recoloring the timeline's surroundings. */
+.hub-flow-complete {
+  /* intentionally empty */
+}
+
+/* Disclosure trigger that has no tooltip content shouldn't behave like a
+   tooltip — disable the pointer affordance and keep keyboard activation a
+   no-op visually. */
+.hub-flow-num-help[data-no-tooltip] {
+  pointer-events: none;
+}
+
+.hub-flow-num-help[data-no-tooltip] .hub-flow-num-trigger {
+  cursor: default;
 }
 
 /* Participation (step 4): the number bubble doubles as the tooltip trigger,

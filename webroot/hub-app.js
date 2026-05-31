@@ -414,6 +414,25 @@ function formatTimestamp(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+function formatDateLong(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  try {
+    return date.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return date.toLocaleDateString();
+  }
+}
+
 function makeButton(label, className, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -552,6 +571,9 @@ function getVerificationRequirementAccessText(config) {
 
 function syncVerificationRequirementStep(config, stepRefs) {
   const participationLabel = getVerificationRequirementLabel(config);
+  // Step 4 is only relevant when moderators have configured a participation
+  // requirement (post / comment unlock). Otherwise it's hidden entirely and the
+  // timeline is a clean 3-step journey ending at "Mod review".
   if (stepRefs.step) {
     stepRefs.step.classList.toggle('hidden', !participationLabel);
   }
@@ -1766,38 +1788,82 @@ export function mountHub(options = {}) {
       help: refs.participationStepHelp,
       tooltip: refs.participationStepTooltip,
     });
+    const hasOutcomeStep = Boolean(participationLabel);
 
-    const canSubmitNow =
-      !isVerified &&
-      !isRestricted &&
-      !awaitingFlairPropagation &&
-      !state.requiresInitialSetup &&
-      state.config.verificationsEnabled &&
-      !(state.userLatest && state.userLatest.status === 'pending');
-    const isPendingReview = !isVerified && !isRestricted && state.userLatest?.status === 'pending';
-
-    // -1 hides the onboarding flow (verified / blocked / setup / disabled states
-    // are communicated by the status hero instead).
-    let currentIndex = -1;
-    if (isVerified && participationLabel) {
-      currentIndex = steps.length;
-    } else if (isPendingReview) {
-      currentIndex = 2;
-    } else if (canSubmitNow) {
-      currentIndex = 0;
-    }
-
-    if (currentIndex < 0) {
+    // Hide the flow entirely when there's no actionable verification journey
+    // (restricted, blocked, disabled at the subreddit level, initial setup, etc).
+    if (
+      isRestricted ||
+      state.requiresInitialSetup ||
+      !state.config.verificationsEnabled
+    ) {
       flow.classList.add('hidden');
       return;
     }
+
+    const status = state.userLatest?.status;
+    let stepStates;
+    if (isVerified || awaitingFlairPropagation) {
+      // Completed journey — every step done, outcome lit up as the reward.
+      stepStates = ['done', 'done', 'done', 'outcome-achieved'];
+    } else if (status === 'pending') {
+      // Photos in, awaiting moderator decision.
+      stepStates = ['done', 'done', 'waiting', 'outcome-locked'];
+    } else if (status === 'denied') {
+      // Failed at the review step; next action is to resubmit (step 2 → current).
+      stepStates = ['done', 'current', 'failed', 'outcome-locked'];
+    } else if (status === 'removed') {
+      // Was verified, now removed — reset journey, outcome locked again.
+      stepStates = ['done', 'current', 'locked', 'outcome-locked'];
+    } else {
+      // First visit / nothing submitted yet.
+      stepStates = ['current', 'locked', 'locked', 'outcome-locked'];
+    }
+
     flow.classList.remove('hidden');
+    flow.classList.toggle('hub-flow-complete', isVerified || awaitingFlairPropagation);
+    const stateClassList = [
+      'is-done',
+      'is-current',
+      'is-waiting',
+      'is-failed',
+      'is-locked',
+      'is-outcome',
+      'is-outcome-achieved',
+    ];
     steps.forEach((step, index) => {
-      step.classList.toggle('is-done', index < currentIndex);
-      step.classList.toggle('is-current', index === currentIndex);
-      // While awaiting moderator review the current step reads as "waiting"
-      // (amber) rather than an active/done step.
-      step.classList.toggle('is-waiting', isPendingReview && index === currentIndex);
+      stateClassList.forEach((cls) => step.classList.remove(cls));
+      // Skip styling the participation step if the moderators haven't enabled
+      // a participation requirement — it's hidden by syncVerificationRequirementStep.
+      if (index === 3 && !hasOutcomeStep) {
+        return;
+      }
+      const stepState = stepStates[index];
+      switch (stepState) {
+        case 'done':
+          step.classList.add('is-done');
+          break;
+        case 'current':
+          step.classList.add('is-current');
+          break;
+        case 'waiting':
+          step.classList.add('is-current', 'is-waiting');
+          break;
+        case 'failed':
+          step.classList.add('is-failed');
+          break;
+        case 'locked':
+          step.classList.add('is-locked');
+          break;
+        case 'outcome-locked':
+          step.classList.add('is-outcome', 'is-locked');
+          break;
+        case 'outcome-achieved':
+          step.classList.add('is-outcome', 'is-done', 'is-outcome-achieved');
+          break;
+        default:
+          break;
+      }
     });
   }
 
@@ -1873,7 +1939,8 @@ export function mountHub(options = {}) {
         : 'This restriction is only for this subreddit and is based on your activity or verification history.';
     } else if (isVerified) {
       commandTitle = isManualSource(state.viewerFlairCheckSource) ? 'Verification detected' : 'Verification complete';
-      infoText = state.userLatest?.reviewedAt ? `Reviewed ${formatTimestamp(state.userLatest.reviewedAt)}.` : '';
+      const approvedOn = formatDateLong(state.userLatest?.reviewedAt);
+      infoText = approvedOn ? `Your verification was approved on ${approvedOn}.` : '';
     } else if (state.userLatest?.status === 'denied') {
       commandTitle = 'Denied - Resubmit your photo(s)';
       const parts = [];
@@ -1950,7 +2017,7 @@ export function mountHub(options = {}) {
 
     if (isVerified || (isGlobalRestriction && state.userLatest?.status === 'approved')) {
       refs.actionRow.appendChild(
-        makeButton('Remove Verification', 'btn-danger', () => {
+        makeButton('Remove verification', 'hub-remove-verification-btn', () => {
           void openDeleteForm();
         })
       );
