@@ -100,14 +100,14 @@ body.hub-photo-instructions-step-open {
 }
 
 .shell {
-  max-width: 760px;
+  max-width: min(960px, 100%);
   margin: 0 auto;
-  padding: 18px;
+  padding: clamp(14px, 2vw, 28px);
 }
 
 body.hub-inline .shell {
   max-width: 100%;
-  padding: 10px;
+  padding: clamp(6px, 1.4vw, 14px);
 }
 
 .loading-screen {
@@ -137,24 +137,35 @@ body.hub-inline .loading-screen {
 }
 
 .hub-surface {
+  --surface-pad-x: clamp(20px, 3.4vw, 36px);
+  --surface-pad-y: clamp(22px, 3.4vw, 36px);
   position: relative;
   overflow: visible;
   background: var(--card);
   border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   border-radius: var(--radius-card);
-  padding: 28px;
+  padding: var(--surface-pad-y) var(--surface-pad-x);
   box-shadow: var(--shadow);
+  container-type: inline-size;
+  container-name: hub;
 }
 
 body.hub-inline .hub-surface {
+  --surface-pad-x: clamp(16px, 3vw, 30px);
+  --surface-pad-y: clamp(18px, 3vw, 30px);
   border-radius: var(--radius-card);
-  padding: 18px;
 }
 
 .hub-surface > * + * {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  margin-top: clamp(18px, 2.4vw, 26px);
+  padding-top: clamp(18px, 2.4vw, 26px);
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.hub-surface > .legal-links {
+  margin-top: clamp(14px, 1.8vw, 20px);
+  padding-top: clamp(12px, 1.6vw, 18px);
+  border-top-color: color-mix(in srgb, var(--line) 38%, transparent);
 }
 
 /* ── Member hub: status-led hero (Minimal) ── */
@@ -163,8 +174,46 @@ body.hub-inline .hub-surface {
   z-index: 3;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
+  align-items: stretch;
+  gap: 0;
+}
+
+/* Per-child spacing for a deliberate vertical rhythm (instead of a uniform
+   flex gap). Lets the headline sit close to its supporting text while the
+   timeline and action dock get more breathing room as workflow elements. */
+.hub-hero > .hub-hero-bar { margin: 0; }
+.hub-hero > .hub-headline { margin-top: clamp(16px, 2.4vw, 26px); }
+.hub-hero > .info-msg { margin-top: clamp(10px, 1.2vw, 14px); }
+.hub-hero > .hub-flow { margin-top: clamp(20px, 2.6vw, 30px); }
+.hub-hero > .hub-meta { margin-top: clamp(14px, 1.8vw, 20px); }
+.hub-hero > .hub-action-dock { margin-top: clamp(18px, 2.4vw, 26px); }
+
+/* ── "Wide" tier: when the surface itself is roomy (desktop inline embed,
+   expanded full-page) the hub gets more generous internal padding, larger
+   per-child rhythm, and a slightly larger headline ceiling so it feels
+   intentional in the space rather than a small card floating in a wide area.
+   Container queries (not viewport queries) so this triggers off the surface's
+   own width — works for both inline and expanded modes. ── */
+@container hub (min-width: 640px) {
+  .hub-surface {
+    --surface-pad-x: clamp(32px, 4.6cqi, 56px);
+    --surface-pad-y: clamp(34px, 5cqi, 60px);
+  }
+
+  .hub-hero > .hub-headline { margin-top: clamp(20px, 3.2cqi, 34px); }
+  .hub-hero > .info-msg { margin-top: clamp(12px, 1.6cqi, 18px); }
+  .hub-hero > .hub-flow { margin-top: clamp(28px, 4cqi, 42px); }
+  .hub-hero > .hub-meta { margin-top: clamp(18px, 2.4cqi, 26px); }
+  .hub-hero > .hub-action-dock { margin-top: clamp(24px, 3.4cqi, 36px); }
+
+  .hub-headline { font-size: clamp(2rem, 4cqi + 0.6rem, 3rem); }
+
+  /* The action dock can comfortably show two columns at this width; the
+     primary action gets a touch more presence. */
+  .hub-action-dock button {
+    min-height: clamp(48px, 4cqi + 22px, 56px);
+    font-size: clamp(0.96rem, 0.2cqi + 0.9rem, 1.05rem);
+  }
 }
 
 .hub-hero-bar {
@@ -200,10 +249,10 @@ body.hub-inline .hub-surface {
 
 .hub-headline {
   margin: 0;
-  font-size: clamp(1.3rem, 4vw, 2.05rem);
-  line-height: 1.1;
+  font-size: clamp(1.75rem, 1.05rem + 3.4vw, 2.75rem);
+  line-height: 1.06;
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.028em;
   color: var(--text);
   text-wrap: balance;
   overflow-wrap: anywhere;
@@ -211,8 +260,19 @@ body.hub-inline .hub-surface {
 
 .hub-meta {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-flow: row wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.hub-meta .meta {
+  margin: 0;
+  font-size: clamp(0.88rem, 0.82rem + 0.22vw, 1rem);
+  color: var(--muted);
+}
+
+.hub-meta .meta:empty {
+  display: none;
 }
 
 .hub-meta:empty {
@@ -421,10 +481,11 @@ button:not(:disabled):hover {
 }
 
 .info-msg {
-  margin: -8px 0 0;
+  margin: 0;
+  max-width: 62ch;
   color: color-mix(in srgb, var(--text) 60%, var(--muted) 40%);
-  font-size: 0.98rem;
-  line-height: 1.45;
+  font-size: clamp(1rem, 0.92rem + 0.42vw, 1.18rem);
+  line-height: 1.5;
   white-space: pre-line;
   text-wrap: pretty;
 }
@@ -613,11 +674,10 @@ button:not(:disabled):hover {
 }
 
 .hub-action-dock {
-  margin-top: 16px;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: clamp(8px, 1.2vw, 14px);
 }
 
 .hub-action-dock:empty {
@@ -627,6 +687,15 @@ button:not(:disabled):hover {
 .hub-action-dock button {
   width: 100%;
   justify-self: stretch;
+  min-height: clamp(44px, 1.4vw + 38px, 52px);
+  padding: clamp(11px, 1vw + 6px, 15px) clamp(14px, 1.4vw + 8px, 20px);
+  font-size: clamp(0.92rem, 0.86rem + 0.18vw, 1rem);
+  font-weight: 600;
+  border-radius: var(--radius-control);
+}
+
+.hub-action-dock .btn-primary {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* Legal/help row: present but quiet. Sits at the end of the surface as a
@@ -634,12 +703,12 @@ button:not(:disabled):hover {
 .legal-links {
   display: flex;
   justify-content: flex-start;
-  gap: 10px 14px;
+  gap: 8px 14px;
   flex-wrap: wrap;
   padding: 0;
-  font-size: 0.74rem;
+  font-size: clamp(0.7rem, 0.66rem + 0.1vw, 0.76rem);
   line-height: 1.4;
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  color: color-mix(in srgb, var(--muted) 62%, transparent);
 }
 
 .legal-link {
@@ -656,22 +725,8 @@ button:not(:disabled):hover {
 }
 
 @media (max-width: 560px) {
-  .hub-surface {
-    padding: 16px;
-    border-radius: 18px;
-  }
-
-  .hub-surface > * + * {
-    margin-top: 16px;
-    padding-top: 16px;
-  }
-
   .hub-title-row {
     min-width: 0;
-  }
-
-  .hub-hero {
-    gap: 14px;
   }
 
   .hub-toolbar-btn {
@@ -680,36 +735,20 @@ button:not(:disabled):hover {
     min-height: 38px;
   }
 
-  .info-msg {
-    font-size: 0.92rem;
-    line-height: 1.4;
-  }
-
+  /* Extend the timeline out to the surface edges so labels have room to
+     breathe without forcing the rest of the hub to lose its inner padding. */
   .hub-flow-hub {
-    gap: 6px;
     width: auto;
-    margin-left: -16px;
-    margin-right: -16px;
-  }
-
-  .hub-flow-hub .hub-flow-label {
-    font-size: 0.68rem;
-    line-height: 1.25;
+    margin-left: calc(-1 * var(--surface-pad-x));
+    margin-right: calc(-1 * var(--surface-pad-x));
+    padding-left: var(--surface-pad-x);
+    padding-right: var(--surface-pad-x);
   }
 
   .hub-flow-hub .hub-flow-step.is-current .hub-flow-label {
     font-weight: 700;
   }
 
-
-  .hub-action-dock {
-    gap: 8px;
-  }
-
-  .hub-action-dock button {
-    min-height: 44px;
-    padding: 11px 10px;
-  }
 
   .hub-developer-input-row {
     grid-template-columns: 1fr;
@@ -828,10 +867,21 @@ button:not(:disabled):hover {
   padding: 0;
 }
 
-/* Hub onboarding variant lives inside the flex hero; gap handles spacing. */
+/* Hub onboarding variant lives inside the flex hero. Margin is set by the
+   .hub-hero > .hub-flow rule above; the timeline itself just fills width. */
 .hub-flow-hub {
   margin: 0;
   width: 100%;
+  gap: clamp(6px, 1vw, 12px);
+}
+
+.hub-flow-hub .hub-flow-label {
+  font-size: clamp(0.7rem, 0.66rem + 0.18vw, 0.82rem);
+  line-height: 1.3;
+}
+
+.hub-flow-hub .hub-flow-bar {
+  height: clamp(4px, 0.32vw + 3px, 5px);
 }
 
 .hub-flow-step {
