@@ -10,11 +10,17 @@
   <body class="mod-panel-page">
     <div class="app-shell">
       <header class="hero">
-        <div class="hero-row">
-          <div class="panel-heading">
-            <p class="panel-kicker">VouchX</p>
+        <div class="panel-heading">
+          <p class="panel-kicker">VouchX</p>
+          <div class="hero-row">
             <h1>Moderation Center</h1>
-            <div class="header-meta" aria-live="polite">
+            <div class="row hero-actions">
+              <button id="back-to-hub-btn" class="btn btn-quiet">Back to Hub</button>
+              <button id="refresh-btn" class="btn btn-quiet">Refresh</button>
+            </div>
+          </div>
+          <div class="header-meta" aria-live="polite">
+            <div class="header-meta-primary">
               <div class="meta-block">
                 <span class="meta-label">Subreddit</span>
                 <span id="hero-subreddit" class="meta-value">Loading...</span>
@@ -23,15 +29,11 @@
                 <span class="meta-label">Queue</span>
                 <span id="hero-queue-status" class="meta-value">Loading...</span>
               </div>
-              <div class="meta-block">
-                <span class="meta-label">Updated</span>
-                <span id="hero-updated" class="meta-value">Waiting for sync</span>
-              </div>
             </div>
-          </div>
-          <div class="row hero-actions">
-            <button id="back-to-hub-btn" class="btn btn-quiet">Back to Hub</button>
-            <button id="refresh-btn" class="btn btn-quiet">Refresh</button>
+            <div class="meta-block">
+              <span class="meta-label">Updated</span>
+              <span id="hero-updated" class="meta-value">Waiting for sync</span>
+            </div>
           </div>
         </div>
       </header>
@@ -60,11 +62,6 @@
 
       <main id="main-content" class="hidden">
         <section id="tab-pending" class="tab-panel">
-          <div class="section-head queue-section-head">
-            <div>
-              <h2>Queue</h2>
-            </div>
-          </div>
           <div id="pending-flair-warning" class="content-card panel-warning panel-warning-error hidden" role="alert">
             <div class="panel-warning-body">
               <p class="panel-warning-title">Approvals are disabled</p>

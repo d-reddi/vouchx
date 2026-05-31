@@ -3508,18 +3508,14 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
     metaGroup.appendChild(createPendingSubmittedMeta(item));
     metaGroup.appendChild(createPendingAccountAgeMeta(item));
-    card.appendChild(metaGroup);
-
-    const checksGroup = document.createElement('div');
-    checksGroup.className = 'queue-verification-checks';
-    appendQueueVerificationChecks(checksGroup, item);
+    appendQueueVerificationChecks(metaGroup, item);
 
     if (isClaimed && !isClaimedByOther) {
-      checksGroup.appendChild(createQueueMetaRow('lock', 'Locked', 'You', 'pending-claim-meta'));
+      metaGroup.appendChild(createQueueMetaRow('lock', 'Locked', 'You', 'pending-claim-meta'));
     }
 
     if (isClaimedByOther) {
-      checksGroup.appendChild(
+      metaGroup.appendChild(
         createQueueMetaRow(
           'lock',
           'Locked',
@@ -3529,7 +3525,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       );
     }
 
-    card.appendChild(checksGroup);
+    card.appendChild(metaGroup);
 
     const decision = document.createElement('div');
     decision.className = 'pending-decision';
