@@ -349,11 +349,6 @@
         </section>
 
         <section id="tab-settings" class="tab-panel hidden">
-          <div class="section-head">
-            <div>
-              <h2>Settings</h2>
-            </div>
-          </div>
           <div
             id="settings-tabs-shell"
             class="settings-tabs-shell"
@@ -366,7 +361,7 @@
               <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
               <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
             </nav>
-            <div id="settings-tabs-scroll-hint" class="settings-tabs-scroll-hint hidden" aria-hidden="true">&rarr;</div>
+            <div id="settings-tabs-scroll-hint" class="settings-tabs-scroll-hint nav-scroll-hint hidden" aria-hidden="true"></div>
           </div>
 
           <div id="settings-panel-general" class="settings-panel">
@@ -405,6 +400,27 @@
                       <span class="approval-flair-preview-label muted small">Flair Preview:</span>
                       <span id="approval-flair-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
+                    <details id="flair-css-class-wrap" class="flair-css-class-stack settings-advanced-disclosure">
+                      <summary class="settings-advanced-summary">
+                        <span>Advanced: Flair CSS match</span>
+                      </summary>
+                      <div class="field-stack settings-advanced-body">
+                        <div class="field-label-row">
+                          <label class="field-label" for="flair-css-class">Flair CSS match (optional)</label>
+                          <details class="team-stats-help">
+                            <summary class="team-stats-help-button" aria-label="Explain Flair CSS match">?</summary>
+                            <div class="team-stats-help-tooltip" role="note">
+                              <p>Most subs will leave this blank.</p>
+                              <p><strong>This is for historical or external verification only.</strong></p>
+                              <p>Users with a matching flair CSS ID will be treated as verified automatically, without submitting through this app.</p>
+                              <p><strong>Example:</strong> "verified" matches "verified_user" or "vip_verified".</p>
+                              <p><strong>Note:</strong> This checks the flair’s CSS ID (not flair text) and does not change how new approvals work.</p>
+                            </div>
+                          </details>
+                        </div>
+                        <input id="flair-css-class" class="field-input" type="text" />
+                      </div>
+                    </details>
                   </div>
                   <div id="primary-approval-flair-template-wrap" class="field-stack hidden" aria-hidden="true">
                     <label class="field-label" for="flair-template-id">If your flair isn’t listed above (for example, if it’s not mod-only), enter its template ID here. This field is only shown when “Manual Input” is selected above.</label>
@@ -433,22 +449,6 @@
                       <span id="approval-flair-third-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
                   </div>
-                </div>
-                <div id="flair-css-class-wrap" class="field-stack flair-css-class-stack">
-                  <div class="field-label-row">
-                    <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
-                    <details class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain Flair CSS match">?</summary>
-                      <div class="team-stats-help-tooltip" role="note">
-                        <p>Most subs will leave this blank.</p>
-                        <p><strong>This is for historical or external verification only.</strong></p>
-                        <p>Users with a matching flair CSS ID will be treated as verified automatically, without submitting through this app.</p>
-                        <p><strong>Example:</strong> "verified" matches "verified_user" or "vip_verified".</p>
-                        <p><strong>Note:</strong> This checks the flair’s CSS ID (not flair text) and does not change how new approvals work.</p>
-                      </div>
-                    </details>
-                  </div>
-                  <input id="flair-css-class" class="field-input" type="text" />
                 </div>
               </div>
 
@@ -577,28 +577,40 @@
               <div id="instruction-language-panel-en" class="settings-language-panel">
                 <label class="field-label" for="photo-instructions">English instructions</label>
                 <p class="muted small field-help">Used when the default language is English, and also as a fallback when other languages are unavailable.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions" aria-label="English instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions" aria-label="English instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-es" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-es">Spanish instructions</label>
                 <p class="muted small field-help">Adds `es` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-es" aria-label="Spanish instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-es" aria-label="Spanish instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-es" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-fr" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-fr">French instructions</label>
                 <p class="muted small field-help">Adds `fr` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-fr" aria-label="French instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-fr" aria-label="French instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-fr" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-pt-br" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-pt-br">Portuguese (Brazil) instructions</label>
                 <p class="muted small field-help">Adds `pt-BR` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-pt-br" aria-label="Portuguese (Brazil) instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-pt-br" aria-label="Portuguese (Brazil) instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-pt-br" class="field-textarea" rows="10"></textarea>
               </div>
             </div>
@@ -611,11 +623,19 @@
           </div>
 
           <div id="settings-panel-templates" class="settings-panel hidden">
-            <div class="template-subtabs" id="template-subtabs" role="tablist" aria-label="Modmail templates">
-              <button class="template-subtab-btn template-subtab-btn-active" data-template-subtab="pending" type="button" role="tab" aria-selected="true">Pending</button>
-              <button class="template-subtab-btn" data-template-subtab="approval" type="button" role="tab" aria-selected="false">Approval</button>
-              <button class="template-subtab-btn" data-template-subtab="denial" type="button" role="tab" aria-selected="false">Denial</button>
-              <button class="template-subtab-btn" data-template-subtab="revoked" type="button" role="tab" aria-selected="false">Revoked</button>
+            <div
+              id="template-subtabs-shell"
+              class="template-subtabs-shell"
+              data-scroll-left="false"
+              data-scroll-right="false"
+            >
+              <div class="template-subtabs" id="template-subtabs" role="tablist" aria-label="Modmail templates">
+                <button class="template-subtab-btn template-subtab-btn-active" data-template-subtab="pending" type="button" role="tab" aria-selected="true">Pending</button>
+                <button class="template-subtab-btn" data-template-subtab="approval" type="button" role="tab" aria-selected="false">Approval</button>
+                <button class="template-subtab-btn" data-template-subtab="denial" type="button" role="tab" aria-selected="false">Denial</button>
+                <button class="template-subtab-btn" data-template-subtab="revoked" type="button" role="tab" aria-selected="false">Revoked</button>
+              </div>
+              <div id="template-subtabs-scroll-hint" class="template-subtabs-scroll-hint nav-scroll-hint hidden" aria-hidden="true"></div>
             </div>
             <div class="template-subpanels">
               <div id="template-subpanel-pending" class="content-card template-subpanel" data-template-subpanel="pending">
@@ -889,10 +909,13 @@
                     <p class="section-copy muted small">Override primary, accent, and background colors for the user-facing hub.</p>
                   </div>
                 </div>
-                <label class="field-label" for="use-custom-colors">Use custom colors</label>
-                <label class="toggle-row">
+                <label class="toggle-row switch-row switch-row-compact">
                   <input id="use-custom-colors" type="checkbox" />
-                  <span>Enable Custom Colors</span>
+                  <span class="toggle-switch" aria-hidden="true"></span>
+                  <span class="toggle-copy">
+                    <span class="toggle-title">Use custom colors</span>
+                    <span class="toggle-description muted small">Enable manual primary, accent, and background colors.</span>
+                  </span>
                 </label>
 
                 <div class="field-grid theme-controls-grid">

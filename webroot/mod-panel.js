@@ -4,6 +4,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
+  const DEFAULT_DENY_REASON_LABELS = {
+    reason_1: 'Altered or edited image',
+    reason_2: 'Unclear image',
+    reason_3: 'Did not follow instructions',
+    reason_4: 'Other',
+  };
 
   const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
   const settingsPrimaryTabButton =
@@ -21,6 +27,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const settingsTabsShell = document.getElementById('settings-tabs-shell');
   const settingsTabsNav = document.getElementById('settings-tabs');
   const settingsTabsScrollHint = document.getElementById('settings-tabs-scroll-hint');
+  const templateSubtabsShell = document.getElementById('template-subtabs-shell');
+  const templateSubtabsNav = document.getElementById('template-subtabs');
+  const templateSubtabsScrollHint = document.getElementById('template-subtabs-scroll-hint');
   const settingsPanels = {
     general: document.getElementById('settings-panel-general'),
     instructions: document.getElementById('settings-panel-instructions'),
@@ -132,6 +141,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const flairTemplateInput = document.getElementById('flair-template-id');
   const flairTemplateValidationFeedback = document.getElementById('flair-template-validation-feedback');
   const flairCssClassInput = document.getElementById('flair-css-class');
+  const flairCssClassDetails = document.getElementById('flair-css-class-wrap');
   const approvalFlairSecondSelect = document.getElementById('approval-flair-second-select');
   const approvalFlairThirdSelect = document.getElementById('approval-flair-third-select');
   const additionalApprovalFlairsRow = document.getElementById('additional-approval-flairs-row');
@@ -1004,6 +1014,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       const isActive = String(panel.dataset.templateSubpanel || '') === resolved;
       panel.classList.toggle('hidden', !isActive);
     });
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
   }
 
   function initTemplateSubtabs() {
@@ -1016,6 +1029,29 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
         setTemplateSubtab(String(button.dataset.templateSubtab || 'pending'));
       });
     });
+  }
+
+  function updateScrollableNavAffordance(shell, nav, hint, visible) {
+    if (!shell || !nav) {
+      return;
+    }
+    if (!visible) {
+      shell.dataset.scrollLeft = 'false';
+      shell.dataset.scrollRight = 'false';
+      if (hint) {
+        hint.classList.add('hidden');
+      }
+      return;
+    }
+
+    const overflow = nav.scrollWidth - nav.clientWidth > 8;
+    const canScrollLeft = nav.scrollLeft > 6;
+    const canScrollRight = nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 6;
+    shell.dataset.scrollLeft = canScrollLeft ? 'true' : 'false';
+    shell.dataset.scrollRight = canScrollRight ? 'true' : 'false';
+    if (hint) {
+      hint.classList.toggle('hidden', !overflow || !canScrollRight);
+    }
   }
 
   let activeDenyReasonChip = '';
@@ -1470,7 +1506,14 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   function getDenyReasonLabel(reasonId) {
     const match = getConfiguredDenyReasons().find((item) => item.id === reasonId);
     const label = match && typeof match.label === 'string' ? match.label.trim() : '';
-    return label || formatDenyReasonSlot(reasonId);
+    if (reasonId === 'reason_4' && label.toLowerCase() === 'custom') {
+      return DEFAULT_DENY_REASON_LABELS.reason_4;
+    }
+    return label || DEFAULT_DENY_REASON_LABELS[reasonId] || formatDenyReasonSlot(reasonId);
+  }
+
+  function getDenyReasonOptionLabel(reason) {
+    return reason && typeof reason.id === 'string' ? getDenyReasonLabel(reason.id) : '';
   }
 
   function getDenyReasonTemplate(reasonId) {
@@ -1857,6 +1900,15 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
   }
 
+  function syncFlairCssClassAdvancedState() {
+    if (!(flairCssClassDetails instanceof HTMLDetailsElement) || !flairCssClassInput) {
+      return;
+    }
+    if (String(flairCssClassInput.value || '').trim()) {
+      flairCssClassDetails.open = true;
+    }
+  }
+
   async function ensureApprovalFlairOptionsLoaded() {
     if (!state || !approvalFlairSelect || approvalFlairOptionsLoaded || approvalFlairOptionsLoading) {
       return;
@@ -2231,6 +2283,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     if (flairCssClassInput) {
       flairCssClassInput.value = draft.flairCssClass;
     }
+    syncFlairCssClassAdvancedState();
     if (verificationsEnabledInput) {
       verificationsEnabledInput.checked = draft.verificationsEnabled;
     }
@@ -2820,28 +2873,14 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
 
   function updateSettingsTabsScrollAffordance() {
-    if (!settingsTabsShell || !settingsTabsNav) {
-      return;
-    }
     const settingsVisible = Boolean(tabPanels.settings && !tabPanels.settings.classList.contains('hidden'));
-    if (!settingsVisible) {
-      settingsTabsShell.dataset.scrollLeft = 'false';
-      settingsTabsShell.dataset.scrollRight = 'false';
-      if (settingsTabsScrollHint) {
-        settingsTabsScrollHint.classList.add('hidden');
-      }
-      return;
-    }
-
-    const overflow = settingsTabsNav.scrollWidth - settingsTabsNav.clientWidth > 8;
-    const canScrollLeft = settingsTabsNav.scrollLeft > 6;
-    const canScrollRight =
-      settingsTabsNav.scrollLeft + settingsTabsNav.clientWidth < settingsTabsNav.scrollWidth - 6;
-    settingsTabsShell.dataset.scrollLeft = canScrollLeft ? 'true' : 'false';
-    settingsTabsShell.dataset.scrollRight = canScrollRight ? 'true' : 'false';
-    if (settingsTabsScrollHint) {
-      settingsTabsScrollHint.classList.toggle('hidden', !overflow || !canScrollRight);
-    }
+    updateScrollableNavAffordance(settingsTabsShell, settingsTabsNav, settingsTabsScrollHint, settingsVisible);
+    updateScrollableNavAffordance(
+      templateSubtabsShell,
+      templateSubtabsNav,
+      templateSubtabsScrollHint,
+      settingsVisible && activeSettingsTab === 'templates'
+    );
   }
 
   function setSettingsTab(tabName) {
@@ -2858,6 +2897,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       button.classList.toggle('settings-tab-btn-active', isActive);
       button.setAttribute('aria-selected', isActive ? 'true' : 'false');
     }
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
     if (activeSettingsTab === 'themes') {
       renderThemePreview();
       return;
@@ -2869,9 +2911,6 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     if (activeSettingsTab === 'instructions') {
       setInstructionsLanguage(activeInstructionLanguage);
     }
-    window.requestAnimationFrame(() => {
-      updateSettingsTabsScrollAffordance();
-    });
   }
 
   function formatDateInputValue(date) {
@@ -3261,7 +3300,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     if (batchDenyReasonSelect) {
       replaceSelectOptions(
         batchDenyReasonSelect,
-        enabledReasons.map((reason) => ({ value: reason.id, label: reason.label })),
+        enabledReasons.map((reason) => ({ value: reason.id, label: getDenyReasonOptionLabel(reason) })),
         enabledReasons.length ? '-- Select denial reason --' : '-- No denial reasons configured --'
       );
       if (batchDenyReasonDraft && enabledReasons.some((reason) => reason.id === batchDenyReasonDraft)) {
@@ -3574,7 +3613,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       for (const reason of configuredReasons) {
         const option = document.createElement('option');
         option.value = reason.id;
-        option.textContent = reason.label;
+        option.textContent = getDenyReasonOptionLabel(reason);
         denyReason.appendChild(option);
       }
       denyReason.selectedIndex = 0;
@@ -4710,6 +4749,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     if (flairCssClassInput) {
       flairCssClassInput.value = state.config.flairCssClass || '';
     }
+    syncFlairCssClassAdvancedState();
     additionalApprovalFlairSecondDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[0]?.templateId || '');
     additionalApprovalFlairThirdDraft = normalizeTemplateIdValue(state.config.additionalApprovalFlairs?.[1]?.templateId || '');
     if (requiredPhotoCountInput) {
@@ -6715,6 +6755,11 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   if (settingsTabsNav) {
     settingsTabsNav.addEventListener('scroll', () => {
+      updateSettingsTabsScrollAffordance();
+    }, { passive: true });
+  }
+  if (templateSubtabsNav) {
+    templateSubtabsNav.addEventListener('scroll', () => {
       updateSettingsTabsScrollAffordance();
     }, { passive: true });
   }
