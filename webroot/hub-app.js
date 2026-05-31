@@ -96,7 +96,6 @@ function createShell(root, inline) {
                   />
                 </div>
                 <p class="hub-brand-name">VouchX</p>
-                ${WORKTREE_LABEL ? `<p class="hub-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
               </div>
               <div class="hub-hero-actions">
                 <div data-el="mod-panel-group" class="hub-mod-action hidden">

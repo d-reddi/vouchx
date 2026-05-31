@@ -68,6 +68,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const historyClearBtn = document.getElementById('history-clear-btn');
   const historySearchResults = document.getElementById('history-search-results');
   const historyLoadMoreBtn = document.getElementById('history-load-more-btn');
+  const historyFilterPanel = document.getElementById('history-filter-panel');
+  const historyFilterSummary = document.getElementById('history-filter-summary');
   const approvedSearchUserInput = document.getElementById('approved-search-user');
   const approvedSearchFromInput = document.getElementById('approved-search-from');
   const approvedSearchToInput = document.getElementById('approved-search-to');
@@ -76,6 +78,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const approvedClearBtn = document.getElementById('approved-clear-btn');
   const approvedSearchResults = document.getElementById('approved-search-results');
   const approvedLoadMoreBtn = document.getElementById('approved-load-more-btn');
+  const approvedFilterPanel = document.getElementById('approved-filter-panel');
+  const approvedFilterSummary = document.getElementById('approved-filter-summary');
   const auditSearchUserInput = document.getElementById('audit-search-user');
   const auditSearchActorInput = document.getElementById('audit-search-actor');
   const auditSearchHint = document.getElementById('audit-search-hint');
@@ -86,6 +90,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const auditClearBtn = document.getElementById('audit-clear-btn');
   const auditSearchResults = document.getElementById('audit-search-results');
   const auditLoadMoreBtn = document.getElementById('audit-load-more-btn');
+  const auditFilterPanel = document.getElementById('audit-filter-panel');
+  const auditFilterSummary = document.getElementById('audit-filter-summary');
   const teamStatsRangeButtons = Array.from(document.querySelectorAll('.team-stats-range-btn'));
   const initialHelpPopovers = Array.from(document.querySelectorAll('.team-stats-help'));
   const teamStatsFeedback = document.getElementById('team-stats-feedback');
@@ -2886,6 +2892,107 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     inputTo.value = formatDateInputValue(now);
   }
 
+  function rememberDefaultDateValue(input) {
+    if (!input) {
+      return;
+    }
+    input.dataset.defaultValue = input.value || '';
+  }
+
+  function isDefaultDateValue(input) {
+    return !input || String(input.value || '') === String(input.dataset.defaultValue || '');
+  }
+
+  function getFilterDateSummary(fromInput, toInput) {
+    if (isDefaultDateValue(fromInput) && isDefaultDateValue(toInput)) {
+      return 'Last 30 days';
+    }
+    if (fromInput && fromInput.value && toInput && toInput.value) {
+      return `${fromInput.value} to ${toInput.value}`;
+    }
+    if (fromInput && fromInput.value) {
+      return `From ${fromInput.value}`;
+    }
+    if (toInput && toInput.value) {
+      return `To ${toInput.value}`;
+    }
+    return 'Any date';
+  }
+
+  function countDateFilterActive(fromInput, toInput) {
+    return isDefaultDateValue(fromInput) && isDefaultDateValue(toInput) ? 0 : 1;
+  }
+
+  function setHistoryFilterSummary(panel, summaryEl, activeCount, dateSummary) {
+    if (!summaryEl) {
+      return;
+    }
+    summaryEl.textContent = activeCount > 0 ? `${activeCount} Active • ${dateSummary}` : dateSummary;
+    if (panel) {
+      panel.classList.toggle('history-filter-panel-active', activeCount > 0);
+    }
+  }
+
+  function getRecordsFilterActiveCount() {
+    let count = 0;
+    if (historySearchUserInput && historySearchUserInput.value.trim()) {
+      count += 1;
+    }
+    count += countDateFilterActive(historySearchFromInput, historySearchToInput);
+    return count;
+  }
+
+  function getApprovedFilterActiveCount() {
+    let count = 0;
+    if (approvedSearchUserInput && approvedSearchUserInput.value.trim()) {
+      count += 1;
+    }
+    count += countDateFilterActive(approvedSearchFromInput, approvedSearchToInput);
+    return count;
+  }
+
+  function getAuditFilterActiveCount() {
+    let count = 0;
+    if (auditSearchUserInput && auditSearchUserInput.value.trim()) {
+      count += 1;
+    }
+    if (auditSearchActorInput && auditSearchActorInput.value.trim()) {
+      count += 1;
+    }
+    if (selectedAuditActionFilter !== 'all') {
+      count += 1;
+    }
+    count += countDateFilterActive(auditSearchFromInput, auditSearchToInput);
+    return count;
+  }
+
+  function updateHistoryFilterSummaries() {
+    setHistoryFilterSummary(
+      historyFilterPanel,
+      historyFilterSummary,
+      getRecordsFilterActiveCount(),
+      getFilterDateSummary(historySearchFromInput, historySearchToInput)
+    );
+    setHistoryFilterSummary(
+      approvedFilterPanel,
+      approvedFilterSummary,
+      getApprovedFilterActiveCount(),
+      getFilterDateSummary(approvedSearchFromInput, approvedSearchToInput)
+    );
+    setHistoryFilterSummary(
+      auditFilterPanel,
+      auditFilterSummary,
+      getAuditFilterActiveCount(),
+      getFilterDateSummary(auditSearchFromInput, auditSearchToInput)
+    );
+  }
+
+  function collapseHistoryFilterIfInactive(panel, activeCount) {
+    if (panel && activeCount === 0) {
+      panel.open = false;
+    }
+  }
+
   function serializeDateInputBoundary(value, endOfDay) {
     const raw = String(value || '').trim();
     if (!raw) {
@@ -2920,6 +3027,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       button.classList.toggle('btn-primary', isActive);
       button.classList.toggle('btn-secondary', !isActive);
     }
+    updateHistoryFilterSummaries();
   }
 
   function normalizeUsernameForCompare(value) {
@@ -3282,29 +3390,56 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return badge;
   }
 
+  function createQueueMetaRow(icon, label, value, extraClass) {
+    const row = document.createElement('p');
+    row.className = extraClass ? `queue-meta-row ${extraClass}` : 'queue-meta-row';
+
+    const iconEl = document.createElement('span');
+    iconEl.className = `queue-meta-icon queue-meta-icon-${icon || 'dot'}`;
+    iconEl.setAttribute('aria-hidden', 'true');
+    row.appendChild(iconEl);
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'queue-meta-label';
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    if (value) {
+      const valueEl = document.createElement('span');
+      valueEl.className = 'queue-meta-value';
+      valueEl.textContent = value;
+      row.appendChild(valueEl);
+    }
+
+    return row;
+  }
+
   function createPendingAccountAgeMeta(item) {
-    const meta = document.createElement('p');
-    meta.className = 'item-meta pending-account-meta';
-
-    const label = document.createElement('span');
-    label.textContent = 'Account age:';
-    meta.appendChild(label);
-
-    const value = document.createElement('span');
-    value.className = 'pending-account-age-chip';
     const ageDays = getPendingAccountAgeDays(item);
-    value.textContent = formatAccountAge(item);
-    if (ageDays !== null && ageDays < ACCOUNT_AGE_WARNING_DAYS) {
+    const meta = createQueueMetaRow('clock', 'Account Age', formatAccountAge(item), 'pending-account-meta');
+    const value = meta.querySelector('.queue-meta-value');
+    if (value && ageDays !== null && ageDays < ACCOUNT_AGE_WARNING_DAYS) {
       value.classList.add('pending-account-age-chip-warn');
     }
-    meta.appendChild(value);
 
     return meta;
   }
 
+  function createPendingSubmittedMeta(item) {
+    if (item.parentVerificationId) {
+      return createQueueMetaRow('calendar', 'Reopened', formatQueueDateTime(item.submittedAt), 'reopened-warning');
+    }
+    return createQueueMetaRow('calendar', 'Submitted', formatQueueDateTime(item.submittedAt));
+  }
+
+  function appendQueueVerificationChecks(container, item) {
+    const acceptedAt = item.acknowledgedAt ? formatDateOnly(item.acknowledgedAt) : 'Not recorded';
+    container.appendChild(createQueueMetaRow('check', 'Terms & Age Confirmed', acceptedAt, 'pending-ack-meta'));
+  }
+
   function buildPendingCard(item) {
     const card = document.createElement('article');
-    card.className = 'item';
+    card.className = 'item queue-card';
     card.dataset.pendingId = String(item.id || '');
     const isReReview = Boolean(item.parentVerificationId);
     const isResubmission = Boolean(item.isResubmission);
@@ -3313,10 +3448,10 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     const isClaimed = Boolean(claimedByNormalized);
     const isClaimedByOther = isPendingItemClaimedByOther(item);
 
-    const titleRow = document.createElement('div');
-    titleRow.className = 'pending-title-row';
-    const titleLeft = document.createElement('div');
-    titleLeft.className = 'pending-title-left';
+    const header = document.createElement('div');
+    header.className = 'queue-card-header';
+    const headerIdentity = document.createElement('div');
+    headerIdentity.className = 'queue-card-identity';
     if (!isClaimedByOther) {
       const selectLabel = document.createElement('label');
       selectLabel.className = 'pending-select-toggle';
@@ -3330,12 +3465,21 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
         togglePendingSelection(item.id, selectCheckbox.checked);
       });
       selectLabel.appendChild(selectCheckbox);
-      titleLeft.appendChild(selectLabel);
+      headerIdentity.appendChild(selectLabel);
     }
-    titleLeft.appendChild(createPendingTitlePrimary(item));
-    titleRow.appendChild(titleLeft);
+    headerIdentity.appendChild(createUsernameHeading(item.username));
+    header.appendChild(headerIdentity);
+
+    const statsBtn = document.createElement('button');
+    statsBtn.type = 'button';
+    statsBtn.className = 'pending-stats-btn queue-stats-btn';
+    statsBtn.textContent = 'Stats';
+    statsBtn.addEventListener('click', () => openStatsModal(item));
+    header.appendChild(statsBtn);
+    card.appendChild(header);
+
     const badgeRow = document.createElement('div');
-    badgeRow.className = 'pending-badge-row';
+    badgeRow.className = 'pending-badge-row queue-trust-row';
     const accountDetails = normalizePendingAccountDetails(item);
     const ageBadge = createPendingAgeBadge(item.submittedAt);
     if (ageBadge) {
@@ -3356,45 +3500,36 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       badgeRow.appendChild(createPendingResubmitBadge());
     }
     if (badgeRow.childNodes.length > 0) {
-      titleRow.appendChild(badgeRow);
+      card.appendChild(badgeRow);
     }
-    card.appendChild(titleRow);
 
     const metaGroup = document.createElement('div');
     metaGroup.className = 'pending-meta';
 
-    const submitted = document.createElement('p');
-    submitted.className = 'item-meta';
-    if (item.parentVerificationId) {
-      const reopenedLabel = document.createElement('span');
-      reopenedLabel.style.color = 'var(--accent)';
-      reopenedLabel.style.fontWeight = '700';
-      reopenedLabel.textContent = 'Reopened';
-      submitted.appendChild(reopenedLabel);
-      submitted.appendChild(document.createTextNode(`: ${formatTime(item.submittedAt)}`));
-    } else {
-      submitted.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
-    }
-    metaGroup.appendChild(submitted);
+    metaGroup.appendChild(createPendingSubmittedMeta(item));
     metaGroup.appendChild(createPendingAccountAgeMeta(item));
+    card.appendChild(metaGroup);
 
-    appendSubmissionAcknowledgementMeta(metaGroup, item);
+    const checksGroup = document.createElement('div');
+    checksGroup.className = 'queue-verification-checks';
+    appendQueueVerificationChecks(checksGroup, item);
 
     if (isClaimed && !isClaimedByOther) {
-      const claimMeta = document.createElement('p');
-      claimMeta.className = 'item-meta pending-claim-meta';
-      claimMeta.textContent = 'Locked by you';
-      metaGroup.appendChild(claimMeta);
+      checksGroup.appendChild(createQueueMetaRow('lock', 'Locked', 'You', 'pending-claim-meta'));
     }
 
     if (isClaimedByOther) {
-      const claimLockMeta = document.createElement('p');
-      claimLockMeta.className = 'item-meta pending-claim-meta';
-      claimLockMeta.textContent = `This request is locked by u/${String(item.claimedBy || '').replace(/^u\//i, '')}`;
-      metaGroup.appendChild(claimLockMeta);
+      checksGroup.appendChild(
+        createQueueMetaRow(
+          'lock',
+          'Locked',
+          `u/${String(item.claimedBy || '').replace(/^u\//i, '')}`,
+          'pending-claim-meta'
+        )
+      );
     }
 
-    card.appendChild(metaGroup);
+    card.appendChild(checksGroup);
 
     const decision = document.createElement('div');
     decision.className = 'pending-decision';
@@ -3549,7 +3684,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
 
     const row = document.createElement('div');
-    row.className = 'row pending-actions';
+    row.className = 'row pending-actions queue-action-bar';
     const approvalsAllowed = canApprovePendingItems();
     const approvalFlairChoices = getConfiguredApprovalFlairChoices();
     let approvalChoiceSelect = null;
@@ -3729,24 +3864,44 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return card;
   }
 
-  function renderEmptyState(container, title, detail) {
+  function renderEmptyState(container, title, detail, options) {
     if (!container) {
       return;
     }
     container.innerHTML = '';
+    const config = options && typeof options === 'object' ? options : {};
     const stateWrap = document.createElement('div');
     stateWrap.className = 'empty-state';
+
+    const icon = document.createElement('span');
+    icon.className = `empty-state-icon empty-state-icon-${config.icon || 'default'}`;
+    icon.setAttribute('aria-hidden', 'true');
+    stateWrap.appendChild(icon);
+
+    const copyWrap = document.createElement('div');
+    copyWrap.className = 'empty-state-copy-wrap';
 
     const titleEl = document.createElement('p');
     titleEl.className = 'empty-state-title';
     titleEl.textContent = title;
-    stateWrap.appendChild(titleEl);
+    copyWrap.appendChild(titleEl);
 
     if (detail) {
       const detailEl = document.createElement('p');
       detailEl.className = 'empty-state-copy';
       detailEl.textContent = detail;
-      stateWrap.appendChild(detailEl);
+      copyWrap.appendChild(detailEl);
+    }
+
+    stateWrap.appendChild(copyWrap);
+
+    if (config.actionLabel && typeof config.onAction === 'function') {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'btn btn-secondary empty-state-action';
+      action.textContent = config.actionLabel;
+      action.addEventListener('click', config.onAction);
+      stateWrap.appendChild(action);
     }
 
     container.appendChild(stateWrap);
@@ -3796,7 +3951,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
     blockedList.innerHTML = '';
     if (!state || !Array.isArray(state.blocked) || state.blocked.length === 0) {
-      renderEmptyState(blockedList, 'No blocked users', 'Users you block manually and users blocked after repeated denials will appear here.');
+      renderEmptyState(
+        blockedList,
+        'No blocked users',
+        'Users you block manually and users blocked after repeated denials will appear here.',
+        { icon: 'blocked' }
+      );
       return;
     }
 
@@ -3811,7 +3971,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     });
 
     if (filtered.length === 0) {
-      renderEmptyState(blockedList, 'No blocked users found', 'Try a different username or reason search.');
+      renderEmptyState(blockedList, 'No blocked users found', 'Try a different username or reason search.', {
+        icon: 'blocked',
+      });
       return;
     }
 
@@ -4187,65 +4349,208 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
   }
 
+  function createRecordStatusChip(status, label) {
+    const chip = document.createElement('span');
+    chip.className = `record-status-chip record-status-${status || 'neutral'}`;
+    chip.textContent = label || 'UNKNOWN';
+    return chip;
+  }
+
+  function createRecordMetaRow(icon, label, value, extraClass) {
+    const row = document.createElement('p');
+    row.className = extraClass ? `record-meta-row ${extraClass}` : 'record-meta-row';
+
+    const iconEl = document.createElement('span');
+    iconEl.className = `record-meta-icon record-meta-icon-${icon || 'dot'}`;
+    iconEl.setAttribute('aria-hidden', 'true');
+    row.appendChild(iconEl);
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'record-meta-label';
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const valueEl = document.createElement('span');
+    valueEl.className = 'record-meta-value';
+    valueEl.textContent = value || 'N/A';
+    row.appendChild(valueEl);
+
+    return row;
+  }
+
+  function createSubmissionAcknowledgementRecordMeta(item) {
+    return createRecordMetaRow(
+      'check',
+      'Terms & Age Confirmed',
+      item && item.acknowledgedAt ? formatDateOnly(item.acknowledgedAt) : 'Not recorded',
+      'pending-ack-meta'
+    );
+  }
+
+  function createRecordDetails(summaryText, children) {
+    const validChildren = Array.isArray(children) ? children.filter(Boolean) : [];
+    if (validChildren.length === 0) {
+      return null;
+    }
+    const details = document.createElement('details');
+    details.className = 'record-details';
+    const summary = document.createElement('summary');
+    summary.className = 'record-details-summary';
+    summary.textContent = summaryText || 'Details';
+    details.appendChild(summary);
+    const body = document.createElement('div');
+    body.className = 'record-details-body';
+    for (const child of validChildren) {
+      body.appendChild(child);
+    }
+    details.appendChild(body);
+    return details;
+  }
+
+  function captureOpenRecordDetails(container) {
+    const open = new Set();
+    if (!container) return open;
+    for (const card of container.querySelectorAll('.record-card[data-item-id]')) {
+      if (card.querySelector('.record-details[open]')) {
+        open.add(card.dataset.itemId);
+      }
+    }
+    return open;
+  }
+
+  function restoreOpenRecordDetails(container, openIds) {
+    if (!container || !openIds.size) return;
+    for (const card of container.querySelectorAll('.record-card[data-item-id]')) {
+      if (openIds.has(card.dataset.itemId)) {
+        const details = card.querySelector('.record-details');
+        if (details) details.open = true;
+      }
+    }
+  }
+
+  function createRecordPhotoLinks(item) {
+    const wrap = document.createElement('div');
+    wrap.className = 'record-photo-links';
+    appendPhotoLinksMeta(wrap, item);
+    return wrap.childNodes.length > 0 ? wrap : null;
+  }
+
+  function createRecordCard(config) {
+    const card = document.createElement('article');
+    card.className = config && config.extraClass ? `record-card ${config.extraClass}` : 'record-card';
+    if (config && config.itemId != null) {
+      card.dataset.itemId = String(config.itemId);
+    }
+
+    const header = document.createElement('div');
+    header.className = 'record-card-header';
+    const title = createUsernameHeading(config && config.username);
+    title.classList.add('record-card-title');
+    header.appendChild(title);
+    header.appendChild(createRecordStatusChip(config && config.status, config && config.statusLabel));
+    card.appendChild(header);
+
+    const metaRows = Array.isArray(config && config.metaRows) ? config.metaRows : [];
+    if (metaRows.length > 0) {
+      const meta = document.createElement('div');
+      meta.className = 'record-meta-grid';
+      for (const row of metaRows) {
+        if (row) {
+          meta.appendChild(row);
+        }
+      }
+      card.appendChild(meta);
+    }
+
+    if (config && config.photoLinks) {
+      card.appendChild(config.photoLinks);
+    }
+
+    const details = createRecordDetails(config && config.detailsLabel, config && config.details);
+    if (details) {
+      card.appendChild(details);
+    }
+
+    return card;
+  }
+
+  function getHistoryRecordStatusInfo(item) {
+    const status = String((item && item.status) || '').toLowerCase();
+    if (status === 'pending' && item && item.claimedBy) {
+      return { status: 'locked', label: 'LOCKED' };
+    }
+    if (status === 'pending' && item && item.parentVerificationId) {
+      return { status: 'pending', label: 'PENDING RE-REVIEW' };
+    }
+    if (status === 'approved') {
+      return { status: 'approved', label: 'APPROVED' };
+    }
+    if (status === 'denied') {
+      return { status: 'denied', label: 'DENIED' };
+    }
+    if (status === 'pending') {
+      return { status: 'pending', label: 'PENDING' };
+    }
+    return { status: 'neutral', label: status ? status.toUpperCase() : 'UNKNOWN' };
+  }
+
+  function getAuditStatusInfo(item) {
+    const action = String((item && item.action) || '').toLowerCase();
+    if (action === 'approved') return { status: 'approved', label: 'APPROVED' };
+    if (action === 'denied') return { status: 'denied', label: 'DENIED' };
+    if (action === 'reopened') return { status: 'pending', label: 'REOPENED' };
+    if (action === 'blocked') return { status: 'locked', label: 'BLOCKED' };
+    if (action === 'unblocked') return { status: 'neutral', label: 'UNBLOCKED' };
+    if (action === 'removed_by_mod') return { status: 'denied', label: 'REMOVED' };
+    return { status: 'neutral', label: action ? action.replace(/_/g, ' ').toUpperCase() : 'AUDIT' };
+  }
+
   function renderHistorySearchResults() {
     if (!historySearchResults) {
       return;
     }
+    const openHistoryIds = captureOpenRecordDetails(historySearchResults);
     historySearchResults.innerHTML = '';
     const isMinLengthHintVisible = Boolean(historySearchHint && !historySearchHint.classList.contains('hidden'));
     if (!Array.isArray(historySearchItems) || historySearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        renderEmptyState(historySearchResults, 'No history results', 'Search records by username prefix or date range.');
+        renderEmptyState(historySearchResults, 'No history results', 'Search records by username prefix or date range.', {
+          icon: 'history',
+        });
       }
     } else {
       for (const item of historySearchItems) {
-        const card = document.createElement('article');
-        card.className = 'item';
-        card.appendChild(createUsernameHeading(item.username));
-        const statusLabel =
-          item.status === 'pending' && item.parentVerificationId
-            ? 'PENDING RE-REVIEW'
-            : String(item.status || '').toUpperCase();
-
-        const statusMeta = document.createElement('p');
-        statusMeta.className = 'item-meta';
-        statusMeta.textContent = `Status: ${statusLabel}`;
-        card.appendChild(statusMeta);
-
-        const submittedMeta = document.createElement('p');
-        submittedMeta.className = 'item-meta';
-        submittedMeta.textContent = `Submitted: ${formatTime(item.submittedAt)}`;
-        card.appendChild(submittedMeta);
-
-        const reviewedMeta = document.createElement('p');
-        reviewedMeta.className = 'item-meta';
-        reviewedMeta.textContent = `Reviewed: ${item.reviewedAt ? formatTime(item.reviewedAt) : 'N/A'}`;
-        card.appendChild(reviewedMeta);
-
-        const moderatorMeta = document.createElement('p');
-        moderatorMeta.className = 'item-meta';
-        moderatorMeta.textContent = `Moderator: ${item.moderator ? `u/${item.moderator}` : 'N/A'}`;
-        card.appendChild(moderatorMeta);
-
-        if (item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none') {
-          const reopenedMeta = document.createElement('p');
-          reopenedMeta.className = 'item-meta reopened-warning';
-          reopenedMeta.textContent = `Reopened: ${item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes'}`;
-          card.appendChild(reopenedMeta);
-        }
+        const statusInfo = getHistoryRecordStatusInfo(item);
+        const metaRows = [
+          createRecordMetaRow('calendar', 'Submitted', formatQueueDateTime(item.submittedAt)),
+        ];
         if (item.status === 'denied' && item.denyReason) {
-          const reasonMeta = document.createElement('p');
-          reasonMeta.className = 'item-meta';
-          reasonMeta.textContent = `Reason: ${getDenyReasonLabel(item.denyReason)}`;
-          card.appendChild(reasonMeta);
+          metaRows.push(createRecordMetaRow('note', 'Reason', getDenyReasonLabel(item.denyReason)));
         }
-        appendSubmissionAcknowledgementMeta(card, item);
-        if (item.status === 'approved') {
-          appendPhotoLinksMeta(card, item);
+        if (item.status === 'denied' && item.reopenedState && item.reopenedState !== 'none') {
+          metaRows.push(
+            createRecordMetaRow(
+              'clock',
+              'Reopened',
+              item.reopenedState === 'yes_cancelled' ? 'Yes (cancelled)' : 'Yes',
+              'reopened-warning'
+            )
+          );
         }
+        if (item.status === 'pending' && item.claimedBy) {
+          metaRows.push(createRecordMetaRow('lock', 'Locked by', `u/${String(item.claimedBy).replace(/^u\//i, '')}`));
+        }
+
+        const photos = item.status === 'approved' ? createRecordPhotoLinks(item) : null;
+
+        const detailsChildren = [
+          createRecordMetaRow('clock', 'Reviewed', item.reviewedAt ? formatQueueDateTime(item.reviewedAt) : 'N/A'),
+          createRecordMetaRow('user', 'Moderator', item.moderator ? `u/${item.moderator}` : 'N/A'),
+          createSubmissionAcknowledgementRecordMeta(item),
+        ];
         if (item.status === 'denied' && !item.reopenedChildId) {
           const row = document.createElement('div');
-          row.className = 'row';
+          row.className = 'row record-action-row';
           const reopenBtn = document.createElement('button');
           reopenBtn.className = 'btn btn-secondary';
           reopenBtn.textContent = 'Reopen Verification';
@@ -4253,11 +4558,23 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
             postWithBusy({ type: 'reopenDenied', verificationId: item.id });
           });
           row.appendChild(reopenBtn);
-          card.appendChild(row);
+          detailsChildren.push(row);
         }
-        historySearchResults.appendChild(card);
+        historySearchResults.appendChild(
+          createRecordCard({
+            username: item.username,
+            status: statusInfo.status,
+            statusLabel: statusInfo.label,
+            itemId: item.id,
+            metaRows,
+            photoLinks: photos,
+            detailsLabel: 'Details',
+            details: detailsChildren,
+          })
+        );
       }
     }
+    restoreOpenRecordDetails(historySearchResults, openHistoryIds);
     if (historyLoadMoreBtn) {
       historyLoadMoreBtn.classList.toggle('hidden', !historySearchHasMore || isMinLengthHintVisible);
     }
@@ -4267,40 +4584,30 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     if (!approvedSearchResults) {
       return;
     }
+    const openApprovedIds = captureOpenRecordDetails(approvedSearchResults);
     approvedSearchResults.innerHTML = '';
     const isMinLengthHintVisible = Boolean(approvedSearchHint && !approvedSearchHint.classList.contains('hidden'));
     if (!Array.isArray(approvedSearchItems) || approvedSearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        renderEmptyState(approvedSearchResults, 'No approved users found', 'Adjust the filters to search approved verifications.');
+        renderEmptyState(approvedSearchResults, 'No approved users found', 'Adjust the filters to search approved verifications.', {
+          icon: 'history',
+        });
       }
     } else {
       for (const item of approvedSearchItems) {
-        const card = document.createElement('article');
-        card.className = 'item';
+        const photos = createRecordPhotoLinks(item);
 
-        card.appendChild(createUsernameHeading(item.username));
-
-        const approved = document.createElement('p');
-        approved.className = 'item-meta';
-        approved.textContent = `Approved: ${formatTime(item.approvedAt)}`;
-        card.appendChild(approved);
-
-        const by = document.createElement('p');
-        by.className = 'item-meta';
-        by.textContent = `Approved by: u/${item.approvedBy}`;
-        card.appendChild(by);
-
-        appendSubmissionAcknowledgementMeta(card, item);
-        appendPhotoLinksMeta(card, item);
+        const detailsChildren = [];
+        detailsChildren.push(createSubmissionAcknowledgementRecordMeta(item));
 
         const removeReason = document.createElement('textarea');
         removeReason.className = 'field-textarea';
         removeReason.rows = 2;
         removeReason.placeholder = 'Reason for revocation (sent to user)';
-        card.appendChild(removeReason);
+        detailsChildren.push(removeReason);
 
         const row = document.createElement('div');
-        row.className = 'row';
+        row.className = 'row record-action-row';
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'btn btn-danger';
@@ -4314,11 +4621,26 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
           postWithBusy({ type: 'removeVerification', verificationId: item.id, reason: trimmedReason });
         });
         row.appendChild(removeBtn);
-        card.appendChild(row);
+        detailsChildren.push(row);
 
-        approvedSearchResults.appendChild(card);
+        approvedSearchResults.appendChild(
+          createRecordCard({
+            username: item.username,
+            status: 'approved',
+            statusLabel: 'APPROVED',
+            itemId: item.id,
+            metaRows: [
+              createRecordMetaRow('calendar', 'Approved', formatQueueDateTime(item.approvedAt)),
+              createRecordMetaRow('user', 'Moderator', item.approvedBy ? `u/${item.approvedBy}` : 'N/A'),
+            ],
+            photoLinks: photos,
+            detailsLabel: 'Details & Actions',
+            details: detailsChildren,
+          })
+        );
       }
     }
+    restoreOpenRecordDetails(approvedSearchResults, openApprovedIds);
     if (approvedLoadMoreBtn) {
       approvedLoadMoreBtn.classList.toggle('hidden', !approvedSearchHasMore || isMinLengthHintVisible);
     }
@@ -4332,34 +4654,28 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     const isMinLengthHintVisible = Boolean(auditSearchHint && !auditSearchHint.classList.contains('hidden'));
     if (!Array.isArray(auditSearchItems) || auditSearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        renderEmptyState(auditSearchResults, 'No audit entries found', 'Try a different moderator, action, or date range.');
+        renderEmptyState(auditSearchResults, 'No audit entries found', 'Try a different moderator, action, or date range.', {
+          icon: 'history',
+        });
       }
     } else {
       for (const item of auditSearchItems) {
-        const card = document.createElement('article');
-        card.className = 'item';
-        card.appendChild(createUsernameHeading(item.username));
+        const statusInfo = getAuditStatusInfo(item);
+        const photos = item.action === 'approved' ? createRecordPhotoLinks(item) : null;
 
-        const line = document.createElement('p');
-        line.className = 'item-meta';
-        line.textContent = item.line;
-        card.appendChild(line);
-
-        const actor = document.createElement('p');
-        actor.className = 'item-meta';
-        actor.textContent = `Actor: u/${item.actor || 'unknown'}`;
-        card.appendChild(actor);
-
-        const at = document.createElement('p');
-        at.className = 'item-meta';
-        at.textContent = formatTime(item.at);
-        card.appendChild(at);
-
-        if (item.action === 'approved') {
-          appendPhotoLinksMeta(card, item);
-        }
-
-        auditSearchResults.appendChild(card);
+        auditSearchResults.appendChild(
+          createRecordCard({
+            username: item.username,
+            status: statusInfo.status,
+            statusLabel: statusInfo.label,
+            metaRows: [
+              createRecordMetaRow('user', 'Moderator', `u/${item.actor || 'unknown'}`),
+              createRecordMetaRow('calendar', 'Logged', formatQueueDateTime(item.at)),
+              createRecordMetaRow('note', 'Event', item.line || statusInfo.label),
+            ],
+            photoLinks: photos,
+          })
+        );
       }
     }
     if (auditLoadMoreBtn) {
@@ -5016,21 +5332,6 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return title;
   }
 
-  function createPendingTitlePrimary(item) {
-    const wrap = document.createElement('div');
-    wrap.className = 'pending-title-primary';
-    wrap.appendChild(createUsernameHeading(item.username));
-
-    const statsBtn = document.createElement('button');
-    statsBtn.type = 'button';
-    statsBtn.className = 'pending-stats-btn';
-    statsBtn.textContent = 'Stats';
-    statsBtn.addEventListener('click', () => openStatsModal(item));
-    wrap.appendChild(statsBtn);
-
-    return wrap;
-  }
-
   function openImage(url) {
     imagePreview.src = url;
     imageModal.classList.remove('hidden');
@@ -5112,6 +5413,34 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return date.toLocaleString();
   }
 
+  function formatQueueDateTime(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+      return iso;
+    }
+    const dateText = date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+    });
+    const timeText = date.toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    return `${dateText}, ${timeText}`;
+  }
+
+  function formatDateOnly(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+      return iso;
+    }
+    return date.toLocaleDateString(undefined, {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+
   function normalizePendingAccountDetails(item) {
     return item && item.accountDetails && typeof item.accountDetails === 'object' ? item.accountDetails : null;
   }
@@ -5173,13 +5502,13 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
     const parts = [];
     if (years > 0) {
-      parts.push(`${years} year${years === 1 ? '' : 's'}`);
+      parts.push(`${years}y`);
     }
     if (months > 0) {
-      parts.push(`${months} month${months === 1 ? '' : 's'}`);
+      parts.push(`${months}m`);
     }
     if (days > 0 || parts.length === 0) {
-      parts.push(`${days} day${days === 1 ? '' : 's'}`);
+      parts.push(`${days}d`);
     }
     return parts.join(' ');
   }
@@ -5361,6 +5690,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       button.classList.toggle('btn-primary', isActive);
       button.classList.toggle('btn-secondary', !isActive);
     }
+    updateHistoryFilterSummaries();
   }
 
   function buildHubPath() {
@@ -5411,6 +5741,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   function runHistoryRecordsSearchWithInputGuard(reset, options) {
     const query = historySearchUserInput ? historySearchUserInput.value.trim() : '';
+    updateHistoryFilterSummaries();
     if (isShortNonEmptyPrefix(query)) {
       setHistorySearchHintVisible(true);
     } else {
@@ -5448,6 +5779,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   function runApprovedSearchWithInputGuard(reset, options) {
     const query = approvedSearchUserInput ? approvedSearchUserInput.value.trim() : '';
+    updateHistoryFilterSummaries();
     if (!query) {
       setApprovedSearchHintVisible(false);
       if (reset) {
@@ -5491,6 +5823,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   function runAuditSearchWithInputGuard(reset, options) {
     const usernameQuery = auditSearchUserInput ? auditSearchUserInput.value.trim() : '';
     const actorQuery = auditSearchActorInput ? auditSearchActorInput.value.trim() : '';
+    updateHistoryFilterSummaries();
     if (isShortNonEmptyPrefix(usernameQuery) || isShortNonEmptyPrefix(actorQuery)) {
       setAuditSearchHintVisible(true);
     } else {
@@ -5908,6 +6241,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       if (historySearchUserInput) historySearchUserInput.value = '';
       applyDefaultDateRange(historySearchFromInput, historySearchToInput, 30);
       setHistorySearchHintVisible(false);
+      updateHistoryFilterSummaries();
+      collapseHistoryFilterIfInactive(historyFilterPanel, getRecordsFilterActiveCount());
       renderHistorySearchResults();
       runHistoryRecordsSearchWithInputGuard(true);
     });
@@ -5933,6 +6268,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       if (approvedSearchUserInput) approvedSearchUserInput.value = '';
       applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, 30);
       setApprovedSearchHintVisible(false);
+      updateHistoryFilterSummaries();
+      collapseHistoryFilterIfInactive(approvedFilterPanel, getApprovedFilterActiveCount());
       renderApprovedSearchResults();
       runApprovedSearchWithInputGuard(true);
     });
@@ -5960,6 +6297,8 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       setAuditActionFilter('all');
       applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, 30);
       setAuditSearchHintVisible(false);
+      updateHistoryFilterSummaries();
+      collapseHistoryFilterIfInactive(auditFilterPanel, getAuditFilterActiveCount());
       renderAuditSearchResults();
       runAuditSearchWithInputGuard(true);
     });
@@ -5973,6 +6312,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   if (historySearchUserInput) {
     historySearchUserInput.addEventListener('input', () => {
+      updateHistoryFilterSummaries();
       window.clearTimeout(historySearchDebounceId);
       historySearchDebounceId = window.setTimeout(() => {
         if (activeHistoryView === 'records') {
@@ -5983,6 +6323,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (historySearchFromInput) {
     historySearchFromInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'records') {
         runHistoryRecordsSearchWithInputGuard(true);
       }
@@ -5990,6 +6331,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (historySearchToInput) {
     historySearchToInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'records') {
         runHistoryRecordsSearchWithInputGuard(true);
       }
@@ -5998,6 +6340,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   if (approvedSearchUserInput) {
     approvedSearchUserInput.addEventListener('input', () => {
+      updateHistoryFilterSummaries();
       window.clearTimeout(approvedSearchDebounceId);
       approvedSearchDebounceId = window.setTimeout(() => {
         if (activeHistoryView === 'approved') {
@@ -6008,6 +6351,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (approvedSearchFromInput) {
     approvedSearchFromInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'approved') {
         runApprovedSearchWithInputGuard(true);
       }
@@ -6015,6 +6359,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (approvedSearchToInput) {
     approvedSearchToInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'approved') {
         runApprovedSearchWithInputGuard(true);
       }
@@ -6023,6 +6368,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   if (auditSearchUserInput) {
     auditSearchUserInput.addEventListener('input', () => {
+      updateHistoryFilterSummaries();
       window.clearTimeout(auditSearchDebounceId);
       auditSearchDebounceId = window.setTimeout(() => {
         if (activeHistoryView === 'audit') {
@@ -6033,6 +6379,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (auditSearchActorInput) {
     auditSearchActorInput.addEventListener('input', () => {
+      updateHistoryFilterSummaries();
       window.clearTimeout(auditSearchDebounceId);
       auditSearchDebounceId = window.setTimeout(() => {
         if (activeHistoryView === 'audit') {
@@ -6043,6 +6390,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (auditSearchFromInput) {
     auditSearchFromInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'audit') {
         runAuditSearchWithInputGuard(true);
       }
@@ -6050,6 +6398,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (auditSearchToInput) {
     auditSearchToInput.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
       if (activeHistoryView === 'audit') {
         runAuditSearchWithInputGuard(true);
       }
@@ -6385,6 +6734,14 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   applyDefaultDateRange(historySearchFromInput, historySearchToInput, 30);
   applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, 30);
   applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, 30);
+  [
+    historySearchFromInput,
+    historySearchToInput,
+    approvedSearchFromInput,
+    approvedSearchToInput,
+    auditSearchFromInput,
+    auditSearchToInput,
+  ].forEach(rememberDefaultDateValue);
   setHistorySearchHintVisible(false);
   setAuditSearchHintVisible(false);
   setAuditActionFilter('all');
