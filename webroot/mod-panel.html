@@ -3,36 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Verification Moderator Panel</title>
+    <title>Moderation Center</title>
     <script type="module" src="mod-panel-bootstrap.js"></script>
     <link rel="stylesheet" href="mod-panel.css" />
   </head>
   <body class="mod-panel-page">
     <div class="app-shell">
       <header class="hero">
-        <div class="hero-row">
-          <div class="panel-heading">
-            <p class="panel-kicker">VouchX</p>
-            <h1>Verification moderator panel</h1>
-            <p class="panel-subtitle">Review the queue, audit past decisions, and manage verification workflows from one workspace.</p>
+        <div class="panel-heading">
+          <p class="panel-kicker">VouchX</p>
+          <div class="hero-row">
+            <h1>Moderation Center</h1>
+            <div class="row hero-actions">
+              <button id="back-to-hub-btn" class="btn btn-quiet">Back to Hub</button>
+              <button id="refresh-btn" class="btn btn-quiet">Refresh</button>
+            </div>
           </div>
-          <div class="row hero-actions">
-            <button id="back-to-hub-btn" class="btn btn-quiet">Back to Verification Hub</button>
-            <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
-          </div>
-        </div>
-        <div class="header-meta" aria-live="polite">
-          <div class="meta-block">
-            <span class="meta-label">Subreddit</span>
-            <span id="hero-subreddit" class="meta-value">Loading...</span>
-          </div>
-          <div class="meta-block">
-            <span class="meta-label">Queue</span>
-            <span id="hero-queue-status" class="meta-value">Loading...</span>
-          </div>
-          <div class="meta-block">
-            <span class="meta-label">Updated</span>
-            <span id="hero-updated" class="meta-value">Waiting for sync</span>
+          <div class="header-meta" aria-live="polite">
+            <div class="header-meta-primary">
+              <div class="meta-block">
+                <span class="meta-label">Subreddit</span>
+                <span id="hero-subreddit" class="meta-value">Loading...</span>
+              </div>
+              <div class="meta-block">
+                <span class="meta-label">Queue</span>
+                <span id="hero-queue-status" class="meta-value">Loading...</span>
+              </div>
+            </div>
+            <div class="meta-block">
+              <span class="meta-label">Updated</span>
+              <span id="hero-updated" class="meta-value">Waiting for sync</span>
+            </div>
           </div>
         </div>
       </header>
@@ -61,12 +62,6 @@
 
       <main id="main-content" class="hidden">
         <section id="tab-pending" class="tab-panel">
-          <div class="section-head queue-section-head">
-            <div>
-              <h2>Queue</h2>
-              <p class="section-copy muted">Review pending verification requests.</p>
-            </div>
-          </div>
           <div id="pending-flair-warning" class="content-card panel-warning panel-warning-error hidden" role="alert">
             <div class="panel-warning-body">
               <p class="panel-warning-title">Approvals are disabled</p>
@@ -131,7 +126,6 @@
           <div class="section-head">
             <div>
               <h2>Blocked users</h2>
-              <p class="section-copy muted">Review manual blocks and users who reached the denial threshold.</p>
             </div>
             <button id="block-user-btn" class="btn btn-primary">Block user</button>
           </div>
@@ -143,107 +137,125 @@
         </section>
 
         <section id="tab-history" class="tab-panel hidden">
-          <div class="section-head">
-            <div>
-              <h2>History</h2>
-              <p class="section-copy muted">Search verification records, approved members, and the moderator audit trail.</p>
-            </div>
-          </div>
-          <div class="content-card">
-            <div class="subtabs segmented-control">
+          <div class="content-card history-workspace">
+            <div class="subtabs segmented-control history-nav">
               <button id="history-view-approved" class="btn btn-secondary history-view-btn" data-history-view="approved">Approved</button>
               <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
               <button id="history-view-audit" class="btn btn-secondary history-view-btn" data-history-view="audit">Audit</button>
             </div>
 
             <div id="history-panel-approved" class="history-view-panel hidden">
-              <div class="field-grid history-field-grid history-field-grid-approved">
-                <div class="field-stack">
-                  <label class="field-label" for="approved-search-user">Username prefix</label>
-                  <input id="approved-search-user" class="field-input" type="text" placeholder="username (optional)" />
+              <details id="approved-filter-panel" class="history-filter-panel">
+                <summary class="history-filter-summary">
+                  <span class="history-filter-title">Filters</span>
+                  <span id="approved-filter-summary" class="history-filter-count">Last 30 days</span>
+                </summary>
+                <div class="history-filter-body">
+                  <div class="field-grid history-field-grid history-field-grid-approved">
+                    <div class="field-stack">
+                      <label class="field-label" for="approved-search-user">Username prefix</label>
+                      <input id="approved-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="approved-search-from">From</label>
+                      <input id="approved-search-from" class="field-input field-date-input" type="date" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="approved-search-to">To</label>
+                      <input id="approved-search-to" class="field-input field-date-input" type="date" />
+                    </div>
+                  </div>
+                  <p id="approved-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
+                  <div class="row history-filter-actions">
+                    <button id="approved-search-btn" class="btn btn-primary">Search</button>
+                    <button id="approved-clear-btn" class="btn btn-secondary">Clear</button>
+                  </div>
                 </div>
-                <div class="field-stack">
-                  <label class="field-label" for="approved-search-from">From date</label>
-                  <input id="approved-search-from" class="field-input" type="date" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="approved-search-to">To date</label>
-                  <input id="approved-search-to" class="field-input" type="date" />
-                </div>
-              </div>
-              <p id="approved-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <div class="row">
-                <button id="approved-search-btn" class="btn btn-primary">Search</button>
-                <button id="approved-clear-btn" class="btn btn-secondary">Clear</button>
-              </div>
-              <div id="approved-search-results" class="stack"></div>
-              <div class="row">
+              </details>
+              <div id="approved-search-results" class="stack history-results"></div>
+              <div class="row history-load-row">
                 <button id="approved-load-more-btn" class="btn btn-secondary hidden">Load More</button>
               </div>
             </div>
 
             <div id="history-panel-records" class="history-view-panel">
-              <div class="field-grid history-field-grid history-field-grid-records">
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-user">Username prefix</label>
-                  <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
+              <details id="history-filter-panel" class="history-filter-panel">
+                <summary class="history-filter-summary">
+                  <span class="history-filter-title">Filters</span>
+                  <span id="history-filter-summary" class="history-filter-count">Last 30 days</span>
+                </summary>
+                <div class="history-filter-body">
+                  <div class="field-grid history-field-grid history-field-grid-records">
+                    <div class="field-stack">
+                      <label class="field-label" for="history-search-user">Username prefix</label>
+                      <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="history-search-from">From</label>
+                      <input id="history-search-from" class="field-input field-date-input" type="date" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="history-search-to">To</label>
+                      <input id="history-search-to" class="field-input field-date-input" type="date" />
+                    </div>
+                  </div>
+                  <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
+                  <div class="row history-filter-actions">
+                    <button id="history-search-btn" class="btn btn-primary">Search</button>
+                    <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
+                  </div>
                 </div>
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-from">From date</label>
-                  <input id="history-search-from" class="field-input" type="date" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="history-search-to">To date</label>
-                  <input id="history-search-to" class="field-input" type="date" />
-                </div>
-              </div>
-              <p id="history-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <div class="row">
-                <button id="history-search-btn" class="btn btn-primary">Search</button>
-                <button id="history-clear-btn" class="btn btn-secondary">Clear</button>
-              </div>
-              <div id="history-search-results" class="stack"></div>
-              <div class="row">
+              </details>
+              <div id="history-search-results" class="stack history-results"></div>
+              <div class="row history-load-row">
                 <button id="history-load-more-btn" class="btn btn-secondary hidden">Load More</button>
               </div>
             </div>
 
             <div id="history-panel-audit" class="history-view-panel hidden">
-              <div class="field-grid history-field-grid history-field-grid-audit">
-                <div class="field-stack">
-                  <label class="field-label" for="audit-search-user">Username prefix</label>
-                  <input id="audit-search-user" class="field-input" type="text" placeholder="username (optional)" />
+              <details id="audit-filter-panel" class="history-filter-panel">
+                <summary class="history-filter-summary">
+                  <span class="history-filter-title">Filters</span>
+                  <span id="audit-filter-summary" class="history-filter-count">Last 30 days</span>
+                </summary>
+                <div class="history-filter-body">
+                  <div class="field-grid history-field-grid history-field-grid-audit">
+                    <div class="field-stack">
+                      <label class="field-label" for="audit-search-user">Username prefix</label>
+                      <input id="audit-search-user" class="field-input" type="text" placeholder="username (optional)" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label" for="audit-search-actor">Moderator</label>
+                      <input id="audit-search-actor" class="field-input" type="text" placeholder="actor username (optional)" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="audit-search-from">From</label>
+                      <input id="audit-search-from" class="field-input field-date-input" type="date" />
+                    </div>
+                    <div class="field-stack">
+                      <label class="field-label field-date-label" for="audit-search-to">To</label>
+                      <input id="audit-search-to" class="field-input field-date-input" type="date" />
+                    </div>
+                  </div>
+                  <p id="audit-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
+                  <label class="field-label">Action</label>
+                  <div class="row button-row filter-chip-row">
+                    <button id="audit-action-all" class="btn btn-primary audit-action-btn" data-audit-action="all">All</button>
+                    <button id="audit-action-approved" class="btn btn-secondary audit-action-btn" data-audit-action="approved">Approved</button>
+                    <button id="audit-action-denied" class="btn btn-secondary audit-action-btn" data-audit-action="denied">Denied</button>
+                    <button id="audit-action-reopened" class="btn btn-secondary audit-action-btn" data-audit-action="reopened">Reopened</button>
+                    <button id="audit-action-removed" class="btn btn-secondary audit-action-btn" data-audit-action="removed_by_mod">Removed</button>
+                    <button id="audit-action-blocked" class="btn btn-secondary audit-action-btn" data-audit-action="blocked">Blocked</button>
+                    <button id="audit-action-unblocked" class="btn btn-secondary audit-action-btn" data-audit-action="unblocked">Unblocked</button>
+                  </div>
+                  <div class="row history-filter-actions">
+                    <button id="audit-search-btn" class="btn btn-primary">Search</button>
+                    <button id="audit-clear-btn" class="btn btn-secondary">Clear</button>
+                  </div>
                 </div>
-                <div class="field-stack">
-                  <label class="field-label" for="audit-search-actor">Moderator</label>
-                  <input id="audit-search-actor" class="field-input" type="text" placeholder="actor username (optional)" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="audit-search-from">From date</label>
-                  <input id="audit-search-from" class="field-input" type="date" />
-                </div>
-                <div class="field-stack">
-                  <label class="field-label" for="audit-search-to">To date</label>
-                  <input id="audit-search-to" class="field-input" type="date" />
-                </div>
-              </div>
-              <p id="audit-search-hint" class="muted small hidden">Type at least 3 characters to search.</p>
-              <label class="field-label">Action</label>
-              <div class="row button-row filter-chip-row">
-                <button id="audit-action-all" class="btn btn-primary audit-action-btn" data-audit-action="all">All</button>
-                <button id="audit-action-approved" class="btn btn-secondary audit-action-btn" data-audit-action="approved">Approved</button>
-                <button id="audit-action-denied" class="btn btn-secondary audit-action-btn" data-audit-action="denied">Denied</button>
-                <button id="audit-action-reopened" class="btn btn-secondary audit-action-btn" data-audit-action="reopened">Reopened</button>
-                <button id="audit-action-removed" class="btn btn-secondary audit-action-btn" data-audit-action="removed_by_mod">Removed</button>
-                <button id="audit-action-blocked" class="btn btn-secondary audit-action-btn" data-audit-action="blocked">Blocked</button>
-                <button id="audit-action-unblocked" class="btn btn-secondary audit-action-btn" data-audit-action="unblocked">Unblocked</button>
-              </div>
-              <div class="row">
-                <button id="audit-search-btn" class="btn btn-primary">Search</button>
-                <button id="audit-clear-btn" class="btn btn-secondary">Clear</button>
-              </div>
-              <div id="audit-search-results" class="stack"></div>
-              <div class="row">
+              </details>
+              <div id="audit-search-results" class="stack history-results"></div>
+              <div class="row history-load-row">
                 <button id="audit-load-more-btn" class="btn btn-secondary hidden">Load More</button>
               </div>
             </div>
@@ -251,13 +263,6 @@
         </section>
 
         <section id="tab-stats" class="tab-panel hidden">
-          <div class="team-stats-head">
-            <div>
-              <h2>Stats</h2>
-              <p class="section-copy muted">Check recent moderator activity and current verification volume at a glance.</p>
-            </div>
-          </div>
-
           <div class="subtabs segmented-control team-stats-range-control" aria-label="Stats range">
             <button id="team-stats-range-weekly" class="btn btn-primary team-stats-range-btn" data-stats-range="weekly">
               Weekly
@@ -269,10 +274,10 @@
 
           <p id="team-stats-feedback" class="muted small team-stats-feedback hidden" aria-live="polite"></p>
 
-          <article class="team-stats-overview-card">
-            <div class="team-stats-overview-head">
-              <p class="team-stats-overview-title">Overview</p>
-              <details class="team-stats-help">
+          <section class="team-stats-section team-stats-section-overview">
+            <div class="stats-section-head">
+              <h3 class="stats-section-title">Overview</h3>
+              <details class="team-stats-help stats-section-help">
                 <summary class="team-stats-help-button" aria-label="Explain currently verified and approvals">?</summary>
                 <div class="team-stats-help-tooltip" role="note">
                   <p><strong>Currently Verified</strong> shows the live total of users who are still approved. This number can go down if users are removed, expire, delete their account, or are automatically cleaned up.</p>
@@ -282,71 +287,68 @@
               </details>
             </div>
 
-            <div class="team-stats-summary-grid" aria-live="polite">
-              <article class="team-stats-card team-stats-card-primary team-stats-card-verified">
-                <p class="team-stats-card-label">Currently Verified</p>
-                <p id="team-stats-currently-verified" class="team-stats-card-value">--</p>
+            <div class="stat-tile-grid" aria-live="polite">
+              <article class="stat-tile stat-tile-primary stat-tile-verified">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Currently Verified</p>
+                <p id="team-stats-currently-verified" class="stat-tile-value">--</p>
               </article>
-              <article class="team-stats-card team-stats-card-approvals">
-                <p class="team-stats-card-label">Approvals</p>
-                <p id="team-stats-approvals" class="team-stats-card-value">--</p>
+              <article class="stat-tile stat-tile-approvals">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Approvals</p>
+                <p id="team-stats-approvals" class="stat-tile-value">--</p>
               </article>
-              <article class="team-stats-card team-stats-card-denials">
-                <p class="team-stats-card-label">Denials</p>
-                <p id="team-stats-denials" class="team-stats-card-value">--</p>
+              <article class="stat-tile stat-tile-denials">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Denials</p>
+                <p id="team-stats-denials" class="stat-tile-value">--</p>
               </article>
-              <article class="team-stats-card team-stats-card-reopens">
-                <p class="team-stats-card-label">Reopens</p>
-                <p id="team-stats-reopens" class="team-stats-card-value">--</p>
+              <article class="stat-tile stat-tile-reopens">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Reopens</p>
+                <p id="team-stats-reopens" class="stat-tile-value">--</p>
               </article>
-              <article class="team-stats-card team-stats-card-active-mods">
-                <p class="team-stats-card-label">Active Mods</p>
-                <p id="team-stats-active-mods" class="team-stats-card-value">--</p>
+              <article class="stat-tile stat-tile-active-mods">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Active Mods</p>
+                <p id="team-stats-active-mods" class="stat-tile-value">--</p>
               </article>
             </div>
+          </section>
 
-            <div class="team-stats-top-strip">
-              <div class="team-stats-top-strip-head">
-                <h3>Top Mods</h3>
-              </div>
-              <div class="team-stats-top-list">
-                <div class="team-stats-top-row team-stats-top-row-approvals">
-                  <div class="team-stats-top-meta">
-                    <p class="team-stats-card-label">Top Approver</p>
-                    <p id="team-stats-top-approver-name" class="team-stats-top-name">--</p>
-                  </div>
-                  <p id="team-stats-top-approver-count" class="team-stats-top-count muted small">No approvals yet.</p>
-                </div>
-                <div class="team-stats-top-row team-stats-top-row-denials">
-                  <div class="team-stats-top-meta">
-                    <p class="team-stats-card-label">Top Denier</p>
-                    <p id="team-stats-top-denier-name" class="team-stats-top-name">--</p>
-                  </div>
-                  <p id="team-stats-top-denier-count" class="team-stats-top-count muted small">No denials yet.</p>
-                </div>
-              </div>
+          <section class="team-stats-section team-stats-section-leaders">
+            <div class="stats-section-head">
+              <h3 class="stats-section-title">Top Mods</h3>
             </div>
-          </article>
+            <div class="stat-leader-grid">
+              <article class="stat-leader-tile stat-leader-tile-approver">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Top Approver</p>
+                <p id="team-stats-top-approver-name" class="stat-leader-name">--</p>
+                <p id="team-stats-top-approver-count" class="stat-leader-count">Not loaded</p>
+              </article>
+              <article class="stat-leader-tile stat-leader-tile-denier">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <p class="stat-tile-label">Top Denier</p>
+                <p id="team-stats-top-denier-name" class="stat-leader-name">--</p>
+                <p id="team-stats-top-denier-count" class="stat-leader-count">Not loaded</p>
+              </article>
+            </div>
+          </section>
 
-          <div class="team-stats-breakdown-card">
-            <div class="team-stats-section-head team-stats-breakdown-head">
+          <section class="team-stats-section team-stats-section-breakdown">
+            <div class="stats-section-head stats-breakdown-head">
               <div>
-                <h3>Moderator Breakdown</h3>
-                <p class="team-stats-section-copy muted small">Approvals and denials by moderator in the selected range.</p>
+                <h3 class="stats-section-title">Moderator Activity</h3>
+                <p class="stats-section-copy muted small">Approvals and denials by moderator in the selected range.</p>
               </div>
-              <button id="team-stats-breakdown-toggle" class="btn btn-secondary team-stats-breakdown-toggle hidden" type="button">Show all</button>
+              <button id="team-stats-breakdown-toggle" class="team-stats-breakdown-toggle hidden" type="button">Show all</button>
             </div>
             <div id="team-stats-breakdown" class="team-stats-breakdown"></div>
-          </div>
+          </section>
         </section>
 
         <section id="tab-settings" class="tab-panel hidden">
-          <div class="section-head">
-            <div>
-              <h2>Settings</h2>
-              <p class="section-copy muted">Configure verification workflow, localized photo instructions, modmail templates, and the user-facing theme.</p>
-            </div>
-          </div>
           <div
             id="settings-tabs-shell"
             class="settings-tabs-shell"
@@ -359,7 +361,7 @@
               <button class="settings-tab-btn" data-settings-tab="templates">Templates</button>
               <button class="settings-tab-btn" data-settings-tab="themes">Themes</button>
             </nav>
-            <div id="settings-tabs-scroll-hint" class="settings-tabs-scroll-hint hidden" aria-hidden="true">&rarr;</div>
+            <div id="settings-tabs-scroll-hint" class="settings-tabs-scroll-hint nav-scroll-hint hidden" aria-hidden="true"></div>
           </div>
 
           <div id="settings-panel-general" class="settings-panel">
@@ -398,6 +400,27 @@
                       <span class="approval-flair-preview-label muted small">Flair Preview:</span>
                       <span id="approval-flair-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
+                    <details id="flair-css-class-wrap" class="flair-css-class-stack settings-advanced-disclosure">
+                      <summary class="settings-advanced-summary">
+                        <span>Advanced: Flair CSS match</span>
+                      </summary>
+                      <div class="field-stack settings-advanced-body">
+                        <div class="field-label-row">
+                          <label class="field-label" for="flair-css-class">Flair CSS match (optional)</label>
+                          <details class="team-stats-help">
+                            <summary class="team-stats-help-button" aria-label="Explain Flair CSS match">?</summary>
+                            <div class="team-stats-help-tooltip" role="note">
+                              <p>Most subs will leave this blank.</p>
+                              <p><strong>This is for historical or external verification only.</strong></p>
+                              <p>Users with a matching flair CSS ID will be treated as verified automatically, without submitting through this app.</p>
+                              <p><strong>Example:</strong> "verified" matches "verified_user" or "vip_verified".</p>
+                              <p><strong>Note:</strong> This checks the flair’s CSS ID (not flair text) and does not change how new approvals work.</p>
+                            </div>
+                          </details>
+                        </div>
+                        <input id="flair-css-class" class="field-input" type="text" />
+                      </div>
+                    </details>
                   </div>
                   <div id="primary-approval-flair-template-wrap" class="field-stack hidden" aria-hidden="true">
                     <label class="field-label" for="flair-template-id">If your flair isn’t listed above (for example, if it’s not mod-only), enter its template ID here. This field is only shown when “Manual Input” is selected above.</label>
@@ -426,22 +449,6 @@
                       <span id="approval-flair-third-preview-chip" class="pending-age-badge approval-flair-preview-chip"></span>
                     </div>
                   </div>
-                </div>
-                <div id="flair-css-class-wrap" class="field-stack flair-css-class-stack">
-                  <div class="field-label-row">
-                    <label class="field-label" for="flair-css-class">Advanced: Flair CSS match (optional)</label>
-                    <details class="team-stats-help">
-                      <summary class="team-stats-help-button" aria-label="Explain Flair CSS match">?</summary>
-                      <div class="team-stats-help-tooltip" role="note">
-                        <p>Most subs will leave this blank.</p>
-                        <p><strong>This is for historical or external verification only.</strong></p>
-                        <p>Users with a matching flair CSS ID will be treated as verified automatically, without submitting through this app.</p>
-                        <p><strong>Example:</strong> "verified" matches "verified_user" or "vip_verified".</p>
-                        <p><strong>Note:</strong> This checks the flair’s CSS ID (not flair text) and does not change how new approvals work.</p>
-                      </div>
-                    </details>
-                  </div>
-                  <input id="flair-css-class" class="field-input" type="text" />
                 </div>
               </div>
 
@@ -570,28 +577,40 @@
               <div id="instruction-language-panel-en" class="settings-language-panel">
                 <label class="field-label" for="photo-instructions">English instructions</label>
                 <p class="muted small field-help">Used when the default language is English, and also as a fallback when other languages are unavailable.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions" aria-label="English instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions" aria-label="English instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-es" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-es">Spanish instructions</label>
                 <p class="muted small field-help">Adds `es` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-es" aria-label="Spanish instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-es" aria-label="Spanish instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-es" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-fr" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-fr">French instructions</label>
                 <p class="muted small field-help">Adds `fr` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-fr" aria-label="French instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-fr" aria-label="French instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-fr" class="field-textarea" rows="10"></textarea>
               </div>
 
               <div id="instruction-language-panel-pt-br" class="settings-language-panel hidden">
                 <label class="field-label" for="photo-instructions-pt-br">Portuguese (Brazil) instructions</label>
                 <p class="muted small field-help">Adds `pt-BR` to the in-view language switcher when this field has content, and can be used as the default opening language.</p>
-                <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-pt-br" aria-label="Portuguese (Brazil) instructions formatting helpers"></div>
+                <details class="textarea-formatting">
+                  <summary>Formatting tools</summary>
+                  <div class="textarea-helper-toolbar" data-textarea-helper="photo-instructions-pt-br" aria-label="Portuguese (Brazil) instructions formatting helpers"></div>
+                </details>
                 <textarea id="photo-instructions-pt-br" class="field-textarea" rows="10"></textarea>
               </div>
             </div>
@@ -604,11 +623,19 @@
           </div>
 
           <div id="settings-panel-templates" class="settings-panel hidden">
-            <div class="template-subtabs" id="template-subtabs" role="tablist" aria-label="Modmail templates">
-              <button class="template-subtab-btn template-subtab-btn-active" data-template-subtab="pending" type="button" role="tab" aria-selected="true">Pending</button>
-              <button class="template-subtab-btn" data-template-subtab="approval" type="button" role="tab" aria-selected="false">Approval</button>
-              <button class="template-subtab-btn" data-template-subtab="denial" type="button" role="tab" aria-selected="false">Denial</button>
-              <button class="template-subtab-btn" data-template-subtab="revoked" type="button" role="tab" aria-selected="false">Revoked</button>
+            <div
+              id="template-subtabs-shell"
+              class="template-subtabs-shell"
+              data-scroll-left="false"
+              data-scroll-right="false"
+            >
+              <div class="template-subtabs" id="template-subtabs" role="tablist" aria-label="Modmail templates">
+                <button class="template-subtab-btn template-subtab-btn-active" data-template-subtab="pending" type="button" role="tab" aria-selected="true">Pending</button>
+                <button class="template-subtab-btn" data-template-subtab="approval" type="button" role="tab" aria-selected="false">Approval</button>
+                <button class="template-subtab-btn" data-template-subtab="denial" type="button" role="tab" aria-selected="false">Denial</button>
+                <button class="template-subtab-btn" data-template-subtab="revoked" type="button" role="tab" aria-selected="false">Revoked</button>
+              </div>
+              <div id="template-subtabs-scroll-hint" class="template-subtabs-scroll-hint nav-scroll-hint hidden" aria-hidden="true"></div>
             </div>
             <div class="template-subpanels">
               <div id="template-subpanel-pending" class="content-card template-subpanel" data-template-subpanel="pending">
@@ -882,10 +909,13 @@
                     <p class="section-copy muted small">Override primary, accent, and background colors for the user-facing hub.</p>
                   </div>
                 </div>
-                <label class="field-label" for="use-custom-colors">Use custom colors</label>
-                <label class="toggle-row">
+                <label class="toggle-row switch-row switch-row-compact">
                   <input id="use-custom-colors" type="checkbox" />
-                  <span>Enable Custom Colors</span>
+                  <span class="toggle-switch" aria-hidden="true"></span>
+                  <span class="toggle-copy">
+                    <span class="toggle-title">Use custom colors</span>
+                    <span class="toggle-description muted small">Enable manual primary, accent, and background colors.</span>
+                  </span>
                 </label>
 
                 <div class="field-grid theme-controls-grid">

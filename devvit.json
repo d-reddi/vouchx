@@ -295,7 +295,7 @@
         "type": "boolean",
         "label": "Show photo instructions before verification submission",
         "helpText": "When enabled users see the configured Photo Instructions after clicking \"Submit Verification\" and before uploading photos. If no instructions are configured the user proceeds directly to the acknowledgement screen and photo upload.",
-        "defaultValue": false
+        "defaultValue": true
       },
       "settings_tab_requires_config_access": {
         "type": "boolean",
