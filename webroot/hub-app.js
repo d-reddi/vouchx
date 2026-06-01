@@ -107,6 +107,14 @@ function createShell(root, inline) {
 
             <h1 data-el="command-title" class="hub-headline">Review the instructions, then submit your verification.</h1>
             <p data-el="info-msg" class="info-msg hidden"></p>
+            <section data-el="restricted-state" class="hub-state-panel hidden" aria-live="polite">
+              <div data-el="restricted-icon" class="hub-state-icon" aria-hidden="true"></div>
+              <div class="hub-state-copy">
+                <h2 data-el="restricted-title" class="hub-state-title"></h2>
+                <p data-el="restricted-summary" class="hub-state-summary"></p>
+                <p data-el="restricted-context" class="hub-state-context hidden"></p>
+              </div>
+            </section>
 
             <ol data-el="hub-flow" class="hub-flow hub-flow-hub hidden" aria-label="Verification steps">
               <li class="hub-flow-step"><span class="hub-flow-bar"></span><span class="hub-flow-label"><span class="hub-flow-num">1</span>Review instructions</span></li>
@@ -282,6 +290,11 @@ function createShell(root, inline) {
     modPanelBtn: root.querySelector('[data-el="mod-panel-btn"]'),
     modPanelGroup: root.querySelector('[data-el="mod-panel-group"]'),
     infoMsg: root.querySelector('[data-el="info-msg"]'),
+    restrictedState: root.querySelector('[data-el="restricted-state"]'),
+    restrictedIcon: root.querySelector('[data-el="restricted-icon"]'),
+    restrictedTitle: root.querySelector('[data-el="restricted-title"]'),
+    restrictedSummary: root.querySelector('[data-el="restricted-summary"]'),
+    restrictedContext: root.querySelector('[data-el="restricted-context"]'),
     hubFlow: root.querySelector('[data-el="hub-flow"]'),
     participationStep: root.querySelector('[data-el="participation-step"]'),
     participationStepLabel: root.querySelector('[data-el="participation-step-label"]'),
@@ -1891,6 +1904,93 @@ export function mountHub(options = {}) {
     });
   }
 
+  function getRestrictedHubStateView(state, { isVerified, isRestricted, isGlobalRestriction }) {
+    if (!state || isVerified) {
+      return null;
+    }
+
+    const subredditLabel = state.subredditName ? `r/${state.subredditName}` : 'this community';
+
+    if (isRestricted && isGlobalRestriction) {
+      return {
+        kind: 'global-blocked',
+        title: 'Your access to VouchX is restricted.',
+        summary:
+          "VouchX helps subreddits manage photo verification requests. This account can't access VouchX across communities that use the app due to a developer-level restriction.",
+        context:
+          'This restriction may be related to the VouchX Terms and Conditions. It does not, by itself, control whether you can post or comment on Reddit. Subreddit rules, flair requirements, moderator actions, or bans may still apply.',
+        actions: [],
+      };
+    }
+
+    if (isRestricted) {
+      const subredditRestrictionKind =
+        String(state.viewerBlocked?.reason || '').toLowerCase().includes('blocked by moderator')
+          ? 'subreddit-blocked'
+          : 'subreddit-restricted';
+      return {
+        kind: subredditRestrictionKind,
+        title: `Verification is unavailable in ${subredditLabel}.`,
+        summary:
+          'This account is blocked by the moderation team from submitting verification through VouchX in this subreddit.',
+        context:
+          "This only affects VouchX verification here. Posting or commenting may still depend on the subreddit's rules, flair requirements, moderator actions, or bans.",
+        actions: [],
+      };
+    }
+
+    if (!state.config.verificationsEnabled) {
+      const disabledMessage = String(state.config.verificationsDisabledMessage || '').trim();
+      return {
+        kind: 'disabled',
+        title: 'Verification is currently unavailable.',
+        summary: 'Submissions have been temporarily disabled by the moderators.',
+        context: disabledMessage || 'Please check back later for updates from the moderation team.',
+        actions: howToUseUrl ? ['requirements', 'learn-more'] : ['requirements'],
+        learnMoreUrl: howToUseUrl,
+      };
+    }
+
+    return null;
+  }
+
+  function renderRestrictedHubState(view) {
+    const panel = refs.restrictedState;
+    if (!panel) {
+      return;
+    }
+
+    panel.classList.toggle('hidden', !view);
+    panel.dataset.state = view?.kind || '';
+    refs.restrictedIcon.className = view ? `hub-state-icon hub-state-icon-${view.kind}` : 'hub-state-icon';
+    refs.restrictedTitle.textContent = view?.title || '';
+    refs.restrictedSummary.textContent = view?.summary || '';
+    refs.restrictedContext.textContent = view?.context || '';
+    refs.restrictedContext.classList.toggle('hidden', !view?.context);
+  }
+
+  function appendRestrictedHubActions(view) {
+    if (!view) {
+      return;
+    }
+
+    if (view.actions.includes('requirements')) {
+      refs.actionRow.appendChild(
+        makeButton('View Requirements', 'btn-secondary', (event) => {
+          openPhotoInstructionsModal(event);
+        })
+      );
+    }
+
+    if (view.actions.includes('learn-more') && view.learnMoreUrl) {
+      refs.actionRow.appendChild(
+        makeButton('Learn More', 'btn-secondary', () => {
+          navigateTo(view.learnMoreUrl);
+        })
+      );
+    }
+  }
+
   function renderState(state) {
     if (!state) {
       return;
@@ -1902,6 +2002,7 @@ export function mountHub(options = {}) {
     const awaitingFlairPropagation = isAwaitingFlairPropagation(state) && !isVerified;
     const isRestricted = Boolean(state.viewerBlocked && !isVerified);
     const isGlobalRestriction = state.viewerBlocked?.scope === 'global';
+    const restrictedView = getRestrictedHubStateView(state, { isVerified, isRestricted, isGlobalRestriction });
 
     applyTheme(state.resolvedTheme);
     refs.metaUsername.textContent = state.viewerUsername
@@ -1962,13 +2063,16 @@ export function mountHub(options = {}) {
 
     refs.commandTitle.textContent = commandTitle;
     refs.infoMsg.textContent = infoText;
-    refs.infoMsg.classList.toggle('hidden', !infoText);
+    refs.commandTitle.classList.toggle('hidden', Boolean(restrictedView));
+    refs.infoMsg.classList.toggle('hidden', Boolean(restrictedView) || !infoText);
+    renderRestrictedHubState(restrictedView);
 
     renderHubFlow(state, { isVerified, isRestricted, awaitingFlairPropagation });
     renderPhotoInstructionsFlow(state);
 
     refs.actionRow.innerHTML = '';
     renderDeveloperPanel();
+    appendRestrictedHubActions(restrictedView);
     const submitLabel =
       state.userLatest && (state.userLatest.status === 'denied' || state.userLatest.status === 'removed')
         ? 'Resubmit Verification'
@@ -2002,7 +2106,7 @@ export function mountHub(options = {}) {
       );
     }
 
-    if (!isVerified && state.userLatest?.status === 'pending' && (!isRestricted || isGlobalRestriction)) {
+    if (!isVerified && state.userLatest?.status === 'pending') {
       refs.actionRow.appendChild(
         makeButton('Withdraw Pending Verification', 'btn-secondary', () => {
           void performAction('/api/hub/withdraw', {}, {
