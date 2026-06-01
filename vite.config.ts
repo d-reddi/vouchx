@@ -12,6 +12,7 @@ function resolveWorktreeLabel(cwd = process.cwd()): string {
 }
 
 export default defineConfig({
+  base: "./",
   plugins: [devvit()],
   define: {
     __VOUCHX_WORKTREE_LABEL__: JSON.stringify(resolveWorktreeLabel()),

@@ -1946,8 +1946,7 @@ export function mountHub(options = {}) {
         title: 'Verification is currently unavailable.',
         summary: 'Submissions have been temporarily disabled by the moderators.',
         context: disabledMessage || 'Please check back later for updates from the moderation team.',
-        actions: howToUseUrl ? ['requirements', 'learn-more'] : ['requirements'],
-        learnMoreUrl: howToUseUrl,
+        actions: [],
       };
     }
 

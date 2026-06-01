@@ -1,6 +1,7 @@
 import express from 'express';
-import type { Devvit } from '@devvit/public-api';
+import type { Context } from '@devvit/public-api';
 import { context, createServer, getServerPort, realtime, reddit, redis, scheduler, settings } from '@devvit/web/server';
+import type { Form } from '@devvit/shared-types/shared/form.js';
 
 import {
   assertCanReview,
@@ -23,6 +24,7 @@ import {
   loadHubDashboard,
   loadModDashboard,
   loadApprovalFlairOptionsForSettings,
+  onModeratorPurgeUserData,
   onSaveFlairTemplateValues,
   onSaveModmailTemplatesValues,
   onSaveThemeValues,
@@ -37,8 +39,10 @@ import {
   searchAuditEntries,
   searchHistoryRecords,
   setPendingClaimState,
+  reconcileApprovedUsersForRetention,
   submitVerification,
   moderatorPermissionLookupNeedsRetry,
+  sanitizeSubredditName,
   toHubState,
   toModPanelState,
   unblockUserForModerator,
@@ -46,7 +50,9 @@ import {
   validateFlairTemplateIdForSubreddit,
   validateMaxDenialsBeforeBlockSetting,
   parseDenyReason,
+  type AuditRetentionJobData,
   type PendingModmailReplyEvent,
+  type PurgeUserDataFormValues,
   type SubmitVerificationValues,
 } from './core.js';
 import {
@@ -73,6 +79,93 @@ type HttpError = Error & {
   status?: number;
 };
 
+type MenuItemRequest = {
+  targetId?: string;
+};
+
+type TriggerLifecycleRequest = {
+  subreddit?: {
+    id?: string;
+    name?: string;
+  };
+};
+
+type TaskRequest<Data> = {
+  data?: Data;
+};
+
+type UiToast = string | {
+  text: string;
+  appearance?: 'neutral' | 'success';
+};
+
+type UiResponse = {
+  showToast?: UiToast;
+  showForm?: {
+    name: string;
+    form: Form;
+  };
+  navigateTo?: string | {
+    url: string;
+    permalink?: string;
+  };
+};
+
+type CreateVerificationHubValues = {
+  postTitle?: string;
+};
+
+type RemoveVerificationPostValues = {
+  confirmationText?: string;
+};
+
+const createVerificationHubForm: Form = {
+  title: 'Create verification hub post',
+  description: 'Creates the verification hub post, marks it NSFW, and pins it to the subreddit.',
+  fields: [
+    {
+      type: 'string',
+      name: 'postTitle',
+      label: 'Post title',
+      required: true,
+      defaultValue: 'Photo Verification Hub',
+    },
+  ],
+  acceptLabel: 'Create and pin NSFW verification post',
+  cancelLabel: 'Cancel',
+};
+
+const purgeAuditLogForm: Form = {
+  title: 'Purge Audit Log',
+  description:
+    'Removes audit log entries using your install setting for this subreddit. Set purge days to 0 to purge all entries.',
+  fields: [
+    {
+      type: 'string',
+      name: 'confirmationText',
+      label: 'Type "confirm" to purge the audit log.',
+      required: true,
+    },
+  ],
+  acceptLabel: 'Purge Audit Log',
+  cancelLabel: 'Cancel',
+};
+
+const removeVerificationHubPostForm: Form = {
+  title: 'Remove verification hub post',
+  description: 'Removes this app-created verification post from the subreddit.',
+  fields: [
+    {
+      type: 'string',
+      name: 'confirmationText',
+      label: 'Type "remove" to confirm',
+      required: true,
+    },
+  ],
+  acceptLabel: 'Remove post',
+  cancelLabel: 'Cancel',
+};
+
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 const REFRESH_SIGNAL = Object.freeze({ type: 'refresh' });
@@ -86,7 +179,7 @@ function httpError(status: number, message: string): HttpError {
   return error;
 }
 
-function currentContext(): Devvit.Context {
+function currentContext(): Context {
   return {
     reddit,
     redis,
@@ -97,7 +190,7 @@ function currentContext(): Devvit.Context {
     userId: context.userId ?? '',
     postId: context.postId ?? '',
     appVersion: context.appVersion ?? '',
-  } as unknown as Devvit.Context;
+  } as unknown as Context;
 }
 
 function getStatus(error: unknown): number {
@@ -109,6 +202,24 @@ function getStatus(error: unknown): number {
 function sendError(res: express.Response, error: unknown): void {
   const message = sanitizeClientErrorMessage(error);
   res.status(getStatus(error)).json({ error: message });
+}
+
+function showForm(name: string, form: Form): UiResponse {
+  return {
+    showForm: {
+      name,
+      form,
+    },
+  };
+}
+
+function toast(text: string, appearance: 'neutral' | 'success' = 'neutral'): UiResponse {
+  return {
+    showToast: {
+      text,
+      appearance,
+    },
+  };
 }
 
 function looksLikeRawRedditHtmlErrorMessage(message: string): boolean {
@@ -176,7 +287,7 @@ function validateDenyReasonLabel(value: unknown): string | undefined {
   }
 }
 
-async function requireModeratorIdentity(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+async function requireModeratorIdentity(appContext: Context): Promise<{ moderator: string; subredditName: string }> {
   const moderator = await appContext.reddit.getCurrentUsername();
   if (!moderator) {
     throw httpError(403, 'You must be logged in as a moderator.');
@@ -187,14 +298,14 @@ async function requireModeratorIdentity(appContext: Devvit.Context): Promise<{ m
 }
 
 async function requireRouteModeratorAccess(
-  appContext: Devvit.Context
+  appContext: Context
 ): Promise<{ moderator: string; subredditName: string; access: RouteModeratorAccess }> {
   const { moderator, subredditName } = await requireModeratorIdentity(appContext);
   const access = await getModeratorAccessSnapshot(appContext, subredditName, moderator);
   return { moderator, subredditName, access };
 }
 
-async function requireModerator(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+async function requireModerator(appContext: Context): Promise<{ moderator: string; subredditName: string }> {
   const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
   const accessError = getModeratorMembershipError(access, 'Only moderators can create verification posts.');
   if (accessError) {
@@ -203,14 +314,14 @@ async function requireModerator(appContext: Devvit.Context): Promise<{ moderator
   return { moderator, subredditName };
 }
 
-async function requireReviewAccess(appContext: Devvit.Context): Promise<{ moderator: string; subredditName: string }> {
+async function requireReviewAccess(appContext: Context): Promise<{ moderator: string; subredditName: string }> {
   const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
   await assertCanReview(appContext, subredditName, moderator, access);
   await cachePositiveModeratorUiState(appContext);
   return { moderator, subredditName };
 }
 
-async function ensureValidationScheduleForStateLoad(appContext: Devvit.Context): Promise<void> {
+async function ensureValidationScheduleForStateLoad(appContext: Context): Promise<void> {
   const subredditName = String(appContext.subredditName ?? '').trim() || (await getCurrentSubredditNameCompat(appContext));
   await ensureUserValidationSchedule(
     appContext,
@@ -219,7 +330,7 @@ async function ensureValidationScheduleForStateLoad(appContext: Devvit.Context):
   );
 }
 
-async function buildHubPayload(appContext: Devvit.Context) {
+async function buildHubPayload(appContext: Context) {
   const dashboard = await loadHubDashboard(appContext);
   return {
     state: toHubState(dashboard),
@@ -232,7 +343,7 @@ async function buildHubPayload(appContext: Devvit.Context) {
   };
 }
 
-async function buildModPayload(appContext: Devvit.Context) {
+async function buildModPayload(appContext: Context) {
   const dashboard = await loadModDashboard(appContext);
   if (!dashboard.viewerUsername) {
     throw httpError(403, 'You must be logged in as a moderator.');
@@ -261,13 +372,54 @@ async function buildModPayload(appContext: Devvit.Context) {
   };
 }
 
+async function createVerificationHubPost(
+  appContext: Context,
+  postTitle: string
+): Promise<{ postUrl: string; toastText: string }> {
+  const { subredditName } = await requireModerator(appContext);
+  const title = postTitle.trim() || 'Photo Verification Hub';
+  const post = await reddit.submitCustomPost({
+    subredditName,
+    title,
+    entry: 'default',
+    nsfw: true,
+    textFallback: {
+      text: 'Photo Verification Hub: users submit verification photos for moderator review.',
+    },
+  });
+  let toastText = 'Created and pinned NSFW verification post.';
+  try {
+    await post.sticky(1);
+  } catch (stickyError) {
+    console.log(
+      `[create-post] Created verification post ${post.id} in r/${subredditName}, but failed to pin it: ${errorText(stickyError)}`
+    );
+    toastText = "Created NSFW verification post, but couldn't pin it. Please pin it manually.";
+  }
+
+  return {
+    postUrl: post.url,
+    toastText,
+  };
+}
+
+async function ensureValidationScheduleFromLifecycleEvent(event: TriggerLifecycleRequest): Promise<void> {
+  const subredditId = sanitizeSubredditId(event.subreddit?.id ?? '');
+  const subredditName = sanitizeSubredditName(event.subreddit?.name ?? '');
+  if (!subredditId || !subredditName) {
+    return;
+  }
+
+  await ensureUserValidationSchedule(currentContext(), subredditId, subredditName);
+}
+
 function normalizeRealtimeChannelPart(value: string): string {
   return String(value || '')
     .trim()
     .replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
-function realtimeChannelsForContext(appContext: Devvit.Context, prefix: string): string[] {
+function realtimeChannelsForContext(appContext: Context, prefix: string): string[] {
   const channels = new Set<string>();
   const subredditId = sanitizeSubredditId(appContext.subredditId);
   if (subredditId) {
@@ -278,11 +430,11 @@ function realtimeChannelsForContext(appContext: Devvit.Context, prefix: string):
   return Array.from(channels);
 }
 
-function modRealtimeChannel(appContext: Devvit.Context): string {
+function modRealtimeChannel(appContext: Context): string {
   return realtimeChannelsForContext(appContext, 'vouchx_mod_refresh')[0];
 }
 
-function hubRealtimeChannel(appContext: Devvit.Context): string {
+function hubRealtimeChannel(appContext: Context): string {
   return realtimeChannelsForContext(appContext, 'vouchx_hub_refresh')[0];
 }
 
@@ -294,7 +446,7 @@ async function sendRealtimeRefreshSignal(channel: string): Promise<void> {
   }
 }
 
-async function sendRefreshSignals(appContext: Devvit.Context): Promise<void> {
+async function sendRefreshSignals(appContext: Context): Promise<void> {
   const channels = [
     ...realtimeChannelsForContext(appContext, 'vouchx_mod_refresh'),
     ...realtimeChannelsForContext(appContext, 'vouchx_hub_refresh'),
@@ -304,7 +456,7 @@ async function sendRefreshSignals(appContext: Devvit.Context): Promise<void> {
 
 function sendFastModRefreshResponse(
   res: express.Response,
-  appContext: Devvit.Context,
+  appContext: Context,
   toast: ToastPayload,
   extras?: Record<string, unknown>
 ): void {
@@ -386,6 +538,116 @@ app.post('/internal/on-modmail', async (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.post('/internal/on-app-install', async (req, res) => {
+  try {
+    await ensureValidationScheduleFromLifecycleEvent((req.body ?? {}) as TriggerLifecycleRequest);
+  } catch {
+    // Lifecycle triggers should not fail the install if background scheduling is temporarily unavailable.
+  }
+  res.json({});
+});
+
+app.post('/internal/on-app-upgrade', async (req, res) => {
+  try {
+    await ensureValidationScheduleFromLifecycleEvent((req.body ?? {}) as TriggerLifecycleRequest);
+  } catch {
+    // Lifecycle triggers should not fail the upgrade if background scheduling is temporarily unavailable.
+  }
+  res.json({});
+});
+
+app.post('/internal/scheduler/user-validation-reconcile', async (req, res) => {
+  const body = (req.body ?? {}) as TaskRequest<Partial<AuditRetentionJobData>>;
+  const subredditId = sanitizeSubredditId(body.data?.subredditId ?? '');
+  const subredditName = sanitizeSubredditName(body.data?.subredditName ?? '');
+  if (subredditId && subredditName) {
+    try {
+      const summary = await reconcileApprovedUsersForRetention(currentContext(), subredditId, subredditName);
+      if (!summary.skipped) {
+        console.log(
+          `[user-validation] r/${subredditName}: approved_processed=${summary.processed} approved_validated=${summary.validated} approved_purged=${summary.purged} approved_retries=${summary.retried} non_approved_processed=${summary.nonApprovedProcessed} non_approved_validated=${summary.nonApprovedValidated} non_approved_purged=${summary.nonApprovedPurged} non_approved_retries=${summary.nonApprovedRetried} audit_purged=${summary.auditPurged} stale_index_entries_purged=${summary.staleIndexEntriesPurged}`
+        );
+      }
+    } catch (error) {
+      console.log(`[user-validation] Failed reconciliation for r/${subredditName}: ${errorText(error)}`);
+    }
+  }
+  res.json({});
+});
+
+app.post('/internal/menu/create-verification-hub', (_req, res) => {
+  res.json(showForm('createVerificationHub', createVerificationHubForm));
+});
+
+app.post('/internal/menu/purge-audit-log', (_req, res) => {
+  res.json(showForm('purgeAuditLog', purgeAuditLogForm));
+});
+
+app.post('/internal/menu/remove-verification-hub-post', (_req, res) => {
+  res.json(showForm('removeVerificationHubPost', removeVerificationHubPostForm));
+});
+
+app.post('/internal/form/create-verification-hub-submit', async (req, res) => {
+  try {
+    const values = (req.body ?? {}) as CreateVerificationHubValues;
+    const result = await createVerificationHubPost(currentContext(), values.postTitle ?? 'Photo Verification Hub');
+    res.json({
+      showToast: {
+        text: result.toastText,
+        appearance: 'success',
+      },
+      navigateTo: result.postUrl,
+    } satisfies UiResponse);
+  } catch (error) {
+    res.json(toast(`Failed to create the verification post: ${errorText(error)}`));
+  }
+});
+
+app.post('/internal/form/purge-audit-log-submit', async (req, res) => {
+  let toastPayload: UiToast | undefined;
+  const appContext = {
+    ...currentContext(),
+    ui: {
+      showToast(payload: UiToast) {
+        toastPayload = payload;
+      },
+    },
+  };
+
+  await onModeratorPurgeUserData(
+    {
+      values: (req.body ?? {}) as PurgeUserDataFormValues,
+    } as never,
+    appContext as never
+  );
+
+  res.json({
+    showToast: toastPayload ?? 'Purge audit log action completed.',
+  } satisfies UiResponse);
+});
+
+app.post('/internal/form/remove-verification-hub-post-submit', async (req, res) => {
+  const values = (req.body ?? {}) as RemoveVerificationPostValues & MenuItemRequest;
+  if (String(values.confirmationText ?? '').trim().toLowerCase() !== 'remove') {
+    res.json(toast('Removal cancelled. Type "remove" to confirm.'));
+    return;
+  }
+
+  const postId = String(values.targetId ?? context.postId ?? '').trim();
+  if (!postId) {
+    res.json(toast('No post context available for removal.'));
+    return;
+  }
+
+  try {
+    const post = await reddit.getPostById(postId as `t3_${string}`);
+    await post.remove(false);
+    res.json(toast('Removed verification hub post.', 'success'));
+  } catch (error) {
+    res.json(toast(`Failed to remove post: ${errorText(error)}`));
+  }
+});
+
 app.post('/api/mod/settings/flair/validate', async (req, res) => {
   try {
     const appContext = currentContext();
@@ -455,38 +717,6 @@ app.post('/api/hub/delete', async (req, res) => {
         text,
         tone: result.flairRemovalFailedFor.length > 0 ? 'error' : 'success',
       },
-    });
-  } catch (error) {
-    sendError(res, error);
-  }
-});
-
-app.post('/api/admin/create-post', async (req, res) => {
-  try {
-    const appContext = currentContext();
-    const { subredditName } = await requireModerator(appContext);
-    const title = String(req.body?.postTitle ?? '').trim() || 'Photo Verification Hub';
-    const post = await reddit.submitCustomPost({
-      subredditName,
-      title,
-      entry: 'default',
-      nsfw: true,
-      textFallback: {
-        text: 'Photo Verification Hub: users submit verification photos for moderator review.',
-      },
-    });
-    let toastText = 'Created and pinned NSFW verification post.';
-    try {
-      await post.sticky(1);
-    } catch (stickyError) {
-      console.log(
-        `[create-post] Created verification post ${post.id} in r/${subredditName}, but failed to pin it: ${errorText(stickyError)}`
-      );
-      toastText = "Created NSFW verification post, but couldn't pin it. Please pin it manually.";
-    }
-    res.json({
-      postUrl: post.url,
-      toast: { text: toastText },
     });
   } catch (error) {
     sendError(res, error);
