@@ -235,42 +235,53 @@ export async function getCurrentModeratorPermissionSnapshot(
     };
   }
 
-  try {
-    const currentUser = viewerIdentity.user;
-    if (!currentUser) {
-      const cachedPermissions = await getCachedModeratorPermissions(context, username);
-      return {
-        permissions: cachedPermissions,
-        state: cachedPermissions.length > 0 ? 'cached' : 'unknown',
-      };
-    }
-    const permissions = normalizeModeratorPermissions(
-      await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit)
-    );
-    await cacheModeratorPermissions(context, username, permissions);
-    return {
-      permissions,
-      state: 'confirmed',
-    };
-  } catch (error) {
+  const currentUser = viewerIdentity.user;
+  if (!currentUser) {
     const cachedPermissions = await getCachedModeratorPermissions(context, username);
-    if (cachedPermissions.length > 0) {
-      return {
-        permissions: cachedPermissions,
-        state: 'cached',
-      };
-    }
-    await logModeratorLookupFailureWithCooldown(
-      context,
-      'permissions',
-      username,
-      `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(error)}`
-    );
     return {
-      permissions: [],
-      state: 'unknown',
+      permissions: cachedPermissions,
+      state: cachedPermissions.length > 0 ? 'cached' : 'unknown',
     };
   }
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const permissions = normalizeModeratorPermissions(
+        await currentUser.getModPermissionsForSubreddit(sanitizedSubreddit)
+      );
+      await cacheModeratorPermissions(context, username, permissions);
+      return {
+        permissions,
+        state: 'confirmed',
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 1 && looksLikeTransientRedditTransportError(errorText(error))) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      break;
+    }
+  }
+
+  const cachedPermissions = await getCachedModeratorPermissions(context, username);
+  if (cachedPermissions.length > 0) {
+    return {
+      permissions: cachedPermissions,
+      state: 'cached',
+    };
+  }
+  await logModeratorLookupFailureWithCooldown(
+    context,
+    'permissions',
+    username,
+    `Moderator permission lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}: ${errorText(lastError)}`
+  );
+  return {
+    permissions: [],
+    state: 'unknown',
+  };
 }
 
 export async function assertCanAccessModeratorSettingsTab(

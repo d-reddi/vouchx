@@ -260,7 +260,12 @@ export function looksLikeTransientRedditTransportError(message: string): boolean
     normalized.includes('timeout') ||
     normalized.includes('socket hang up') ||
     normalized.includes('econnreset') ||
-    normalized.includes('connection reset')
+    normalized.includes('connection reset') ||
+    normalized.includes('goaway') ||
+    normalized.includes('graceful shutdown') ||
+    normalized.includes('call cancelled') ||
+    /^1 cancelled\b/.test(normalized) ||
+    /\bfailed to get \d{3} response after \d+ attempts?\b/.test(normalized)
   );
 }
 

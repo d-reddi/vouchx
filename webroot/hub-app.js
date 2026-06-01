@@ -1914,7 +1914,7 @@ export function mountHub(options = {}) {
     if (isRestricted && isGlobalRestriction) {
       return {
         kind: 'global-blocked',
-        title: 'Your access to VouchX is restricted.',
+        title: 'Access to VouchX is restricted.',
         summary:
           "VouchX helps subreddits manage photo verification requests. This account can't access VouchX across communities that use the app due to a developer-level restriction.",
         context:
