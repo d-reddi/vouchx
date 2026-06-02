@@ -16,6 +16,7 @@ import {
   parseRedditUsernameList,
   splitRedditUsernameListAcrossSettings,
 } from '../shared/global-usernames.ts';
+import { isVouchxHomeSubreddit } from '../shared/subreddits.ts';
 import brandVxUrl from './brand-vx.png';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
@@ -2004,6 +2005,7 @@ export function mountHub(options = {}) {
     const awaitingFlairPropagation = isAwaitingFlairPropagation(state) && !isVerified;
     const isRestricted = Boolean(state.viewerBlocked && !isVerified);
     const isGlobalRestriction = state.viewerBlocked?.scope === 'global';
+    const submissionsDisabledForHomeSubreddit = isVouchxHomeSubreddit(state.subredditName);
     const restrictedView = getRestrictedHubStateView(state, { isVerified, isRestricted, isGlobalRestriction });
 
     applyTheme(state.resolvedTheme);
@@ -2024,6 +2026,15 @@ export function mountHub(options = {}) {
     if (!isVerified && !isRestricted && !state.config.verificationsEnabled) {
       commandTitle = 'Verifications are currently unavailable';
       infoText = String(state.config.verificationsDisabledMessage || '').trim() || 'Verifications are temporarily disabled. Please check back soon.';
+    } else if (
+      submissionsDisabledForHomeSubreddit &&
+      !isVerified &&
+      !isRestricted &&
+      !awaitingFlairPropagation &&
+      !state.requiresInitialSetup &&
+      !(state.userLatest && state.userLatest.status === 'pending')
+    ) {
+      infoText = 'This is the VouchX home subreddit. Verification submissions are disabled here.';
     } else if (awaitingFlairPropagation) {
       commandTitle = 'Approval syncing';
       infoText = 'Your approval was recorded. Verified flair is still syncing and should update shortly.';
@@ -2101,11 +2112,18 @@ export function mountHub(options = {}) {
           openPhotoInstructionsModal(event);
         })
       );
-      refs.actionRow.appendChild(
-        makeButton(submitLabel, 'btn-primary', (event) => {
-          void openSubmitForm(event);
-        })
-      );
+      const submitButton = makeButton(submitLabel, 'btn-primary', (event) => {
+        if (submissionsDisabledForHomeSubreddit) {
+          showToast('Verification submissions are disabled in r/vouchx.', 'info');
+          return;
+        }
+        void openSubmitForm(event);
+      });
+      if (submissionsDisabledForHomeSubreddit) {
+        submitButton.disabled = true;
+        submitButton.title = 'Verification submissions are disabled in r/vouchx.';
+      }
+      refs.actionRow.appendChild(submitButton);
     }
 
     if (!isVerified && state.userLatest?.status === 'pending') {

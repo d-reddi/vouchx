@@ -2844,6 +2844,32 @@ test('submitVerification rejects globally blocked usernames', async () => {
   );
 });
 
+test('submitVerification rejects submissions in the VouchX home subreddit', async () => {
+  await assert.rejects(
+    submitVerification(
+      {
+        is18Confirmed: true,
+        adultOnlySelfPhotosConfirmed: true,
+        termsAccepted: true,
+        photoOneUrl: 'https://i.redd.it/one.png',
+        photoTwoUrl: 'https://i.redd.it/two.png',
+        photoThreeUrl: '',
+      } as never,
+      {
+        subredditId: 't5_vouchx',
+        subredditName: 'vouchx',
+        userId: 't2_viewer',
+        reddit: {
+          async getCurrentUsername() {
+            return 'example_user';
+          },
+        },
+      } as never
+    ),
+    /Verification submissions are disabled in r\/vouchx\./
+  );
+});
+
 test('clearExpiredPendingClaim clears stale claims', () => {
   const staleRecord = buildRecord({
     claimedBy: 'mod_one',

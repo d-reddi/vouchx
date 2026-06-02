@@ -10,6 +10,7 @@ import type {
   VerificationRecord,
 } from './types.ts';
 import { GLOBAL_BLOCKED_USERNAME_SETTING_NAMES } from '../shared/global-usernames.ts';
+import { isVouchxHomeSubreddit } from '../shared/subreddits.ts';
 import {
   createGlobalBlockedUserEntry,
   getStoredDenialCount,
@@ -476,6 +477,10 @@ export async function submitVerification(
 
   const subredditId = sanitizeSubredditId(context.subredditId);
   const subredditName = await getCurrentSubredditNameCompat(context);
+  if (isVouchxHomeSubreddit(subredditName)) {
+    throw new Error('Verification submissions are disabled in r/vouchx.');
+  }
+
   const config = await getRuntimeConfig(context, subredditId);
   if (!config.verificationsEnabled) {
     throw new Error(config.verificationsDisabledMessage);
