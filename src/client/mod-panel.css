@@ -439,7 +439,9 @@ textarea {
 .settings-tabs-shell::before,
 .settings-tabs-shell::after,
 .template-subtabs-shell::before,
-.template-subtabs-shell::after {
+.template-subtabs-shell::after,
+.deny-reason-chips-shell::before,
+.deny-reason-chips-shell::after {
   content: "";
   position: absolute;
   top: 0;
@@ -452,7 +454,8 @@ textarea {
 }
 
 .settings-tabs-shell::before,
-.template-subtabs-shell::before {
+.template-subtabs-shell::before,
+.deny-reason-chips-shell::before {
   left: 0;
   background:
     linear-gradient(
@@ -464,7 +467,8 @@ textarea {
 }
 
 .settings-tabs-shell::after,
-.template-subtabs-shell::after {
+.template-subtabs-shell::after,
+.deny-reason-chips-shell::after {
   right: 0;
   background:
     linear-gradient(
@@ -476,12 +480,14 @@ textarea {
 }
 
 .settings-tabs-shell[data-scroll-left="true"]::before,
-.template-subtabs-shell[data-scroll-left="true"]::before {
+.template-subtabs-shell[data-scroll-left="true"]::before,
+.deny-reason-chips-shell[data-scroll-left="true"]::before {
   opacity: 1;
 }
 
 .settings-tabs-shell[data-scroll-right="true"]::after,
-.template-subtabs-shell[data-scroll-right="true"]::after {
+.template-subtabs-shell[data-scroll-right="true"]::after,
+.deny-reason-chips-shell[data-scroll-right="true"]::after {
   opacity: 1;
 }
 
@@ -962,20 +968,17 @@ textarea {
   align-self: end;
 }
 
-.queue-filter-card {
-  padding-block: var(--space-7);
+.queue-filter-panel {
+  margin-bottom: calc(var(--space-2) * -1);
 }
 
-.queue-filter-card .toolbar-grid {
-  gap: var(--space-5) var(--space-6);
+.queue-filter-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.42fr);
+  align-items: end;
 }
 
-.queue-filter-card .group-kicker {
-  margin-bottom: 4px;
-}
-
-.queue-filter-card .field-label {
-  margin-bottom: 6px;
+.queue-filter-actions {
+  justify-content: flex-start;
 }
 
 .group-kicker {
@@ -1435,7 +1438,6 @@ textarea {
   gap: var(--space-3);
 }
 
-.pending-sla-btn,
 .audit-action-btn {
   min-height: 30px;
   padding: var(--space-2) var(--space-5);
@@ -3651,14 +3653,6 @@ textarea {
     gap: var(--space-5);
   }
 
-  .queue-filter-card {
-    padding: var(--space-7) var(--space-8);
-  }
-
-  .queue-filter-card .toolbar-grid {
-    gap: 8px;
-  }
-
   .queue-list-card {
     padding: var(--space-1) 0 var(--space-3);
   }
@@ -3749,10 +3743,6 @@ textarea {
   .record-details-body {
     gap: var(--space-3);
     padding-top: var(--space-3);
-  }
-
-  .queue-layout[data-mobile-priority="list"] .queue-list-card {
-    order: -1;
   }
 
   .toolbar-group-compact {
@@ -3928,8 +3918,8 @@ textarea {
     gap: 10px 16px;
   }
 
-  .queue-filter-card {
-    padding: 13px 14px;
+  .queue-filter-grid {
+    grid-template-columns: 1fr;
   }
 
   .settings-tab-btn {
@@ -4187,6 +4177,45 @@ textarea {
   margin-bottom: var(--space-3);
 }
 
+.deny-reason-chips-shell {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.deny-reason-chips-shell::before,
+.deny-reason-chips-shell::after {
+  bottom: calc(var(--space-3) + 2px);
+}
+
+.deny-reason-chips-shell::before {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--surface-card) 100%, transparent) 0%,
+      color-mix(in srgb, var(--surface-card) 88%, transparent) 52%,
+      color-mix(in srgb, var(--surface-card) 0%, transparent) 100%
+    );
+}
+
+.deny-reason-chips-shell::after {
+  background:
+    linear-gradient(
+      270deg,
+      color-mix(in srgb, var(--surface-card) 100%, transparent) 0%,
+      color-mix(in srgb, var(--surface-card) 88%, transparent) 52%,
+      color-mix(in srgb, var(--surface-card) 0%, transparent) 100%
+    );
+}
+
+.deny-reason-scroll-hint {
+  right: 6px;
+  bottom: 0;
+  width: 44px;
+}
+
 .subtabs.deny-reason-segment {
   display: flex;
   flex-wrap: nowrap;
@@ -4201,7 +4230,9 @@ textarea {
   background: transparent;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .subtabs.deny-reason-segment::-webkit-scrollbar {
@@ -4231,4 +4262,10 @@ textarea {
   border: 0;
   border-bottom: 2px solid color-mix(in srgb, var(--primary) 80%, white 20%);
   box-shadow: none;
+}
+
+@media (max-width: 760px) {
+  .deny-reason-chips-shell[data-scroll-right="true"] .deny-reason-segment {
+    padding-right: 42px;
+  }
 }

@@ -15,8 +15,8 @@ import {
   GLOBAL_BLOCKED_USERNAME_SETTING_NAMES,
   parseRedditUsernameList,
   splitRedditUsernameListAcrossSettings,
-} from '../src/shared/global-usernames.ts';
-import brandLogoUrl from './logo.png';
+} from '../shared/global-usernames.ts';
+import brandVxUrl from './brand-vx.png';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -76,10 +76,13 @@ const PHOTO_INSTRUCTION_LANGUAGE_COPY = Object.freeze({
 function createShell(root, inline) {
   root.innerHTML = `
     <div class="shell">
-      <div data-el="loading" class="loading-screen">
-        <div class="loading-copy">
+      <div data-el="loading" class="loading-screen" role="status" aria-live="polite">
+        <div class="loading-intro">
           ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
-          <p>${inline ? 'Loading verification panel...' : 'Loading Verification Hub...'}</p>
+          <img class="loading-intro-logo" src="${brandVxUrl}" alt="" />
+          <p class="loading-intro-brand">VouchX</p>
+          <h1>Loading verification hub</h1>
+          <div class="loading-bar" aria-hidden="true"><span></span></div>
         </div>
       </div>
       <div data-el="main" class="hub-main hidden">
@@ -908,7 +911,7 @@ export function mountHub(options = {}) {
   const submitWarningLinks = legalLinks.filter((item) => item.label !== 'How to use this app');
 
   if (refs.brandLogo) {
-    refs.brandLogo.src = brandLogoUrl;
+    refs.brandLogo.src = brandVxUrl;
     refs.brandLogo.addEventListener('load', () => {
       refs.brandLogo.classList.remove('hidden');
     });
@@ -1946,8 +1949,7 @@ export function mountHub(options = {}) {
         title: 'Verification is currently unavailable.',
         summary: 'Submissions have been temporarily disabled by the moderators.',
         context: disabledMessage || 'Please check back later for updates from the moderation team.',
-        actions: howToUseUrl ? ['requirements', 'learn-more'] : ['requirements'],
-        learnMoreUrl: howToUseUrl,
+        actions: [],
       };
     }
 
@@ -2234,14 +2236,34 @@ export function mountHub(options = {}) {
     closeRealtimeSubscription();
   });
 
-  refs.modPanelBtn.addEventListener('click', (event) => {
+  let modPanelLaunchResetTimerId = null;
+
+  function setModPanelLaunchPending(isPending) {
+    if (!refs.modPanelBtn) {
+      return;
+    }
+    if (modPanelLaunchResetTimerId) {
+      window.clearTimeout(modPanelLaunchResetTimerId);
+      modPanelLaunchResetTimerId = null;
+    }
+    refs.modPanelBtn.disabled = isPending;
+    refs.modPanelBtn.setAttribute('aria-busy', isPending ? 'true' : 'false');
+    refs.modPanelBtn.textContent = isPending ? 'Opening Mod Panel...' : 'Mod Panel';
+  }
+
+  refs.modPanelBtn.addEventListener('click', async (event) => {
     if (inline) {
       try {
         if (event instanceof MouseEvent) {
-          requestExpandedMode(event, 'modPanel');
+          setModPanelLaunchPending(true);
+          await requestExpandedMode(event, 'modPanel');
+          modPanelLaunchResetTimerId = window.setTimeout(() => {
+            setModPanelLaunchPending(false);
+          }, 2500);
           return;
         }
       } catch (error) {
+        setModPanelLaunchPending(false);
         showToast(error instanceof Error ? error.message : String(error), 'error');
       }
     }

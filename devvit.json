@@ -5,20 +5,19 @@
     "dir": "dist/client",
     "entrypoints": {
       "default": {
-        "entry": "webroot/index.html",
-        "height": "tall",
-        "inline": true
+        "entry": "index.html",
+        "height": "tall"
       },
       "hub": {
-        "entry": "webroot/hub.html",
+        "entry": "hub.html",
         "height": "tall"
       },
       "photoInstructions": {
-        "entry": "webroot/photo-instructions.html",
+        "entry": "photo-instructions.html",
         "height": "tall"
       },
       "modPanel": {
-        "entry": "webroot/mod-panel.html",
+        "entry": "mod-panel.html",
         "height": "tall"
       }
     }
@@ -28,12 +27,42 @@
     "entry": "index.cjs"
   },
   "triggers": {
-    "onModMail": "/internal/on-modmail"
+    "onModMail": "/internal/on-modmail",
+    "onAppInstall": "/internal/on-app-install",
+    "onAppUpgrade": "/internal/on-app-upgrade"
   },
-  "blocks": {
-    "entry": "src/main.tsx",
-    "settings": {
-      "enable": false
+  "menu": {
+    "items": [
+      {
+        "label": "Create Verification Hub (VouchX)",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/create-verification-hub"
+      },
+      {
+        "label": "Purge Audit Log",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/purge-audit-log"
+      },
+      {
+        "label": "Remove Verification Hub Post",
+        "description": "Removes this verification post from the subreddit.",
+        "location": "post",
+        "postFilter": "currentApp",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/remove-verification-hub-post"
+      }
+    ]
+  },
+  "forms": {
+    "createVerificationHub": "/internal/form/create-verification-hub-submit",
+    "purgeAuditLog": "/internal/form/purge-audit-log-submit",
+    "removeVerificationHubPost": "/internal/form/remove-verification-hub-post-submit"
+  },
+  "scheduler": {
+    "tasks": {
+      "vouchx:user-validation-reconcile": "/internal/scheduler/user-validation-reconcile"
     }
   },
   "permissions": {
@@ -343,7 +372,11 @@
   "dev": {
     "subreddit": "vouchx_dev"
   },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
   "marketingAssets": {
-    "icon": "webroot/logo.png"
+    "icon": "src/client/app-icon.png"
   }
 }
