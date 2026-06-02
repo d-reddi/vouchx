@@ -109,7 +109,7 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.0
+### v1.5.1
 
 #### UI Changes
 
@@ -119,9 +119,12 @@ Full changelog:
 - Settings experience streamlined with cleaner navigation, lighter section structure, unified theme styling, and improved template editing.
 - Photo instructions are now optimized for mobile review, with improved language picker behavior and better use of available space.
 - Added optional verification requirement setting for communicating sub-level posting / commenting restrictions.
+- Updated VouchX branding with the new VX logo treatment for the hub, loading state, and app/profile icon.
+- Improved the hub loading experience with a branded loading state for inline Reddit views.
 
 #### Technical Changes
 
+- Updated VouchX to Devvit 0.13.0 and the current Devvit Web app structure.
 - Improved handling of transient Reddit/Devvit transport errors, including GOAWAY, cancelled calls, and retry-exhausted responses.
 - Improved moderator permission lookup resilience with retry behavior before falling back to cached permissions.
 - Updated queue lock TTL behavior.

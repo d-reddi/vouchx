@@ -16,7 +16,7 @@ import {
   parseRedditUsernameList,
   splitRedditUsernameListAcrossSettings,
 } from '../shared/global-usernames.ts';
-import brandLogoUrl from './logo.png';
+import brandVxUrl from './brand-vx.png';
 import { HOW_TO_USE_APP_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -79,7 +79,7 @@ function createShell(root, inline) {
       <div data-el="loading" class="loading-screen" role="status" aria-live="polite">
         <div class="loading-intro">
           ${WORKTREE_LABEL ? `<p class="hub-worktree-badge loading-worktree-badge">WT ${escapeHtml(WORKTREE_LABEL)}</p>` : ''}
-          <img class="loading-intro-logo" src="${brandLogoUrl}" alt="" />
+          <img class="loading-intro-logo" src="${brandVxUrl}" alt="" />
           <p class="loading-intro-brand">VouchX</p>
           <h1>Loading verification hub</h1>
           <div class="loading-bar" aria-hidden="true"><span></span></div>
@@ -911,7 +911,7 @@ export function mountHub(options = {}) {
   const submitWarningLinks = legalLinks.filter((item) => item.label !== 'How to use this app');
 
   if (refs.brandLogo) {
-    refs.brandLogo.src = brandLogoUrl;
+    refs.brandLogo.src = brandVxUrl;
     refs.brandLogo.addEventListener('load', () => {
       refs.brandLogo.classList.remove('hidden');
     });
