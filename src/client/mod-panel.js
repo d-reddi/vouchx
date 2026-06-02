@@ -30,6 +30,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const templateSubtabsShell = document.getElementById('template-subtabs-shell');
   const templateSubtabsNav = document.getElementById('template-subtabs');
   const templateSubtabsScrollHint = document.getElementById('template-subtabs-scroll-hint');
+  const denyReasonChipsShell = document.getElementById('deny-reason-chips-shell');
+  const denyReasonChipsNav = document.getElementById('deny-reason-chips');
+  const denyReasonChipsScrollHint = document.getElementById('deny-reason-chips-scroll-hint');
   const settingsPanels = {
     general: document.getElementById('settings-panel-general'),
     instructions: document.getElementById('settings-panel-instructions'),
@@ -52,11 +55,13 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const pendingFlairWarningText = document.getElementById('pending-flair-warning-text');
   const pendingFlairWarningSettingsBtn = document.getElementById('pending-flair-warning-settings-btn');
   const pendingFlairWarningGuideBtn = document.getElementById('pending-flair-warning-guide-btn');
-  const pendingLayout = document.getElementById('pending-layout');
+  const pendingFilterPanel = document.getElementById('pending-filter-panel');
+  const pendingFilterSummary = document.getElementById('pending-filter-summary');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSearchHint = document.getElementById('pending-search-hint');
-  const pendingSlaButtons = Array.from(document.querySelectorAll('.pending-sla-btn'));
+  const pendingSlaSelect = document.getElementById('pending-sla-filter');
+  const pendingClearFilterBtn = document.getElementById('pending-clear-filter-btn');
   const batchReviewToolbar = document.getElementById('batch-review-toolbar');
   const batchSelectedCount = document.getElementById('batch-selected-count');
   const batchApprovalFlairWrap = document.getElementById('batch-approval-flair-wrap');
@@ -1056,6 +1061,46 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
 
   let activeDenyReasonChip = '';
 
+  function scrollDenyReasonChipIntoView(reasonId) {
+    const chipsContainer = document.getElementById('deny-reason-chips');
+    if (!chipsContainer) {
+      return;
+    }
+    const chip = Array.from(chipsContainer.querySelectorAll('[data-deny-reason-chip]')).find(
+      (item) => String(item.dataset.denyReasonChip || '') === reasonId
+    );
+    if (!chip) {
+      return;
+    }
+
+    const inset = 24;
+    const visibleLeft = chipsContainer.scrollLeft;
+    const visibleRight = visibleLeft + chipsContainer.clientWidth;
+    const chipLeft = chip.offsetLeft;
+    const chipRight = chipLeft + chip.offsetWidth;
+    let nextScrollLeft = visibleLeft;
+
+    if (chipLeft < visibleLeft + inset) {
+      nextScrollLeft = chipLeft - inset;
+    } else if (chipRight > visibleRight - inset) {
+      nextScrollLeft = chipRight - chipsContainer.clientWidth + inset;
+    }
+
+    if (Math.abs(nextScrollLeft - visibleLeft) < 1) {
+      updateSettingsTabsScrollAffordance();
+      return;
+    }
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    chipsContainer.scrollTo({
+      left: Math.max(0, nextScrollLeft),
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+    });
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
+  }
+
   function setActiveDenyReasonChip(reasonId) {
     activeDenyReasonChip = reasonId;
     const chipsContainer = document.getElementById('deny-reason-chips');
@@ -1101,6 +1146,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     const firstEnabled = enabled[0] ? enabled[0].id : '';
     const stillEnabled = enabled.some((item) => item.id === activeDenyReasonChip);
     setActiveDenyReasonChip(stillEnabled ? activeDenyReasonChip : firstEnabled);
+    window.requestAnimationFrame(() => {
+      updateSettingsTabsScrollAffordance();
+    });
   }
 
   function initDenyReasonChips() {
@@ -1114,6 +1162,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
         return;
       }
       setActiveDenyReasonChip(String(target.dataset.denyReasonChip || ''));
+      window.requestAnimationFrame(() => {
+        scrollDenyReasonChipIntoView(String(target.dataset.denyReasonChip || ''));
+      });
     });
   }
 
@@ -2881,6 +2932,14 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       templateSubtabsScrollHint,
       settingsVisible && activeSettingsTab === 'templates'
     );
+    updateScrollableNavAffordance(
+      denyReasonChipsShell,
+      denyReasonChipsNav,
+      denyReasonChipsScrollHint,
+      settingsVisible &&
+        activeSettingsTab === 'templates' &&
+        Boolean(document.getElementById('template-subpanel-denial') && !document.getElementById('template-subpanel-denial').classList.contains('hidden'))
+    );
   }
 
   function setSettingsTab(tabName) {
@@ -3093,6 +3152,55 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     pendingSearchHint.classList.toggle('hidden', !visible);
   }
 
+  function getPendingFilterActiveCount() {
+    let count = 0;
+    if (pendingUsernameFilter) {
+      count += 1;
+    }
+    if (selectedPendingSlaFilter !== 'all') {
+      count += 1;
+    }
+    return count;
+  }
+
+  function getPendingSlaFilterLabel(value) {
+    if (value === 'lt24') {
+      return '<24h';
+    }
+    if (value === '24to72') {
+      return '24-72h';
+    }
+    if (value === 'gt72') {
+      return '>72h';
+    }
+    return 'All requests';
+  }
+
+  function updatePendingFilterSummary() {
+    if (pendingSlaSelect && pendingSlaSelect.value !== selectedPendingSlaFilter) {
+      pendingSlaSelect.value = selectedPendingSlaFilter;
+    }
+    const activeCount = getPendingFilterActiveCount();
+    if (pendingFilterPanel) {
+      pendingFilterPanel.classList.toggle('history-filter-panel-active', activeCount > 0);
+    }
+    if (!pendingFilterSummary) {
+      return;
+    }
+    if (activeCount === 0) {
+      pendingFilterSummary.textContent = 'All requests';
+      return;
+    }
+    const parts = [];
+    if (pendingUsernameFilter) {
+      parts.push(`u/${pendingUsernameFilter}`);
+    }
+    if (selectedPendingSlaFilter !== 'all') {
+      parts.push(getPendingSlaFilterLabel(selectedPendingSlaFilter));
+    }
+    pendingFilterSummary.textContent = parts.join(' · ');
+  }
+
   function getPendingSortScore(item) {
     const score = new Date(item && item.submittedAt ? item.submittedAt : '').getTime();
     return Number.isFinite(score) ? score : 0;
@@ -3167,12 +3275,11 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     return getPendingSlaBucket(item) === selectedPendingSlaFilter;
   }
 
-  function updatePendingSlaButtonStyles() {
-    for (const button of pendingSlaButtons) {
-      const isActive = String(button.dataset.sla || 'all') === selectedPendingSlaFilter;
-      button.classList.toggle('btn-primary', isActive);
-      button.classList.toggle('btn-secondary', !isActive);
+  function syncPendingFilterControls() {
+    if (pendingSlaSelect && pendingSlaSelect.value !== selectedPendingSlaFilter) {
+      pendingSlaSelect.value = selectedPendingSlaFilter;
     }
+    updatePendingFilterSummary();
   }
 
   function getFilteredPendingItems() {
@@ -3943,7 +4050,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
 
   function renderPending() {
-    updatePendingSlaButtonStyles();
+    syncPendingFilterControls();
     setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
     pruneSelectedPendingIds();
@@ -3958,9 +4065,6 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       }
     }
     const hasPendingItems = Boolean(state && Array.isArray(state.pending) && state.pending.length > 0);
-    if (pendingLayout) {
-      pendingLayout.dataset.mobilePriority = hasPendingItems ? 'list' : 'filters';
-    }
     if (!hasPendingItems) {
       syncBatchToolbarState();
       renderEmptyState(pendingList, 'No pending verifications', 'New verification requests will appear here.');
@@ -6193,18 +6297,33 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
         return;
       }
       pendingUsernameFilter = nextFilter;
+      updatePendingFilterSummary();
       renderPending();
     });
   }
 
-  if (pendingSlaButtons.length) {
-    for (const button of pendingSlaButtons) {
-      button.addEventListener('click', () => {
-        selectedPendingSlaFilter = String(button.dataset.sla || 'all');
-        updatePendingSlaButtonStyles();
-        renderPending();
-      });
-    }
+  if (pendingSlaSelect) {
+    pendingSlaSelect.addEventListener('change', () => {
+      selectedPendingSlaFilter = pendingSlaSelect.value || 'all';
+      updatePendingFilterSummary();
+      renderPending();
+    });
+  }
+
+  if (pendingClearFilterBtn) {
+    pendingClearFilterBtn.addEventListener('click', () => {
+      pendingUsernameFilter = '';
+      selectedPendingSlaFilter = 'all';
+      if (pendingSearchUserInput) {
+        pendingSearchUserInput.value = '';
+      }
+      setPendingSearchHintVisible(false);
+      updatePendingFilterSummary();
+      renderPending();
+      if (pendingFilterPanel && getPendingFilterActiveCount() === 0) {
+        pendingFilterPanel.open = false;
+      }
+    });
   }
 
   if (batchApprovalFlairSelect) {
@@ -6760,6 +6879,11 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   }
   if (templateSubtabsNav) {
     templateSubtabsNav.addEventListener('scroll', () => {
+      updateSettingsTabsScrollAffordance();
+    }, { passive: true });
+  }
+  if (denyReasonChipsNav) {
+    denyReasonChipsNav.addEventListener('scroll', () => {
       updateSettingsTabsScrollAffordance();
     }, { passive: true });
   }

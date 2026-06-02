@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Moderation Center</title>
-    <script type="module" src="webroot/mod-panel-bootstrap.js"></script>
-    <link rel="stylesheet" href="webroot/mod-panel.css" />
+    <script type="module" src="./mod-panel-bootstrap.js"></script>
+    <link rel="stylesheet" href="./mod-panel.css" />
   </head>
   <body class="mod-panel-page">
     <div class="app-shell">
@@ -72,26 +72,34 @@
               <button id="pending-flair-warning-guide-btn" class="btn btn-secondary hidden" type="button">Moderator Quick Start</button>
             </div>
           </div>
-          <div id="pending-layout" class="queue-layout" data-mobile-priority="filters">
-            <div class="content-card queue-filter-card">
-              <div class="toolbar-grid">
-                <div class="field-stack toolbar-group">
-                  <p class="group-kicker">Filter</p>
-                  <label class="field-label" for="pending-search-user">Username</label>
-                  <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
-                  <p id="pending-search-hint" class="muted small hidden">Type at least 3 characters to filter the queue.</p>
-                </div>
-                <div class="field-stack toolbar-group toolbar-group-compact">
-                  <p class="group-kicker">Queue age</p>
-                  <div class="row button-row filter-chip-row">
-                    <button id="pending-sla-all" class="btn btn-primary pending-sla-btn" data-sla="all">All</button>
-                    <button id="pending-sla-lt24" class="btn btn-secondary pending-sla-btn" data-sla="lt24">&lt;24h</button>
-                    <button id="pending-sla-24to72" class="btn btn-secondary pending-sla-btn" data-sla="24to72">24-72h</button>
-                    <button id="pending-sla-gt72" class="btn btn-secondary pending-sla-btn" data-sla="gt72">&gt;72h</button>
+          <div class="queue-layout">
+            <details id="pending-filter-panel" class="history-filter-panel queue-filter-panel">
+              <summary class="history-filter-summary">
+                <span class="history-filter-title">Filters</span>
+                <span id="pending-filter-summary" class="history-filter-count">All requests</span>
+              </summary>
+              <div class="history-filter-body queue-filter-body">
+                <div class="field-grid queue-filter-grid">
+                  <div class="field-stack">
+                    <label class="field-label" for="pending-search-user">Username</label>
+                    <input id="pending-search-user" class="field-input" type="text" placeholder="Type username (no u/)" />
+                    <p id="pending-search-hint" class="muted small hidden">Type at least 3 characters to filter the queue.</p>
+                  </div>
+                  <div class="field-stack">
+                    <label class="field-label" for="pending-sla-filter">Queue age</label>
+                    <select id="pending-sla-filter" class="field-select">
+                      <option value="all">All requests</option>
+                      <option value="lt24">&lt;24h</option>
+                      <option value="24to72">24-72h</option>
+                      <option value="gt72">&gt;72h</option>
+                    </select>
                   </div>
                 </div>
+                <div class="row history-filter-actions queue-filter-actions">
+                  <button id="pending-clear-filter-btn" class="btn btn-secondary" type="button">Clear</button>
+                </div>
               </div>
-            </div>
+            </details>
             <div class="content-card queue-list-card">
               <div id="batch-review-toolbar" class="batch-review-toolbar hidden" aria-live="polite">
                 <div class="batch-review-summary">
@@ -749,7 +757,15 @@
 
                 <div class="deny-reason-segment-wrap">
                   <span class="group-kicker deny-reason-segment-label">Denial reason</span>
-                  <div class="subtabs segmented-control deny-reason-segment" id="deny-reason-chips" role="tablist" aria-label="Denial reason"></div>
+                  <div
+                    id="deny-reason-chips-shell"
+                    class="deny-reason-chips-shell"
+                    data-scroll-left="false"
+                    data-scroll-right="false"
+                  >
+                    <div class="subtabs segmented-control deny-reason-segment" id="deny-reason-chips" role="tablist" aria-label="Denial reason"></div>
+                    <div id="deny-reason-chips-scroll-hint" class="deny-reason-scroll-hint nav-scroll-hint hidden" aria-hidden="true"></div>
+                  </div>
                 </div>
 
                 <div class="field-stack">
@@ -1115,6 +1131,6 @@
       </div>
     </div>
 
-    <script type="module" src="webroot/mod-panel.js"></script>
+    <script type="module" src="./mod-panel.js"></script>
   </body>
 </html>

@@ -377,6 +377,6 @@
     "dev": "vite build --watch"
   },
   "marketingAssets": {
-    "icon": "webroot/logo.png"
+    "icon": "src/client/logo.png"
   }
 }
