@@ -47,6 +47,7 @@ import {
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
   refreshConfiguredFlairTemplateCache,
+  shouldReconcileApprovedViewerFlair,
   shouldViewerDisplayVerifiedState,
   submitVerification,
   toModPanelState,
@@ -96,6 +97,7 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
     validationFailureCount: 0,
     terminalValidationFailureCount: 0,
     lastTtlBumpAt: null,
+    retentionDays: null,
     lastAppliedFlairTemplateId: null,
     lastFlairReconcileAt: null,
     ...overrides,
@@ -3618,6 +3620,101 @@ test('shouldViewerDisplayVerifiedState keeps approved users verified when flair 
     ),
     true
   );
+});
+
+// 'abc-123' satisfies isLikelyFlairTemplateId: lowercase alphanumeric + hyphen, has digit, has hyphen.
+const RECONCILE_TEST_TEMPLATE_ID = 'abc-123';
+
+function buildFlairReconcileFixture({
+  lastAppliedFlairTemplateId = null as string | null,
+  flairTemplateId = RECONCILE_TEST_TEMPLATE_ID,
+  detectedTemplateId = '',
+  flairText = '',
+  flairCssClass = '',
+  lookupState = 'confirmed' as 'confirmed' | 'confirmed_absent' | 'unavailable',
+  source = 'viewer-snapshot:no-match',
+} = {}) {
+  const record = buildRecord({
+    status: 'approved',
+    lastAppliedFlairTemplateId,
+  });
+  const config = { ...buildRuntimeConfig(), flairTemplateId, flairCssClass: '' };
+  const flairCheck = {
+    verified: false,
+    configuredTemplateId: flairTemplateId,
+    detectedTemplateId,
+    source,
+    error: null,
+  };
+  const viewerFlairSnapshot = {
+    userId: 't2_abc',
+    lookupState,
+    flairTemplateId: detectedTemplateId,
+    flairText,
+    flairCssClass,
+    error: null,
+  };
+  return { record, config, flairCheck, viewerFlairSnapshot };
+}
+
+test('shouldReconcileApprovedViewerFlair repairs legacy record (null lastAppliedFlairTemplateId) when flair is completely absent', () => {
+  const { record, config, flairCheck, viewerFlairSnapshot } = buildFlairReconcileFixture({
+    lastAppliedFlairTemplateId: null,
+    detectedTemplateId: '',
+    flairText: '',
+    flairCssClass: '',
+  });
+  assert.equal(shouldReconcileApprovedViewerFlair(record as never, config, flairCheck, viewerFlairSnapshot as never), true);
+});
+
+test('shouldReconcileApprovedViewerFlair skips legacy record when some flair is present (cannot distinguish intentional from accidental)', () => {
+  const withTemplate = buildFlairReconcileFixture({ lastAppliedFlairTemplateId: null, detectedTemplateId: 'flair_other_xyz' });
+  assert.equal(
+    shouldReconcileApprovedViewerFlair(withTemplate.record as never, withTemplate.config, withTemplate.flairCheck, withTemplate.viewerFlairSnapshot as never),
+    false,
+  );
+
+  const withText = buildFlairReconcileFixture({ lastAppliedFlairTemplateId: null, flairText: 'Verified' });
+  assert.equal(
+    shouldReconcileApprovedViewerFlair(withText.record as never, withText.config, withText.flairCheck, withText.viewerFlairSnapshot as never),
+    false,
+  );
+
+  const withCss = buildFlairReconcileFixture({ lastAppliedFlairTemplateId: null, flairCssClass: 'verified' });
+  assert.equal(
+    shouldReconcileApprovedViewerFlair(withCss.record as never, withCss.config, withCss.flairCheck, withCss.viewerFlairSnapshot as never),
+    false,
+  );
+});
+
+test('shouldReconcileApprovedViewerFlair skips legacy record when flair snapshot is unavailable', () => {
+  const { record, config, flairCheck, viewerFlairSnapshot } = buildFlairReconcileFixture({
+    lastAppliedFlairTemplateId: null,
+    detectedTemplateId: '',
+    flairText: '',
+    flairCssClass: '',
+    lookupState: 'unavailable',
+    source: 'viewer-snapshot:unavailable',
+  });
+  assert.equal(shouldReconcileApprovedViewerFlair(record as never, config, { ...flairCheck, source: 'viewer-snapshot:unavailable' }, { ...viewerFlairSnapshot, lookupState: 'unavailable' } as never), false);
+});
+
+test('shouldReconcileApprovedViewerFlair normal record with known lastAppliedFlairTemplateId still follows existing logic', () => {
+  // Flair is correct — no repair needed.
+  const correct = buildFlairReconcileFixture({
+    lastAppliedFlairTemplateId: RECONCILE_TEST_TEMPLATE_ID,
+    detectedTemplateId: RECONCILE_TEST_TEMPLATE_ID,
+  });
+  assert.equal(shouldReconcileApprovedViewerFlair(correct.record as never, correct.config, correct.flairCheck, correct.viewerFlairSnapshot as never), false);
+
+  // Flair is completely absent — repair needed.
+  const absent = buildFlairReconcileFixture({
+    lastAppliedFlairTemplateId: RECONCILE_TEST_TEMPLATE_ID,
+    detectedTemplateId: '',
+    flairText: '',
+    flairCssClass: '',
+  });
+  assert.equal(shouldReconcileApprovedViewerFlair(absent.record as never, absent.config, absent.flairCheck, absent.viewerFlairSnapshot as never), true);
 });
 
 test('isViewerAwaitingFlairPropagation is only true for recent approved records that have not confirmed flair yet', async () => {

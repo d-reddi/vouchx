@@ -456,8 +456,16 @@ export function shouldReconcileApprovedViewerFlair(
   }
 
   const lastAppliedTemplateId = normalizeTemplateId(latestRecord.lastAppliedFlairTemplateId ?? '');
-  if (!lastAppliedTemplateId || !isLikelyFlairTemplateId(lastAppliedTemplateId)) {
-    return false;
+  const hasLastApplied = Boolean(lastAppliedTemplateId) && isLikelyFlairTemplateId(lastAppliedTemplateId);
+
+  if (!hasLastApplied) {
+    // Legacy record: no known applied template. Only repair if flair is completely absent —
+    // without knowing what was originally applied we cannot safely distinguish an intentional
+    // mod flair change from an accidental removal, so we stay conservative.
+    const detectedTemplateId = normalizeTemplateId(flairCheck.detectedTemplateId || viewerFlairSnapshot.flairTemplateId);
+    const detectedText = viewerFlairSnapshot.flairText.trim().toLowerCase();
+    const detectedCss = normalizeCssClass(viewerFlairSnapshot.flairCssClass);
+    return !detectedTemplateId && !detectedText && !detectedCss;
   }
 
   const detectedTemplateId = normalizeTemplateId(flairCheck.detectedTemplateId || viewerFlairSnapshot.flairTemplateId);
