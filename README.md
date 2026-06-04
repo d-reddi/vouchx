@@ -81,7 +81,7 @@ Track moderator activity and verification volume.
 ## Data & Retention
 
 - Pending / denied records: **45 days**  
-- Approved users: **90-day rolling retention**  
+- Approved users: **180-day rolling retention**  
 - Audit logs: **45 days**  
 
 Data may also be removed earlier in the following cases:
@@ -108,6 +108,18 @@ These background processes help ensure data is kept up to date and not retained 
 Full changelog:  
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
+
+### v1.5.2
+
+#### Critical Fix:
+- Fixes a Cron job name mismatch that prevented the nightly user validation reconcile job from running.
+
+#### Other Changes:
+
+- Fixes an issue where the auto flair repair could silently skip approved users verified before VouchX v1.3.0
+- TTL for newly approved records extended to 180 days to better support members who browse infrequently. Records for previously approved users are unaffected.
+
+---
 
 ### v1.5.1
 

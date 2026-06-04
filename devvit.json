@@ -62,7 +62,7 @@
   },
   "scheduler": {
     "tasks": {
-      "vouchx:user-validation-reconcile": "/internal/scheduler/user-validation-reconcile"
+      "photo-verification:user-validation-reconcile": "/internal/scheduler/user-validation-reconcile"
     }
   },
   "permissions": {

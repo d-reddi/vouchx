@@ -22,6 +22,7 @@ import {
   VALIDATION_BATCH_SIZE,
   VALIDATION_CHECK_INTERVAL_DAYS,
   VALIDATION_HARD_EXPIRY_DAYS,
+  LEGACY_VERIFIED_RECORD_RETENTION_DAYS,
   VERIFIED_RECORD_RETENTION_DAYS,
   VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS,
 } from './constants.ts';
@@ -120,7 +121,12 @@ export async function pruneHistoryOlderThanDays(
 
     if (
       parsed.status === 'approved' &&
-      getApprovedRecordRetentionAnchorMs(parsed, nowMs) + VERIFIED_RECORD_RETENTION_DAYS * MILLIS_PER_DAY > nowMs
+      getApprovedRecordRetentionAnchorMs(parsed, nowMs) +
+        (typeof parsed.retentionDays === 'number' && parsed.retentionDays > 0
+          ? parsed.retentionDays
+          : LEGACY_VERIFIED_RECORD_RETENTION_DAYS) *
+          MILLIS_PER_DAY >
+        nowMs
     ) {
       continue;
     }

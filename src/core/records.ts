@@ -13,6 +13,7 @@ import {
   MILLIS_PER_DAY,
   STALE_RECORD_INDEX_SWEEP_BATCH_SIZE,
   STORAGE_METER_CAP_BYTES,
+  LEGACY_VERIFIED_RECORD_RETENTION_DAYS,
   VERIFIED_RECORD_RETENTION_DAYS,
 } from './constants.ts';
 import { normalizeTemplateId } from './flair.ts';
@@ -498,7 +499,11 @@ export async function setRecord(context: RedisContext, subredditId: string, reco
   if (recordToStore.status === 'approved') {
     const lastTtlBumpAt = getApprovedRecordRetentionAnchorMs(recordToStore, nowMs);
     recordToStore.lastTtlBumpAt = lastTtlBumpAt;
-    expirationMs = lastTtlBumpAt + VERIFIED_RECORD_RETENTION_DAYS * MILLIS_PER_DAY;
+    const retentionDays =
+      typeof recordToStore.retentionDays === 'number' && recordToStore.retentionDays > 0
+        ? recordToStore.retentionDays
+        : LEGACY_VERIFIED_RECORD_RETENTION_DAYS;
+    expirationMs = lastTtlBumpAt + retentionDays * MILLIS_PER_DAY;
   }
   await context.redis.set(verificationRecordKey(subredditId, record.id), JSON.stringify(recordToStore), {
     expiration: new Date(expirationMs),
@@ -570,6 +575,10 @@ export function parseRecord(payload: string): VerificationRecord | null {
       lastTtlBumpAt:
         typeof parsed.lastTtlBumpAt === 'number' && Number.isFinite(parsed.lastTtlBumpAt)
           ? Math.max(0, Math.floor(parsed.lastTtlBumpAt))
+          : null,
+      retentionDays:
+        typeof parsed.retentionDays === 'number' && Number.isFinite(parsed.retentionDays) && parsed.retentionDays > 0
+          ? Math.floor(parsed.retentionDays)
           : null,
       lastAppliedFlairTemplateId:
         typeof parsed.lastAppliedFlairTemplateId === 'string'

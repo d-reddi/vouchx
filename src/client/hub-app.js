@@ -1391,6 +1391,8 @@ export function mountHub(options = {}) {
         refs.submitWarningCancel.removeEventListener('click', onCancel);
         refs.submitWarningContinue.removeEventListener('click', onContinue);
         refs.submitWarningModal.removeEventListener('click', onBackdrop);
+        refs.submitWarningContinue.disabled = false;
+        refs.submitWarningContinue.title = '';
         resolve(result);
       };
 
@@ -1420,6 +1422,11 @@ export function mountHub(options = {}) {
       refs.submitWarningContinue.addEventListener('click', onContinue);
       refs.submitWarningModal.addEventListener('click', onBackdrop);
       refs.submitWarningModal.classList.remove('hidden');
+      const demoMode = isVouchxHomeSubreddit(hubState?.subredditName ?? '');
+      if (demoMode) {
+        refs.submitWarningContinue.disabled = true;
+        refs.submitWarningContinue.title = 'Verification submissions are disabled in r/vouchx. This subreddit is for demonstration purposes only.';
+      }
     });
   }
 
@@ -2034,7 +2041,7 @@ export function mountHub(options = {}) {
       !state.requiresInitialSetup &&
       !(state.userLatest && state.userLatest.status === 'pending')
     ) {
-      infoText = 'This is the VouchX home subreddit. Verification submissions are disabled here.';
+      infoText = 'This is the VouchX home subreddit. Verification submissions are disabled here — this subreddit is for demonstration purposes only.';
     } else if (awaitingFlairPropagation) {
       commandTitle = 'Approval syncing';
       infoText = 'Your approval was recorded. Verified flair is still syncing and should update shortly.';
@@ -2113,16 +2120,8 @@ export function mountHub(options = {}) {
         })
       );
       const submitButton = makeButton(submitLabel, 'btn-primary', (event) => {
-        if (submissionsDisabledForHomeSubreddit) {
-          showToast('Verification submissions are disabled in r/vouchx.', 'info');
-          return;
-        }
         void openSubmitForm(event);
       });
-      if (submissionsDisabledForHomeSubreddit) {
-        submitButton.disabled = true;
-        submitButton.title = 'Verification submissions are disabled in r/vouchx.';
-      }
       refs.actionRow.appendChild(submitButton);
     }
 

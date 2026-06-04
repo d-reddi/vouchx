@@ -30,7 +30,7 @@ import {
   setManualBlockedUserEntry,
   unblockUserForModerator,
 } from './blocking.ts';
-import { BATCH_REVIEW_CONCURRENCY, HISTORY_RETENTION_DAYS, MAX_BATCH_REVIEW_ITEMS } from './constants.ts';
+import { BATCH_REVIEW_CONCURRENCY, HISTORY_RETENTION_DAYS, MAX_BATCH_REVIEW_ITEMS, VERIFIED_RECORD_RETENTION_DAYS } from './constants.ts';
 import { toPendingPanelItem } from './dashboard.ts';
 import { configuredApprovalTemplateIds, isLikelyFlairTemplateId, normalizeTemplateId } from './flair.ts';
 import {
@@ -350,6 +350,7 @@ export async function approveVerification(
       validationFailureCount: 0,
       terminalValidationFailureCount: 0,
       lastTtlBumpAt: Date.now(),
+      retentionDays: VERIFIED_RECORD_RETENTION_DAYS,
       lastAppliedFlairTemplateId: normalizeTemplateId(flairResult.appliedTemplateId ?? templateIdForApproval),
       lastFlairReconcileAt: null,
     };

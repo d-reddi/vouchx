@@ -37,6 +37,7 @@ export {
   isViewerAwaitingFlairPropagation,
   loadApprovalFlairOptionsForSettings,
   refreshConfiguredFlairTemplateCache,
+  shouldReconcileApprovedViewerFlair,
   shouldViewerDisplayVerifiedState,
   validateFlairTemplateId,
   validateFlairTemplateIdForSubreddit,

@@ -41,7 +41,12 @@ export const HISTORY_RETENTION_DAYS = 45;
 
 export const AUDIT_RETENTION_DAYS = 45;
 
-export const VERIFIED_RECORD_RETENTION_DAYS = 90;
+// Retention window agreed to in the original ToC. Used as the fallback for records
+// that pre-date the retentionDays field and must not be silently extended.
+export const LEGACY_VERIFIED_RECORD_RETENTION_DAYS = 90;
+
+// Retention window for records approved under the current policy.
+export const VERIFIED_RECORD_RETENTION_DAYS = 180;
 
 export const VERIFIED_RECORD_TTL_BUMP_INTERVAL_MS = MILLIS_PER_DAY;
 

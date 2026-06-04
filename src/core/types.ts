@@ -103,6 +103,7 @@ export type VerificationRecord = {
   validationFailureCount?: number;
   terminalValidationFailureCount?: number;
   lastTtlBumpAt?: number | null;
+  retentionDays?: number | null;
   lastAppliedFlairTemplateId?: string | null;
   lastFlairReconcileAt?: number | null;
 };
