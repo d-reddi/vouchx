@@ -683,6 +683,7 @@ export type ModPanelStatePayload = {
   canOpenInstallSettings: boolean;
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
+  requiresInitialSetup: boolean;
   flairTemplateValidation: FlairTemplateValidationState;
   pendingCount: number;
   pending: PendingPanelItem[];

@@ -60,6 +60,28 @@
         <button class="tab-btn hidden" data-tab="settings">Settings</button>
       </nav>
 
+      <div id="wizard-banner" class="wizard-banner hidden" role="status" aria-live="polite">
+        <div id="wizard-banner-inner" class="wizard-banner-inner">
+          <div class="wizard-banner-head">
+            <div class="wizard-banner-head-left">
+              <span id="wizard-step-badge" class="wizard-step-badge"></span>
+              <strong id="wizard-banner-title" class="wizard-banner-title"></strong>
+            </div>
+            <button id="wizard-minimize-btn" class="btn btn-quiet wizard-minimize-btn" type="button" aria-label="Minimize setup guide">Minimize</button>
+          </div>
+          <p id="wizard-banner-body" class="wizard-banner-body"></p>
+          <div id="wizard-banner-extra" class="wizard-banner-extra hidden"></div>
+          <div class="row wizard-banner-actions">
+            <button id="wizard-back-btn" class="btn btn-secondary hidden" type="button">← Back</button>
+            <button id="wizard-next-btn" class="btn btn-primary" type="button">Next →</button>
+          </div>
+        </div>
+        <div id="wizard-chip" class="wizard-chip hidden">
+          <span id="wizard-chip-label" class="wizard-chip-label"></span>
+          <button id="wizard-expand-btn" class="btn btn-quiet" type="button">Resume →</button>
+        </div>
+      </div>
+
       <main id="main-content" class="hidden">
         <section id="tab-pending" class="tab-panel">
           <div id="pending-flair-warning" class="content-card panel-warning panel-warning-error hidden" role="alert">
@@ -395,6 +417,8 @@
                 </label>
               </div>
 
+              <div id="wizard-inline-detail" class="wizard-inline-detail hidden" role="status" aria-live="polite"></div>
+
               <div class="form-section">
                 <h4 class="minor-heading">Flair Setup</h4>
                 <div id="primary-approval-flair-row" class="field-grid">
@@ -462,7 +486,7 @@
 
               <div class="form-section">
                 <h4 class="minor-heading">Submission requirements</h4>
-                <div class="field-grid">
+                <div id="required-photo-count-row" class="field-grid">
                   <div class="field-stack">
                     <label class="field-label" for="required-photo-count">Required verification photos</label>
                     <select id="required-photo-count" class="field-select">
@@ -755,7 +779,7 @@
                   </details>
                 </label>
 
-                <div class="deny-reason-segment-wrap">
+                <div id="deny-reason-segment-wrap" class="deny-reason-segment-wrap">
                   <span class="group-kicker deny-reason-segment-label">Denial reason</span>
                   <div
                     id="deny-reason-chips-shell"
@@ -1127,6 +1151,21 @@
         <div class="row">
           <button id="textarea-link-cancel-btn" class="btn btn-secondary" type="button">Cancel</button>
           <button id="textarea-link-insert-btn" class="btn btn-primary" type="button">Insert Link</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="wizard-overlay" class="wizard-overlay hidden"></div>
+    <div id="wizard-spotlight-ring" class="wizard-spotlight-ring hidden" aria-hidden="true"></div>
+
+    <div id="wizard-modal" class="wizard-modal dialog-modal hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-modal-title">
+      <div class="dialog-card wizard-dialog-card">
+        <p id="wizard-modal-kicker" class="wizard-modal-kicker hidden"></p>
+        <h2 id="wizard-modal-title" class="wizard-modal-title"></h2>
+        <p id="wizard-modal-body" class="wizard-modal-body"></p>
+        <div id="wizard-modal-extras" class="wizard-modal-extras hidden"></div>
+        <div class="row wizard-modal-actions">
+          <button id="wizard-modal-btn" class="btn btn-primary" type="button"></button>
         </div>
       </div>
     </div>

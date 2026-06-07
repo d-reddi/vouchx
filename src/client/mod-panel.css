@@ -694,6 +694,318 @@ textarea {
   flex: 0 0 auto;
 }
 
+/* === Setup Wizard === */
+
+/* Fixed bottom action bar so the explanation + Back/Next are always visible while the
+   mod scrolls, and it never covers the nav/tab targets highlighted at the top. */
+.wizard-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  border-top: 1px solid color-mix(in srgb, var(--primary) 24%, var(--panel-border) 76%);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--primary-soft) 20%, var(--panel-surface-strong) 80%), var(--panel-surface));
+  box-shadow: 0 -8px 22px -10px rgba(0, 0, 0, 0.55);
+}
+
+.wizard-banner-inner,
+.wizard-chip {
+  max-width: 1160px;
+  margin-inline: auto;
+  width: 100%;
+}
+
+/* Freeze page scrolling during spotlight steps so the highlight stays on its target. */
+html.wizard-scroll-locked,
+body.wizard-scroll-locked {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+.wizard-banner-inner {
+  padding: var(--space-6) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard-banner-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.wizard-banner-head-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.wizard-step-badge {
+  font-size: var(--text-small);
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wizard-banner-title {
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+}
+
+.wizard-banner-body {
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  line-height: 1.52;
+  margin: 0;
+}
+
+.wizard-banner-extra {
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 50%, transparent);
+  padding-top: var(--space-4);
+}
+
+.wizard-banner-actions {
+  gap: var(--space-3);
+}
+
+.wizard-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-7);
+  gap: var(--space-4);
+}
+
+.wizard-chip-label {
+  font-size: var(--text-small);
+  color: var(--primary);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Slim the fixed bottom instruction bar down on small screens. */
+@media (max-width: 600px) {
+  .wizard-banner-inner {
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-3);
+  }
+
+  .wizard-step-badge {
+    font-size: 0.68rem;
+  }
+
+  .wizard-banner-title {
+    font-size: var(--text-body);
+  }
+
+  .wizard-banner-body {
+    font-size: var(--text-small);
+    line-height: 1.45;
+  }
+
+  .wizard-banner .btn {
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-small);
+  }
+
+  .wizard-chip {
+    padding: var(--space-2) var(--space-5);
+  }
+}
+
+.wizard-modal-kicker {
+  font-size: var(--text-small);
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-3);
+}
+
+.wizard-modal-title {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-bottom: var(--space-4);
+}
+
+.wizard-modal-body {
+  color: color-mix(in srgb, var(--muted) 78%, white 22%);
+  line-height: 1.56;
+  margin-bottom: var(--space-7);
+}
+
+.wizard-modal-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.wizard-modal-actions {
+  gap: var(--space-3);
+}
+
+.wizard-dialog-card {
+  max-width: 520px;
+}
+
+.wizard-flair-instructions {
+  background: color-mix(in srgb, var(--panel-surface-strong) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: var(--radius-card);
+  padding: var(--space-6);
+}
+
+.wizard-flair-instructions-title {
+  font-family: var(--font-display);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-body);
+  color: var(--text);
+  margin-bottom: var(--space-3);
+}
+
+.wizard-flair-steps {
+  padding-left: var(--space-6);
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  line-height: 1.52;
+}
+
+.wizard-flair-steps li + li {
+  margin-top: var(--space-2);
+}
+
+.wizard-inline-detail {
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--panel-border) 60%);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-soft) 22%, var(--panel-surface-strong) 78%), var(--panel-surface));
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+  scroll-margin-top: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard-inline-detail-title {
+  font-family: var(--font-display);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-body);
+  color: var(--text);
+}
+
+.wizard-inline-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard-inline-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  line-height: 1.5;
+}
+
+.wizard-inline-checklist .wizard-inline-num {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-small);
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary-contrast, white);
+  background: var(--primary);
+}
+
+.wizard-inline-checklist li.is-done .wizard-inline-num {
+  background: color-mix(in srgb, var(--success, #2e7d32) 90%, transparent);
+}
+
+.wizard-inline-checklist strong {
+  color: var(--text);
+}
+
+.wizard-inline-hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.wizard-field-highlight {
+  position: relative;
+  border-radius: var(--radius-card);
+  scroll-margin-top: 120px;
+  animation: wizard-field-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wizard-field-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--primary) 60%, transparent),
+      0 0 0 6px color-mix(in srgb, var(--primary) 12%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px var(--primary),
+      0 0 16px 4px color-mix(in srgb, var(--primary) 38%, transparent);
+  }
+}
+
+.wizard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  /* Solid dim that also blocks taps + touch scrolling. A clip-path hole (set in JS) is
+     punched over the spotlight target so only that element can be tapped/scrolled. */
+  background: rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.wizard-spotlight-ring {
+  position: fixed;
+  z-index: 46;
+  border-radius: 10px;
+  pointer-events: none;
+  animation: wizard-spotlight-pulse 1.0s ease-in-out infinite;
+}
+
+/* Dimming now comes from the overlay; the ring only draws the pulsing highlight border. */
+@keyframes wizard-spotlight-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--primary) 80%, transparent),
+      0 0 18px 5px color-mix(in srgb, var(--primary) 32%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px var(--primary),
+      0 0 28px 10px color-mix(in srgb, var(--primary) 55%, transparent);
+  }
+}
+
+.wizard-spotlight-target {
+  /* Kept for potential future use; z-index lifting no longer needed */
+}
+
+/* === End Setup Wizard === */
+
 .update-notice-notes {
   margin-top: 8px;
   color: color-mix(in srgb, var(--muted) 86%, white 14%);
