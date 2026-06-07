@@ -131,6 +131,7 @@ export function toModPanelState(dashboard: DashboardData): ModPanelStatePayload 
     canOpenInstallSettings: dashboard.canOpenInstallSettings,
     hasConfigAccess: dashboard.hasConfigAccess,
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
+    requiresInitialSetup: dashboard.requiresInitialSetup,
     flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record, dashboard.config)),

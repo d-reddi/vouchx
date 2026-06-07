@@ -1,6 +1,6 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
-import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_START_URL } from './app-config.js';
+import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
@@ -256,6 +256,27 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const textareaLinkCancelBtn = document.getElementById('textarea-link-cancel-btn');
   const textareaLinkInsertBtn = document.getElementById('textarea-link-insert-btn');
   const bugReportLink = document.getElementById('bug-report-link');
+  const wizardOverlay = document.getElementById('wizard-overlay');
+  const wizardSpotlightRing = document.getElementById('wizard-spotlight-ring');
+  const wizardBanner = document.getElementById('wizard-banner');
+  const wizardBannerInner = document.getElementById('wizard-banner-inner');
+  const wizardChip = document.getElementById('wizard-chip');
+  const wizardChipLabel = document.getElementById('wizard-chip-label');
+  const wizardStepBadge = document.getElementById('wizard-step-badge');
+  const wizardBannerTitle = document.getElementById('wizard-banner-title');
+  const wizardBannerBody = document.getElementById('wizard-banner-body');
+  const wizardBannerExtra = document.getElementById('wizard-banner-extra');
+  const wizardInlineDetail = document.getElementById('wizard-inline-detail');
+  const wizardBackBtn = document.getElementById('wizard-back-btn');
+  const wizardNextBtn = document.getElementById('wizard-next-btn');
+  const wizardMinimizeBtn = document.getElementById('wizard-minimize-btn');
+  const wizardExpandBtn = document.getElementById('wizard-expand-btn');
+  const wizardModal = document.getElementById('wizard-modal');
+  const wizardModalKicker = document.getElementById('wizard-modal-kicker');
+  const wizardModalTitle = document.getElementById('wizard-modal-title');
+  const wizardModalBody = document.getElementById('wizard-modal-body');
+  const wizardModalExtras = document.getElementById('wizard-modal-extras');
+  const wizardModalBtn = document.getElementById('wizard-modal-btn');
   const externalNavigationLinks = Array.from(document.querySelectorAll('[data-open-external-url]'));
 
   const PHOTO_TEXTAREA_ACTIONS = [
@@ -449,6 +470,20 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
   const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
+  try {
+    // Consume the hub-side setup-mode flag; wizard handles its own state.
+    window.localStorage.removeItem('vx_setup_mode');
+  } catch (_e) {
+    // localStorage unavailable
+  }
+  const wizardDebugMode = true; // TODO: set to `queryParams.get('vx_wizard_debug') === '1'` before shipping
+  let wizardStep = -1;
+  let wizardPhase = 'navigate'; // 'navigate' | 'learn' — tour steps start in navigate
+  let wizardMinimized = false;
+  let wizardLastRenderedStep = -1;
+  let wizardSpotlightTargetEl = null;
+  let wizardHighlightedEls = [];
+  let wizardScrollLocked = false;
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MAX_BATCH_REVIEW_ITEMS = 25;
@@ -1031,7 +1066,17 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
     buttons.forEach((button) => {
       button.addEventListener('click', () => {
-        setTemplateSubtab(String(button.dataset.templateSubtab || 'pending'));
+        const sub = String(button.dataset.templateSubtab || 'pending');
+        setTemplateSubtab(sub);
+        // Advance the wizard from navigate phase when the mod taps the target template tab.
+        if (wizardStep >= 0 && wizardPhase === 'navigate') {
+          const stepDef = WIZARD_STEPS[wizardStep];
+          if (stepDef && stepDef.isTourStep && stepDef.isTemplateSubtab && sub === stepDef.templateSubtab) {
+            wizardPhase = 'learn';
+            hideWizardSpotlight();
+            renderWizardBanner(stepDef);
+          }
+        }
       });
     });
   }
@@ -1653,7 +1698,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       return;
     }
     const validation = getSavedFlairTemplateValidation();
-    const shouldShow = !validation.isValid;
+    const shouldShow = !validation.isValid && wizardStep < 0;
     pendingFlairWarning.classList.toggle('hidden', !shouldShow);
     pendingFlairWarningText.textContent = shouldShow ? buildPendingFlairWarningText(validation) : '';
     if (pendingFlairWarningSettingsBtn) {
@@ -1991,6 +2036,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       approvalFlairOptionsLoading = false;
       approvalFlairOptionsError = '';
       renderApprovalFlairPicker();
+      refreshWizardConfigDetail();
     } catch (error) {
       if (approvalFlairOptionsRequestId !== requestId) {
         return;
@@ -2000,6 +2046,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       approvalFlairOptionsLoading = false;
       approvalFlairOptionsError = error instanceof Error ? error.message : String(error);
       renderApprovalFlairPicker();
+      refreshWizardConfigDetail();
     }
   }
 
@@ -4822,6 +4869,683 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     }
   }
 
+  // === Setup Wizard ===
+
+  function getWizardStorageKey() {
+    const subredditId = (queryParams.get('subredditId') || 'unknown').trim().toLowerCase();
+    return `vx-wizard-v1:${subredditId}`;
+  }
+
+  function readWizardStorage() {
+    if (wizardDebugMode) return null; // Always start fresh in debug mode
+    try {
+      const raw = window.localStorage.getItem(getWizardStorageKey());
+      return raw ? JSON.parse(raw) : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  function writeWizardStorage(step, done) {
+    if (wizardDebugMode) return; // Don't persist in debug mode
+    try {
+      window.localStorage.setItem(getWizardStorageKey(), JSON.stringify({ step: Number(step), done: Boolean(done) }));
+    } catch (_e) {}
+  }
+
+  function shouldShowWizard() {
+    if (!state || !canAccessSettingsTab()) return false;
+    if (wizardDebugMode) return true; // Always show when debugging
+    const stored = readWizardStorage();
+    if (stored && stored.done) return false;
+    if (state.requiresInitialSetup) return true;
+    return Boolean(stored && typeof stored.step === 'number' && stored.step > 0);
+  }
+
+  const WIZARD_TOTAL_BANNER_STEPS = 12;
+
+  const WIZARD_STEPS = [
+    // 0: Welcome modal
+    {
+      type: 'modal',
+      kicker: '',
+      title: 'Welcome to VouchX',
+      body: "You'll be walked through the mod panel and initial configuration. This should only take a couple of minutes. You can minimize the guide at any time.",
+      primaryBtn: 'Get Started',
+    },
+    // 1: Queue
+    {
+      type: 'banner',
+      stepNum: 1,
+      title: 'Queue',
+      body: 'This is where new verification submissions appear. When a member submits their photos, they show up here as cards. You can approve or deny each one, view their Reddit stats, and send modmail.',
+      tab: 'pending',
+      isTourStep: true,
+      navigateLabel: 'Queue',
+    },
+    // 2: History
+    {
+      type: 'banner',
+      stepNum: 2,
+      title: 'History',
+      body: "History keeps a complete record of every verification — approvals, denials, and removals. Use the search to look up a specific user's history at any time.",
+      tab: 'history',
+      isTourStep: true,
+      navigateLabel: 'History',
+    },
+    // 3: Blocked
+    {
+      type: 'banner',
+      stepNum: 3,
+      title: 'Blocked Users',
+      body: "Members you've blocked from submitting. You can block a user directly from the Queue when reviewing their request. Blocked users see a message that they cannot submit to this community.",
+      tab: 'blocked',
+      isTourStep: true,
+      navigateLabel: 'Blocked',
+    },
+    // 4: Stats
+    {
+      type: 'banner',
+      stepNum: 4,
+      title: 'Stats',
+      body: 'A high-level view of your verification volume. See weekly and monthly breakdowns of approvals, denials, and pending submissions.',
+      tab: 'stats',
+      isTourStep: true,
+      navigateLabel: 'Stats',
+    },
+    // 5: Settings — navigate phase spotlights the Settings nav tab
+    {
+      type: 'banner',
+      stepNum: 5,
+      title: 'Settings',
+      body: "This is where you configure your community's verification. We'll walk through each setting that needs your attention to go live.",
+      tab: 'settings',
+      settingsTab: 'general',
+      isTourStep: true,
+      navigateLabel: 'Settings',
+    },
+    // 6: Verification setup — combined flair + photo count, highlighted inline (no dimming)
+    {
+      type: 'banner',
+      stepNum: 6,
+      title: 'Verification setup',
+      body: 'Two quick settings get your community ready. Both are highlighted below, with details right above them — no need to scroll back up. The Back and Next buttons stay pinned at the top.',
+      tab: 'settings',
+      settingsTab: 'general',
+      isFlairStep: true,
+      isConfigStep: true,
+      highlightElementIds: ['primary-approval-flair-row', 'required-photo-count-row'],
+    },
+    // 7: Photo Instructions — navigate phase spotlights the settings sub-tab button
+    {
+      type: 'banner',
+      stepNum: 7,
+      title: 'Photo Instructions',
+      body: "Add instructions for what members should include in their photos — this appears in the submission form. At minimum, add a brief requirement (for example: \"Hold a paper with your username and today's date\"). You can also add translations. Tap Next when ready.",
+      tab: 'settings',
+      settingsTab: 'instructions',
+      isTourStep: true,
+      isSettingsSubTab: true,
+      navigateLabel: 'Photo Instructions',
+    },
+    // 8: Templates — navigate phase spotlights the Templates settings sub-tab
+    {
+      type: 'banner',
+      stepNum: 8,
+      title: 'Message Templates',
+      body: 'VouchX sends an automatic modmail for each verification outcome. We\'ll walk through each message so you know exactly what members receive.',
+      tab: 'settings',
+      settingsTab: 'templates',
+      isTourStep: true,
+      isSettingsSubTab: true,
+      navigateLabel: 'Templates',
+    },
+    // 9: Pending template — navigate phase spotlights the Pending template tab
+    {
+      type: 'banner',
+      stepNum: 9,
+      title: 'Pending message',
+      body: 'Sent the moment a member submits — it confirms their request was received and is waiting for your review.',
+      tab: 'settings',
+      settingsTab: 'templates',
+      templateSubtab: 'pending',
+      isTourStep: true,
+      isTemplateSubtab: true,
+      navigateLabel: 'Pending',
+    },
+    // 10: Approval template — navigate phase spotlights the Approval template tab
+    {
+      type: 'banner',
+      stepNum: 10,
+      title: 'Approval message',
+      body: 'Sent when you approve a member — it lets them know they have been verified.',
+      tab: 'settings',
+      settingsTab: 'templates',
+      templateSubtab: 'approval',
+      isTourStep: true,
+      isTemplateSubtab: true,
+      navigateLabel: 'Approval',
+    },
+    // 11: Denial template — navigate phase spotlights the Denial template tab
+    {
+      type: 'banner',
+      stepNum: 11,
+      title: 'Denial message',
+      body: 'Sent when you deny a submission. Denial is special — each denial reason can have its own message. Let\'s look at that next.',
+      tab: 'settings',
+      settingsTab: 'templates',
+      templateSubtab: 'denial',
+      isTourStep: true,
+      isTemplateSubtab: true,
+      navigateLabel: 'Denial',
+    },
+    // 12: Denial reasons — spotlight the reason selector and explain how to switch reasons
+    {
+      type: 'banner',
+      stepNum: 12,
+      title: 'Denial reasons',
+      body: 'Each denial reason has its own message. Tap a reason here to switch to it — the header and body below update for the reason you select. Scroll the reasons to the right to see them all. You can enable, rename, or add reasons in Install Settings.',
+      tab: 'settings',
+      settingsTab: 'templates',
+      templateSubtab: 'denial',
+      spotlightElementId: 'deny-reason-segment-wrap',
+      primaryBtn: 'Finish Setup',
+    },
+    // 9: Complete modal
+    {
+      type: 'modal',
+      kicker: 'Setup complete',
+      title: 'Your hub is ready!',
+      body: 'Members can now submit verifications and you can start reviewing them. Read the moderator guide to learn about advanced workflows.',
+      primaryBtn: 'Explore the Mod Panel',
+      hasGuideLink: true,
+    },
+  ];
+
+  function navigateForWizardStep(stepDef) {
+    if (!stepDef) return;
+    if (stepDef.tab) {
+      setTab(stepDef.tab);
+    }
+    if (stepDef.settingsTab) {
+      setSettingsTab(stepDef.settingsTab);
+    }
+    if (stepDef.templateSubtab) {
+      setTemplateSubtab(stepDef.templateSubtab);
+    }
+  }
+
+  function getWizardSpotlightTarget(stepDef) {
+    if (!stepDef) return null;
+    if (stepDef.isTourStep && wizardPhase === 'navigate') {
+      if (stepDef.isTemplateSubtab && stepDef.templateSubtab) {
+        return (
+          document.querySelector(`.template-subtab-btn[data-template-subtab="${stepDef.templateSubtab}"]`) || null
+        );
+      }
+      if (stepDef.isSettingsSubTab && stepDef.settingsTab) {
+        return settingsTabButtons.find((btn) => btn.dataset.settingsTab === stepDef.settingsTab) || null;
+      }
+      return tabButtons.find((btn) => btn.dataset.tab === stepDef.tab) || null;
+    }
+    if (stepDef.spotlightElementId) {
+      return document.getElementById(stepDef.spotlightElementId);
+    }
+    return null;
+  }
+
+  function lockWizardScroll() {
+    wizardScrollLocked = true;
+    document.documentElement.classList.add('wizard-scroll-locked');
+    document.body.classList.add('wizard-scroll-locked');
+  }
+
+  function unlockWizardScroll() {
+    wizardScrollLocked = false;
+    document.documentElement.classList.remove('wizard-scroll-locked');
+    document.body.classList.remove('wizard-scroll-locked');
+  }
+
+  function setWizardOverlayHole(x1, y1, x2, y2) {
+    if (!wizardOverlay) return;
+    // Rectangular cutout via a zero-width slit to the bottom edge — works with the default
+    // (nonzero) fill rule across mobile webviews. The hole receives no overlay pixels, so
+    // taps and touch-scroll only reach the highlighted element; everything else is blocked.
+    const poly =
+      `polygon(0% 0%, 0% 100%, ${x1}px 100%, ${x1}px ${y1}px, ${x2}px ${y1}px, ` +
+      `${x2}px ${y2}px, ${x1}px ${y2}px, ${x1}px 100%, 100% 100%, 100% 0%)`;
+    wizardOverlay.style.setProperty('clip-path', poly);
+    wizardOverlay.style.setProperty('-webkit-clip-path', poly);
+  }
+
+  function clearWizardOverlayHole() {
+    if (!wizardOverlay) return;
+    wizardOverlay.style.removeProperty('clip-path');
+    wizardOverlay.style.removeProperty('-webkit-clip-path');
+  }
+
+  function positionWizardSpotlightRing(targetEl) {
+    if (!targetEl) return;
+    const rect = targetEl.getBoundingClientRect();
+    const pad = 10;
+    const x1 = Math.max(0, rect.left - pad);
+    const y1 = Math.max(0, rect.top - pad);
+    const x2 = rect.right + pad;
+    const y2 = rect.bottom + pad;
+    if (wizardSpotlightRing) {
+      wizardSpotlightRing.style.top = `${y1}px`;
+      wizardSpotlightRing.style.left = `${x1}px`;
+      wizardSpotlightRing.style.width = `${x2 - x1}px`;
+      wizardSpotlightRing.style.height = `${y2 - y1}px`;
+    }
+    setWizardOverlayHole(x1, y1, x2, y2);
+  }
+
+  function showWizardSpotlight(targetEl) {
+    if (!wizardSpotlightRing || !wizardOverlay || !targetEl) return;
+    if (wizardSpotlightTargetEl && wizardSpotlightTargetEl !== targetEl) {
+      wizardSpotlightTargetEl.classList.remove('wizard-spotlight-target');
+    }
+    wizardSpotlightTargetEl = targetEl;
+    targetEl.classList.add('wizard-spotlight-target');
+    wizardOverlay.classList.remove('hidden');
+    // Unlock so the programmatic scroll can run, jump the target into view, then re-lock
+    // so the highlight stays put until the mod acts. Use instant scroll: a smooth scroll
+    // keeps animating after we read the rect, leaving the ring at a stale position.
+    unlockWizardScroll();
+    targetEl.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+    const reposition = () => {
+      if (wizardSpotlightTargetEl !== targetEl) return; // step changed; abort
+      positionWizardSpotlightRing(targetEl);
+      wizardSpotlightRing.classList.remove('hidden');
+    };
+    window.requestAnimationFrame(() => {
+      reposition();
+      window.requestAnimationFrame(reposition);
+    });
+    // Final settle pass after any post-layout adjustments, then freeze scrolling.
+    window.setTimeout(() => {
+      reposition();
+      if (wizardSpotlightTargetEl === targetEl) lockWizardScroll();
+    }, 120);
+  }
+
+  function hideWizardSpotlight() {
+    unlockWizardScroll();
+    if (wizardSpotlightRing) wizardSpotlightRing.classList.add('hidden');
+    if (wizardOverlay) wizardOverlay.classList.add('hidden');
+    clearWizardOverlayHole();
+    if (wizardSpotlightTargetEl) {
+      wizardSpotlightTargetEl.classList.remove('wizard-spotlight-target');
+      wizardSpotlightTargetEl = null;
+    }
+  }
+
+  function clearWizardFieldHighlights() {
+    for (const el of wizardHighlightedEls) {
+      if (el) el.classList.remove('wizard-field-highlight');
+    }
+    wizardHighlightedEls = [];
+  }
+
+  function applyWizardFieldHighlights(ids) {
+    const els = (ids || []).map((id) => document.getElementById(id)).filter(Boolean);
+    // No-op when the same elements are already highlighted, so we don't restart the
+    // pulse animation on every re-render (realtime refreshes call renderAll often).
+    const unchanged =
+      els.length === wizardHighlightedEls.length &&
+      els.every((el, i) => el === wizardHighlightedEls[i]);
+    if (unchanged) return;
+    clearWizardFieldHighlights();
+    for (const el of els) {
+      el.classList.add('wizard-field-highlight');
+    }
+    wizardHighlightedEls = els;
+  }
+
+  function buildFlairMissingInstructions() {
+    const box = document.createElement('div');
+    box.className = 'wizard-flair-instructions';
+    const titleEl = document.createElement('p');
+    titleEl.className = 'wizard-flair-instructions-title';
+    titleEl.textContent = 'No mod-only flairs found — create one first:';
+    box.appendChild(titleEl);
+    const ol = document.createElement('ol');
+    ol.className = 'wizard-flair-steps';
+    [
+      'Open Reddit Mod Tools → Settings → Look and Feel → User Flair',
+      'Tap Create, enter your flair text (e.g. "Verified"), and enable For mods only',
+      'Save the flair, then return here and tap Reload Flairs',
+    ].forEach((text) => {
+      const li = document.createElement('li');
+      li.textContent = text;
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+    const reloadBtn = document.createElement('button');
+    reloadBtn.className = 'btn btn-secondary';
+    reloadBtn.style.marginTop = 'var(--space-5)';
+    reloadBtn.textContent = 'Reload Flairs';
+    reloadBtn.type = 'button';
+    reloadBtn.addEventListener('click', () => {
+      resetApprovalFlairOptionsState();
+      void ensureApprovalFlairOptionsLoaded();
+    });
+    box.appendChild(reloadBtn);
+    return box;
+  }
+
+  function renderWizardInlineDetail() {
+    if (!wizardInlineDetail) return;
+    wizardInlineDetail.innerHTML = '';
+    wizardInlineDetail.classList.remove('hidden');
+
+    const flairDone = Boolean(state && !state.requiresInitialSetup);
+
+    const title = document.createElement('p');
+    title.className = 'wizard-inline-detail-title';
+    title.textContent = 'Finish these two settings';
+    wizardInlineDetail.appendChild(title);
+
+    const list = document.createElement('ol');
+    list.className = 'wizard-inline-checklist';
+
+    const flairLi = document.createElement('li');
+    if (flairDone) flairLi.classList.add('is-done');
+    const flairNum = document.createElement('span');
+    flairNum.className = 'wizard-inline-num';
+    flairNum.textContent = flairDone ? '✓' : '1';
+    flairLi.appendChild(flairNum);
+    const flairText = document.createElement('span');
+    flairText.innerHTML =
+      '<strong>Approval flair</strong> — choose the mod-only flair verified members receive, then tap Save Settings. (Highlighted below.)';
+    flairLi.appendChild(flairText);
+    list.appendChild(flairLi);
+
+    // The photo count always has a valid value (default 2), so it counts as done as soon
+    // as a valid option is selected — including when the mod leaves it at the default.
+    const photoCountValue = requiredPhotoCountInput ? String(requiredPhotoCountInput.value || '') : '';
+    const photoDone = ['1', '2', '3'].includes(photoCountValue);
+    const photoLi = document.createElement('li');
+    if (photoDone) photoLi.classList.add('is-done');
+    const photoNum = document.createElement('span');
+    photoNum.className = 'wizard-inline-num';
+    photoNum.textContent = photoDone ? '✓' : '2';
+    photoLi.appendChild(photoNum);
+    const photoText = document.createElement('span');
+    const photoCountLabel = photoDone
+      ? `currently set to ${photoCountValue} ${photoCountValue === '1' ? 'photo' : 'photos'}`
+      : 'choose how many members must submit';
+    photoText.innerHTML =
+      `<strong>Required photos</strong> — ${photoCountLabel}. Adjust it below if you'd like; the default of 2 works for most communities. (Highlighted below.)`;
+    photoLi.appendChild(photoText);
+    list.appendChild(photoLi);
+
+    wizardInlineDetail.appendChild(list);
+
+    // When the community has no mod-only flairs yet, surface the create-flair steps inline.
+    if (approvalFlairOptionsLoaded && approvalFlairOptions.length === 0) {
+      wizardInlineDetail.appendChild(buildFlairMissingInstructions());
+    }
+
+    const hint = document.createElement('p');
+    hint.className = 'wizard-inline-hint';
+    hint.textContent = flairDone
+      ? 'All set? Tap Next at the top to continue.'
+      : 'Once you save your approval flair, tap Next at the top to continue.';
+    wizardInlineDetail.appendChild(hint);
+  }
+
+  function hideWizardInlineDetail() {
+    if (wizardInlineDetail) {
+      wizardInlineDetail.classList.add('hidden');
+      wizardInlineDetail.innerHTML = '';
+    }
+  }
+
+  // Re-render the inline config detail when flair options finish loading, but only while
+  // the combined config step is actually on screen.
+  function refreshWizardConfigDetail() {
+    if (wizardStep < 0) return;
+    const stepDef = WIZARD_STEPS[wizardStep];
+    if (stepDef && stepDef.isConfigStep) {
+      renderWizardInlineDetail();
+    }
+  }
+
+  function updateWizardBannerSpacing() {
+    if (!wizardBanner) return;
+    const shown = !wizardBanner.classList.contains('hidden');
+    // Reserve space at the bottom so content can scroll clear of the fixed bottom bar.
+    document.body.style.paddingBottom = shown ? `${wizardBanner.offsetHeight + 24}px` : '';
+  }
+
+  function renderWizardBanner(stepDef) {
+    if (!wizardBanner || !wizardBannerInner || !wizardChip) return;
+    wizardBanner.classList.remove('hidden');
+    window.requestAnimationFrame(updateWizardBannerSpacing);
+
+    if (wizardMinimized) {
+      wizardBannerInner.classList.add('hidden');
+      wizardChip.classList.remove('hidden');
+      if (wizardChipLabel) {
+        wizardChipLabel.textContent = `Setup in progress — Step ${stepDef.stepNum} of ${WIZARD_TOTAL_BANNER_STEPS}`;
+      }
+      return;
+    }
+
+    wizardBannerInner.classList.remove('hidden');
+    wizardChip.classList.add('hidden');
+    if (wizardStepBadge) wizardStepBadge.textContent = `Step ${stepDef.stepNum} of ${WIZARD_TOTAL_BANNER_STEPS}`;
+
+    const inNavigatePhase = stepDef.isTourStep && wizardPhase === 'navigate';
+
+    if (inNavigatePhase) {
+      // Navigate phase: tell user exactly what to click; hide Next so they must click the target
+      if (wizardBannerTitle) wizardBannerTitle.textContent = stepDef.title;
+      if (wizardBannerBody) {
+        let loc;
+        if (stepDef.isTemplateSubtab) loc = 'the template tabs';
+        else if (stepDef.isSettingsSubTab) loc = 'the settings menu below';
+        else loc = 'the navigation above';
+        wizardBannerBody.textContent = `Tap "${stepDef.navigateLabel}" in ${loc} to continue.`;
+      }
+      if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepDef.stepNum === 1);
+      if (wizardNextBtn) wizardNextBtn.classList.add('hidden');
+      if (wizardBannerExtra) {
+        wizardBannerExtra.classList.add('hidden');
+        wizardBannerExtra.innerHTML = '';
+      }
+      return;
+    }
+
+    // Learn / interact phase
+    if (wizardBannerTitle) wizardBannerTitle.textContent = stepDef.title;
+    if (wizardBannerBody) wizardBannerBody.textContent = stepDef.body;
+    if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepDef.stepNum === 1);
+    if (wizardNextBtn) {
+      wizardNextBtn.textContent = stepDef.primaryBtn || 'Next →';
+      wizardNextBtn.classList.remove('hidden');
+      wizardNextBtn.disabled = Boolean(stepDef.isFlairStep && state && state.requiresInitialSetup);
+    }
+    // Config step shows its detail inline next to the fields, not in the banner extra.
+    if (wizardBannerExtra) {
+      wizardBannerExtra.classList.add('hidden');
+      wizardBannerExtra.innerHTML = '';
+    }
+  }
+
+  function renderWizardModal(stepDef) {
+    if (!wizardModal) return;
+    wizardModal.classList.remove('hidden');
+    if (wizardModalKicker) {
+      wizardModalKicker.textContent = stepDef.kicker || '';
+      wizardModalKicker.classList.toggle('hidden', !stepDef.kicker);
+    }
+    if (wizardModalTitle) wizardModalTitle.textContent = stepDef.title;
+    if (wizardModalBody) wizardModalBody.textContent = stepDef.body;
+    if (wizardModalBtn) wizardModalBtn.textContent = stepDef.primaryBtn || 'Continue';
+    if (wizardModalExtras) {
+      wizardModalExtras.innerHTML = '';
+      if (stepDef.hasGuideLink) {
+        wizardModalExtras.classList.remove('hidden');
+        const guideUrl = normalizeExternalUrl(MODERATOR_GUIDE_URL);
+        if (guideUrl) {
+          const link = document.createElement('a');
+          link.href = guideUrl;
+          link.setAttribute('data-open-external-url', guideUrl);
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.className = 'btn btn-secondary';
+          link.textContent = 'Read the Moderator Guide ↗';
+          wizardModalExtras.appendChild(link);
+          bindExternalNavigationLink(link, (el) => el.getAttribute('data-open-external-url') || '');
+        }
+      } else {
+        wizardModalExtras.classList.add('hidden');
+      }
+    }
+  }
+
+  function hideWizardBanner() {
+    if (wizardBanner) {
+      wizardBanner.classList.add('hidden');
+    }
+    document.body.style.paddingBottom = '';
+  }
+
+  function hideWizardModal() {
+    if (wizardModal) wizardModal.classList.add('hidden');
+  }
+
+  function advanceWizard() {
+    if (wizardStep < 0 || wizardStep >= WIZARD_STEPS.length - 1) return;
+    wizardStep += 1;
+    const nextStep = WIZARD_STEPS[wizardStep];
+    wizardPhase = nextStep && nextStep.isTourStep ? 'navigate' : 'learn';
+    writeWizardStorage(wizardStep, false);
+    renderWizard();
+  }
+
+  function retreatWizard() {
+    if (wizardStep <= 1) return;
+    wizardStep -= 1;
+    wizardPhase = 'learn'; // going back shows learn content immediately
+    writeWizardStorage(wizardStep, false);
+    renderWizard();
+  }
+
+  function hideAllWizardUi() {
+    hideWizardBanner();
+    hideWizardModal();
+    hideWizardSpotlight();
+    hideWizardInlineDetail();
+    clearWizardFieldHighlights();
+  }
+
+  function completeWizard() {
+    writeWizardStorage(wizardStep, true);
+    wizardStep = -1;
+    wizardLastRenderedStep = -1;
+    hideAllWizardUi();
+  }
+
+  function renderWizard() {
+    if (!state || !canAccessSettingsTab()) {
+      hideAllWizardUi();
+      return;
+    }
+    if (wizardStep === -1) {
+      if (!shouldShowWizard()) {
+        hideAllWizardUi();
+        return;
+      }
+      const stored = readWizardStorage();
+      wizardStep = (stored && typeof stored.step === 'number') ? stored.step : 0;
+      writeWizardStorage(wizardStep, false);
+    }
+    if (!shouldShowWizard()) {
+      hideAllWizardUi();
+      return;
+    }
+    const stepDef = WIZARD_STEPS[wizardStep];
+    if (!stepDef) {
+      hideAllWizardUi();
+      return;
+    }
+    const stepChanged = wizardStep !== wizardLastRenderedStep;
+    wizardLastRenderedStep = wizardStep;
+
+    if (stepDef.type === 'modal') {
+      hideWizardBanner();
+      hideWizardSpotlight();
+      hideWizardInlineDetail();
+      clearWizardFieldHighlights();
+      renderWizardModal(stepDef);
+      return;
+    }
+
+    hideWizardModal();
+    renderWizardBanner(stepDef);
+
+    // While minimized, get out of the way entirely: no spotlight, no scroll lock, no
+    // inline detail — just the collapsed chip (rendered by renderWizardBanner).
+    if (wizardMinimized) {
+      hideWizardSpotlight();
+      hideWizardInlineDetail();
+      clearWizardFieldHighlights();
+      return;
+    }
+
+    // Config step: highlight both fields in place (no dimming) with details shown inline
+    // right above them, so the mod never has to scroll up to read instructions.
+    if (stepDef.isConfigStep) {
+      // Config step keeps scrolling enabled (long form); the bottom banner stays visible
+      // and the pulse highlights live on the real fields, so they track the scroll.
+      hideWizardSpotlight();
+      if (stepChanged) {
+        navigateForWizardStep(stepDef);
+      }
+      applyWizardFieldHighlights(stepDef.highlightElementIds);
+      renderWizardInlineDetail();
+      if (stepChanged && wizardInlineDetail) {
+        window.requestAnimationFrame(() => {
+          wizardInlineDetail.scrollIntoView({ behavior: 'auto', block: 'start' });
+        });
+      }
+      return;
+    }
+
+    // Any non-config step: drop the inline detail + field highlights.
+    hideWizardInlineDetail();
+    clearWizardFieldHighlights();
+
+    // Navigate phase: DON'T auto-navigate — spotlight the element to tap and wait
+    const inNavigatePhase = stepDef.isTourStep && wizardPhase === 'navigate';
+    if (inNavigatePhase) {
+      const target = getWizardSpotlightTarget(stepDef);
+      if (target) {
+        showWizardSpotlight(target);
+      } else {
+        hideWizardSpotlight();
+      }
+      return;
+    }
+
+    // Learn / interact phase: navigate to the correct tab, show spotlight on form element if any
+    if (stepChanged) {
+      navigateForWizardStep(stepDef);
+    }
+    const target = getWizardSpotlightTarget(stepDef);
+    if (target) {
+      showWizardSpotlight(target);
+    } else {
+      hideWizardSpotlight();
+    }
+  }
+
+  // === End Setup Wizard ===
+
   function renderSettings() {
     if (!state) {
       return;
@@ -5365,6 +6089,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
     activePrimaryTab = setTab(activePrimaryTab);
     updateHeroMeta();
     renderUpdateNotice();
+    renderWizard();
     renderPendingFlairWarning();
     renderPending();
     renderBlocked();
@@ -6813,12 +7538,88 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
       if (tab) {
         setSettingsTab(tab);
       }
+      // Advance wizard from navigate phase when mod clicks the target settings sub-tab
+      if (tab && wizardStep >= 0 && wizardPhase === 'navigate') {
+        const stepDef = WIZARD_STEPS[wizardStep];
+        if (stepDef && stepDef.isTourStep && stepDef.isSettingsSubTab && tab === stepDef.settingsTab) {
+          wizardPhase = 'learn';
+          hideWizardSpotlight();
+          renderWizardBanner(stepDef);
+        }
+      }
     });
   }
 
   for (const btn of instructionLanguageTabButtons) {
     btn.addEventListener('click', () => {
       setInstructionsLanguage(btn.dataset.instructionLanguage);
+    });
+  }
+
+  if (wizardNextBtn) {
+    wizardNextBtn.addEventListener('click', () => {
+      advanceWizard();
+    });
+  }
+
+  if (wizardBackBtn) {
+    wizardBackBtn.addEventListener('click', () => {
+      retreatWizard();
+    });
+  }
+
+  if (requiredPhotoCountInput) {
+    // Keep the inline checklist's photo count label/checkmark in sync as the mod changes it.
+    requiredPhotoCountInput.addEventListener('change', () => {
+      refreshWizardConfigDetail();
+    });
+  }
+
+  // Keep the spotlight ring glued to its target if the viewport shifts (resize, mobile
+  // address bar, or any scroll that slips past the lock).
+  const repositionWizardSpotlightOnViewportChange = () => {
+    if (wizardSpotlightTargetEl) positionWizardSpotlightRing(wizardSpotlightTargetEl);
+  };
+  window.addEventListener('scroll', repositionWizardSpotlightOnViewportChange, { passive: true });
+  window.addEventListener('resize', repositionWizardSpotlightOnViewportChange);
+  // Freeze page scrolling during spotlight steps so the highlight can't drift off target.
+  document.addEventListener(
+    'touchmove',
+    (event) => {
+      if (!wizardScrollLocked) return;
+      // Still allow scrolling/interaction inside the highlighted element itself (e.g. the
+      // horizontally scrollable denial-reason chips); block page scroll otherwise.
+      if (wizardSpotlightTargetEl && wizardSpotlightTargetEl.contains(event.target)) return;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+
+  if (wizardMinimizeBtn) {
+    wizardMinimizeBtn.addEventListener('click', () => {
+      wizardMinimized = true;
+      // Free the mod to scroll and look around while minimized.
+      hideWizardSpotlight();
+      const stepDef = WIZARD_STEPS[wizardStep];
+      if (stepDef) renderWizardBanner(stepDef);
+    });
+  }
+
+  if (wizardExpandBtn) {
+    wizardExpandBtn.addEventListener('click', () => {
+      wizardMinimized = false;
+      // Full re-render restores the spotlight + scroll lock for the current step.
+      renderWizard();
+    });
+  }
+
+  if (wizardModalBtn) {
+    wizardModalBtn.addEventListener('click', () => {
+      if (wizardStep === WIZARD_STEPS.length - 1) {
+        completeWizard();
+      } else {
+        advanceWizard();
+      }
     });
   }
 
@@ -6852,6 +7653,18 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_QUICK_S
           void loadStats({ force: true });
         } else if (activeTab === 'settings') {
           setSettingsTab(activeSettingsTab);
+        }
+      }
+      // Advance wizard from navigate phase when mod clicks the target tab
+      if (tab && wizardStep >= 0 && wizardPhase === 'navigate') {
+        const stepDef = WIZARD_STEPS[wizardStep];
+        if (stepDef && stepDef.isTourStep && !stepDef.isSettingsSubTab && tab === stepDef.tab) {
+          wizardPhase = 'learn';
+          hideWizardSpotlight();
+          if (stepDef.settingsTab) {
+            setSettingsTab(stepDef.settingsTab);
+          }
+          renderWizardBanner(stepDef);
         }
       }
     });

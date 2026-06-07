@@ -2075,10 +2075,10 @@ export function mountHub(options = {}) {
       commandTitle = 'Verification removed';
       infoText = state.userLatest.removedAt ? `Removed ${formatTimestamp(state.userLatest.removedAt)}.` : '';
     } else if (state.requiresInitialSetup) {
-      commandTitle = 'Setup required';
+      commandTitle = state.canReview ? 'Setup required' : 'Coming soon!';
       infoText = state.canReview
-        ? 'Setup is required. Open the Mod Panel > Settings and set a flair template ID to get started. If you do not see the Settings tab in the mod panel, ask a moderator with \"config\" permissions to complete setup.'
-        : 'Verification setup is still in progress. Please check back later.';
+        ? 'A primary approval flair is required before members can be verified. Click Complete Setup to configure it in the Mod Panel.'
+        : 'Verification is being set up for this community. Check back soon!';
     }
 
     refs.commandTitle.textContent = commandTitle;
@@ -2098,10 +2098,30 @@ export function mountHub(options = {}) {
         ? 'Resubmit Verification'
         : 'Submit Verification';
 
-    if (state.requiresInitialSetup && moderatorQuickStartUrl) {
+    if (state.requiresInitialSetup && state.canReview) {
       refs.actionRow.appendChild(
-        makeButton('Moderator Quick Start', 'btn-secondary', () => {
-          navigateTo(moderatorQuickStartUrl);
+        makeButton('Complete Setup', 'btn-secondary', async (event) => {
+          try {
+            window.localStorage.setItem('vx_setup_mode', '1');
+          } catch (_e) {
+            // localStorage unavailable
+          }
+          if (inline) {
+            try {
+              if (event instanceof MouseEvent) {
+                setModPanelLaunchPending(true);
+                await requestExpandedMode(event, 'modPanel');
+                modPanelLaunchResetTimerId = window.setTimeout(() => {
+                  setModPanelLaunchPending(false);
+                }, 2500);
+                return;
+              }
+            } catch (error) {
+              setModPanelLaunchPending(false);
+              showToast(error instanceof Error ? error.message : String(error), 'error');
+            }
+          }
+          window.location.replace(buildInternalNavigationUrl(modPanelPath || './mod-panel.html'));
         })
       );
     }
