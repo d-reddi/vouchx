@@ -173,6 +173,10 @@ export function updateNoticeDismissalKey(subredditId: string, moderator: string,
   )}:${normalizedVersion}`;
 }
 
+export function moderatorOnboardingCompletedKey(subredditId: string, moderator: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator:onboarded:${normalizeUsername(moderator)}`;
+}
+
 export function userPendingKeyById(subredditId: string, userId: string): string {
   return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
 }

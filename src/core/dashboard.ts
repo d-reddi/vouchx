@@ -36,6 +36,7 @@ import {
 } from './flair.ts';
 import { pendingIndexKey } from './keys.ts';
 import { clearExpiredPendingClaim } from './locks.ts';
+import { hasCompletedModeratorOnboarding } from './onboarding.ts';
 import {
   getModeratorAccessSnapshot,
   getSettingsTabRequiresConfigAccess,
@@ -132,6 +133,7 @@ export function toModPanelState(dashboard: DashboardData): ModPanelStatePayload 
     hasConfigAccess: dashboard.hasConfigAccess,
     canAccessSettingsTab: dashboard.canAccessSettingsTab,
     requiresInitialSetup: dashboard.requiresInitialSetup,
+    needsOnboarding: dashboard.needsOnboarding,
     flairTemplateValidation: dashboard.flairTemplateValidation,
     pendingCount: dashboard.pendingCount,
     pending: dashboard.pending.map((record) => toPendingPanelItem(record, dashboard.config)),
@@ -261,6 +263,12 @@ export async function loadDashboardData(
     flairTemplateValidation = await validateFlairTemplateIdForSubreddit(context, subredditName, config.flairTemplateId);
   }
   const requiresInitialSetup = !config.flairTemplateId.trim();
+  // Once setup is done, reviewers who haven't been through the panel walkthrough get a
+  // one-time onboarding tour. Tracked per-moderator server-side (see onboarding.ts).
+  const needsOnboarding =
+    options.includeModData && canReviewUser && !requiresInitialSetup && viewerIdentity.username
+      ? !(await hasCompletedModeratorOnboarding(context, viewerIdentity.username))
+      : false;
   const [globalBlockedUsernames, developerUiUsernames] = await Promise.all([
     readMergedGlobalUsernameSettings(context, GLOBAL_BLOCKED_USERNAME_SETTING_NAMES),
     readGlobalUsernameSetting(context, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES),
@@ -448,6 +456,7 @@ export async function loadDashboardData(
     canAccessSettingsTab,
     flairTemplateValidation,
     requiresInitialSetup,
+    needsOnboarding,
     config,
     viewerSnapshot,
     viewerShouldDisplayVerified,

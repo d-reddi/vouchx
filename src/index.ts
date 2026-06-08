@@ -17,6 +17,7 @@ import {
   dismissModeratorUpdateNotice,
   denyVerification,
   ensureUserValidationSchedule,
+  markModeratorOnboardingCompleted,
   errorText,
   getModeratorAccessSnapshot,
   getModeratorMembershipError,
@@ -1136,6 +1137,17 @@ app.post('/api/mod/update-notice/dismiss', async (req, res) => {
       ...(await buildModPayload(appContext)),
       toast: { text: `We'll remind you about ${targetVersion} again in 7 days.`, tone: 'success' },
     });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/onboarding/complete', async (_req, res) => {
+  try {
+    const appContext = currentContext();
+    const { moderator } = await requireReviewAccess(appContext);
+    await markModeratorOnboardingCompleted(appContext, moderator);
+    res.json(await buildModPayload(appContext));
   } catch (error) {
     sendError(res, error);
   }

@@ -196,6 +196,7 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
       message: 'Flair template ID looks valid.',
     },
     requiresInitialSetup: false,
+    needsOnboarding: false,
     config: buildRuntimeConfig(),
     viewerSnapshot: {
       accountAgeDays: 365,
