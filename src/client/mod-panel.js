@@ -476,7 +476,10 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
   } catch (_e) {
     // localStorage unavailable
   }
-  const wizardDebugMode = true; // TODO: set to `queryParams.get('vx_wizard_debug') === '1'` before shipping
+  // Data-driven in production; append ?vx_wizard_debug=1 to force the wizard for testing.
+  const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
+  let wizardMode = null; // 'setup' | 'onboarding' | null — locked once the wizard starts
+  let wizardActiveSteps = []; // master steps filtered for the current mode + permissions
   let wizardStep = -1;
   let wizardPhase = 'navigate'; // 'navigate' | 'learn' — tour steps start in navigate
   let wizardMinimized = false;
@@ -1070,7 +1073,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
         setTemplateSubtab(sub);
         // Advance the wizard from navigate phase when the mod taps the target template tab.
         if (wizardStep >= 0 && wizardPhase === 'navigate') {
-          const stepDef = WIZARD_STEPS[wizardStep];
+          const stepDef = wizardActiveSteps[wizardStep];
           if (stepDef && stepDef.isTourStep && stepDef.isTemplateSubtab && sub === stepDef.templateSubtab) {
             wizardPhase = 'learn';
             hideWizardSpotlight();
@@ -4893,81 +4896,138 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
     } catch (_e) {}
   }
 
-  function shouldShowWizard() {
-    if (!state || !canAccessSettingsTab()) return false;
-    if (wizardDebugMode) return true; // Always show when debugging
-    const stored = readWizardStorage();
-    if (stored && stored.done) return false;
-    if (state.requiresInitialSetup) return true;
-    return Boolean(stored && typeof stored.step === 'number' && stored.step > 0);
+  // 'setup' = first-time configuration (requires settings access); 'onboarding' = one-time
+  // panel tour for reviewers after setup is complete. Debug mode forces whichever fits.
+  function resolveWizardMode() {
+    if (!state) return null;
+    if (state.requiresInitialSetup && state.canAccessSettingsTab) return 'setup';
+    if (wizardDebugMode) return 'onboarding';
+    if (state.needsOnboarding) return 'onboarding';
+    return null;
   }
 
-  const WIZARD_TOTAL_BANNER_STEPS = 12;
+  function shouldShowWizard() {
+    if (!state) return false;
+    if (resolveWizardMode() === null) return false;
+    if (wizardDebugMode) return true; // Always show a wizard when debugging
+    const stored = readWizardStorage();
+    if (stored && stored.done) return false;
+    return true;
+  }
 
+  // Filter the master list: drop setup-only steps in onboarding, and drop settings/config
+  // steps for moderators who can't open the Settings tab. We mirror canAccessSettingsTab
+  // so the walkthrough matches the tab's own gate: open to all reviewers when the "settings
+  // tab requires config access" install setting is off, otherwise config-permission only.
+  function buildWizardActiveSteps(mode) {
+    const canSettings = Boolean(state && state.canAccessSettingsTab);
+    return WIZARD_STEPS.filter((step) => {
+      if (mode === 'onboarding' && step.setupOnly) return false;
+      if (step.requiresConfigAccess && !canSettings) return false;
+      return true;
+    });
+  }
+
+  function resolveWizardStepCopy(stepDef) {
+    const override = wizardMode === 'onboarding' && stepDef && stepDef.onboarding ? stepDef.onboarding : null;
+    const pick = (key) => (override && override[key] !== undefined ? override[key] : stepDef[key]);
+    return {
+      kicker: pick('kicker'),
+      title: pick('title'),
+      body: pick('body'),
+      primaryBtn: pick('primaryBtn'),
+    };
+  }
+
+  function wizardBannerTotalCount() {
+    return wizardActiveSteps.reduce((count, step) => count + (step.type === 'banner' ? 1 : 0), 0);
+  }
+
+  function wizardBannerNumberFor(index) {
+    let count = 0;
+    for (let i = 0; i <= index && i < wizardActiveSteps.length; i += 1) {
+      if (wizardActiveSteps[i].type === 'banner') count += 1;
+    }
+    return count;
+  }
+
+  // Master step list. The active list is derived per mode + permissions by
+  // buildWizardActiveSteps(): `setupOnly` steps appear only during first-time setup, and
+  // `requiresConfigAccess` steps are dropped for reviewers without settings access.
+  // Step numbers shown in the banner are computed dynamically from the active list.
   const WIZARD_STEPS = [
-    // 0: Welcome modal
+    // Welcome modal
     {
+      id: 'welcome',
       type: 'modal',
       kicker: '',
       title: 'Welcome to VouchX',
       body: "You'll be walked through the mod panel and initial configuration. This should only take a couple of minutes. You can minimize the guide at any time.",
       primaryBtn: 'Get Started',
+      onboarding: {
+        body: "Here's a quick tour of the moderator panel so you know where everything is. It only takes a minute — you can minimize this guide anytime.",
+        primaryBtn: 'Start Tour',
+      },
     },
-    // 1: Queue
+    // Queue
     {
+      id: 'queue',
       type: 'banner',
-      stepNum: 1,
       title: 'Queue',
       body: 'This is where new verification submissions appear. When a member submits their photos, they show up here as cards. You can approve or deny each one, view their Reddit stats, and send modmail.',
       tab: 'pending',
       isTourStep: true,
       navigateLabel: 'Queue',
     },
-    // 2: History
+    // History
     {
+      id: 'history',
       type: 'banner',
-      stepNum: 2,
       title: 'History',
       body: "History keeps a complete record of every verification — approvals, denials, and removals. Use the search to look up a specific user's history at any time.",
       tab: 'history',
       isTourStep: true,
       navigateLabel: 'History',
     },
-    // 3: Blocked
+    // Blocked
     {
+      id: 'blocked',
       type: 'banner',
-      stepNum: 3,
       title: 'Blocked Users',
       body: "Members you've blocked from submitting. You can block a user directly from the Queue when reviewing their request. Blocked users see a message that they cannot submit to this community.",
       tab: 'blocked',
       isTourStep: true,
       navigateLabel: 'Blocked',
     },
-    // 4: Stats
+    // Stats
     {
+      id: 'stats',
       type: 'banner',
-      stepNum: 4,
       title: 'Stats',
       body: 'A high-level view of your verification volume. See weekly and monthly breakdowns of approvals, denials, and pending submissions.',
       tab: 'stats',
       isTourStep: true,
       navigateLabel: 'Stats',
     },
-    // 5: Settings — navigate phase spotlights the Settings nav tab
+    // Settings — navigate phase spotlights the Settings nav tab
     {
+      id: 'settings',
       type: 'banner',
-      stepNum: 5,
       title: 'Settings',
       body: "This is where you configure your community's verification. We'll walk through each setting that needs your attention to go live.",
       tab: 'settings',
       settingsTab: 'general',
       isTourStep: true,
       navigateLabel: 'Settings',
+      requiresConfigAccess: true,
+      onboarding: {
+        body: 'This is Settings — where verification is configured: the approval flair, photo requirements, and the messages members receive.',
+      },
     },
-    // 6: Verification setup — combined flair + photo count, highlighted inline (no dimming)
+    // Verification setup — combined flair + photo count (setup only)
     {
+      id: 'config',
       type: 'banner',
-      stepNum: 6,
       title: 'Verification setup',
       body: 'Two quick settings get your community ready. Both are highlighted below, with details right above them — no need to scroll back up. The Back and Next buttons stay pinned at the top.',
       tab: 'settings',
@@ -4975,11 +5035,13 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isFlairStep: true,
       isConfigStep: true,
       highlightElementIds: ['primary-approval-flair-row', 'required-photo-count-row'],
+      requiresConfigAccess: true,
+      setupOnly: true,
     },
-    // 7: Photo Instructions — navigate phase spotlights the settings sub-tab button
+    // Photo Instructions — navigate phase spotlights the settings sub-tab button
     {
+      id: 'photo-instructions',
       type: 'banner',
-      stepNum: 7,
       title: 'Photo Instructions',
       body: "Add instructions for what members should include in their photos — this appears in the submission form. At minimum, add a brief requirement (for example: \"Hold a paper with your username and today's date\"). You can also add translations. Tap Next when ready.",
       tab: 'settings',
@@ -4987,11 +5049,15 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isTourStep: true,
       isSettingsSubTab: true,
       navigateLabel: 'Photo Instructions',
+      requiresConfigAccess: true,
+      onboarding: {
+        body: 'This is where the photo instructions members see when they submit are managed — edit them here anytime.',
+      },
     },
-    // 8: Templates — navigate phase spotlights the Templates settings sub-tab
+    // Templates — navigate phase spotlights the Templates settings sub-tab (setup only)
     {
+      id: 'templates',
       type: 'banner',
-      stepNum: 8,
       title: 'Message Templates',
       body: 'VouchX sends an automatic modmail for each verification outcome. We\'ll walk through each message so you know exactly what members receive.',
       tab: 'settings',
@@ -4999,11 +5065,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isTourStep: true,
       isSettingsSubTab: true,
       navigateLabel: 'Templates',
+      requiresConfigAccess: true,
     },
-    // 9: Pending template — navigate phase spotlights the Pending template tab
+    // Pending template (setup only)
     {
+      id: 'template-pending',
       type: 'banner',
-      stepNum: 9,
       title: 'Pending message',
       body: 'Sent the moment a member submits — it confirms their request was received and is waiting for your review.',
       tab: 'settings',
@@ -5012,11 +5079,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isTourStep: true,
       isTemplateSubtab: true,
       navigateLabel: 'Pending',
+      requiresConfigAccess: true,
     },
-    // 10: Approval template — navigate phase spotlights the Approval template tab
+    // Approval template (setup only)
     {
+      id: 'template-approval',
       type: 'banner',
-      stepNum: 10,
       title: 'Approval message',
       body: 'Sent when you approve a member — it lets them know they have been verified.',
       tab: 'settings',
@@ -5025,11 +5093,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isTourStep: true,
       isTemplateSubtab: true,
       navigateLabel: 'Approval',
+      requiresConfigAccess: true,
     },
-    // 11: Denial template — navigate phase spotlights the Denial template tab
+    // Denial template (setup only)
     {
+      id: 'template-denial',
       type: 'banner',
-      stepNum: 11,
       title: 'Denial message',
       body: 'Sent when you deny a submission. Denial is special — each denial reason can have its own message. Let\'s look at that next.',
       tab: 'settings',
@@ -5038,11 +5107,12 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       isTourStep: true,
       isTemplateSubtab: true,
       navigateLabel: 'Denial',
+      requiresConfigAccess: true,
     },
-    // 12: Denial reasons — spotlight the reason selector and explain how to switch reasons
+    // Denial reasons — spotlight the reason selector (setup only)
     {
+      id: 'denial-reasons',
       type: 'banner',
-      stepNum: 12,
       title: 'Denial reasons',
       body: 'Each denial reason has its own message. Tap a reason here to switch to it — the header and body below update for the reason you select. Scroll the reasons to the right to see them all. You can enable, rename, or add reasons in Install Settings.',
       tab: 'settings',
@@ -5050,15 +5120,26 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       templateSubtab: 'denial',
       spotlightElementId: 'deny-reason-segment-wrap',
       primaryBtn: 'Finish Setup',
+      requiresConfigAccess: true,
+      onboarding: {
+        primaryBtn: 'Finish Tour',
+      },
     },
-    // 9: Complete modal
+    // Complete modal
     {
+      id: 'complete',
       type: 'modal',
       kicker: 'Setup complete',
       title: 'Your hub is ready!',
       body: 'Members can now submit verifications and you can start reviewing them. Read the moderator guide to learn about advanced workflows.',
       primaryBtn: 'Explore the Mod Panel',
       hasGuideLink: true,
+      onboarding: {
+        kicker: 'All set',
+        title: "You're all set!",
+        body: "That's the tour. Head to the Queue anytime to review submissions. Read the moderator guide to learn about advanced workflows.",
+        primaryBtn: 'Got it',
+      },
     },
   ];
 
@@ -5307,7 +5388,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
   // the combined config step is actually on screen.
   function refreshWizardConfigDetail() {
     if (wizardStep < 0) return;
-    const stepDef = WIZARD_STEPS[wizardStep];
+    const stepDef = wizardActiveSteps[wizardStep];
     if (stepDef && stepDef.isConfigStep) {
       renderWizardInlineDetail();
     }
@@ -5325,24 +5406,29 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
     wizardBanner.classList.remove('hidden');
     window.requestAnimationFrame(updateWizardBannerSpacing);
 
+    const stepNumber = wizardBannerNumberFor(wizardStep);
+    const stepTotal = wizardBannerTotalCount();
+    const copy = resolveWizardStepCopy(stepDef);
+    const progressLabel = wizardMode === 'onboarding' ? 'Tour' : 'Setup';
+
     if (wizardMinimized) {
       wizardBannerInner.classList.add('hidden');
       wizardChip.classList.remove('hidden');
       if (wizardChipLabel) {
-        wizardChipLabel.textContent = `Setup in progress — Step ${stepDef.stepNum} of ${WIZARD_TOTAL_BANNER_STEPS}`;
+        wizardChipLabel.textContent = `${progressLabel} in progress — Step ${stepNumber} of ${stepTotal}`;
       }
       return;
     }
 
     wizardBannerInner.classList.remove('hidden');
     wizardChip.classList.add('hidden');
-    if (wizardStepBadge) wizardStepBadge.textContent = `Step ${stepDef.stepNum} of ${WIZARD_TOTAL_BANNER_STEPS}`;
+    if (wizardStepBadge) wizardStepBadge.textContent = `Step ${stepNumber} of ${stepTotal}`;
 
     const inNavigatePhase = stepDef.isTourStep && wizardPhase === 'navigate';
 
     if (inNavigatePhase) {
-      // Navigate phase: tell user exactly what to click; hide Next so they must click the target
-      if (wizardBannerTitle) wizardBannerTitle.textContent = stepDef.title;
+      // Navigate phase: tell user exactly what to tap; hide Next so they must tap the target
+      if (wizardBannerTitle) wizardBannerTitle.textContent = copy.title;
       if (wizardBannerBody) {
         let loc;
         if (stepDef.isTemplateSubtab) loc = 'the template tabs';
@@ -5350,7 +5436,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
         else loc = 'the navigation above';
         wizardBannerBody.textContent = `Tap "${stepDef.navigateLabel}" in ${loc} to continue.`;
       }
-      if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepDef.stepNum === 1);
+      if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepNumber <= 1);
       if (wizardNextBtn) wizardNextBtn.classList.add('hidden');
       if (wizardBannerExtra) {
         wizardBannerExtra.classList.add('hidden');
@@ -5360,11 +5446,11 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
     }
 
     // Learn / interact phase
-    if (wizardBannerTitle) wizardBannerTitle.textContent = stepDef.title;
-    if (wizardBannerBody) wizardBannerBody.textContent = stepDef.body;
-    if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepDef.stepNum === 1);
+    if (wizardBannerTitle) wizardBannerTitle.textContent = copy.title;
+    if (wizardBannerBody) wizardBannerBody.textContent = copy.body;
+    if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepNumber <= 1);
     if (wizardNextBtn) {
-      wizardNextBtn.textContent = stepDef.primaryBtn || 'Next →';
+      wizardNextBtn.textContent = copy.primaryBtn || 'Next →';
       wizardNextBtn.classList.remove('hidden');
       wizardNextBtn.disabled = Boolean(stepDef.isFlairStep && state && state.requiresInitialSetup);
     }
@@ -5377,14 +5463,15 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
 
   function renderWizardModal(stepDef) {
     if (!wizardModal) return;
+    const copy = resolveWizardStepCopy(stepDef);
     wizardModal.classList.remove('hidden');
     if (wizardModalKicker) {
-      wizardModalKicker.textContent = stepDef.kicker || '';
-      wizardModalKicker.classList.toggle('hidden', !stepDef.kicker);
+      wizardModalKicker.textContent = copy.kicker || '';
+      wizardModalKicker.classList.toggle('hidden', !copy.kicker);
     }
-    if (wizardModalTitle) wizardModalTitle.textContent = stepDef.title;
-    if (wizardModalBody) wizardModalBody.textContent = stepDef.body;
-    if (wizardModalBtn) wizardModalBtn.textContent = stepDef.primaryBtn || 'Continue';
+    if (wizardModalTitle) wizardModalTitle.textContent = copy.title;
+    if (wizardModalBody) wizardModalBody.textContent = copy.body;
+    if (wizardModalBtn) wizardModalBtn.textContent = copy.primaryBtn || 'Continue';
     if (wizardModalExtras) {
       wizardModalExtras.innerHTML = '';
       if (stepDef.hasGuideLink) {
@@ -5419,9 +5506,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
   }
 
   function advanceWizard() {
-    if (wizardStep < 0 || wizardStep >= WIZARD_STEPS.length - 1) return;
+    if (wizardStep < 0 || wizardStep >= wizardActiveSteps.length - 1) return;
     wizardStep += 1;
-    const nextStep = WIZARD_STEPS[wizardStep];
+    const nextStep = wizardActiveSteps[wizardStep];
     wizardPhase = nextStep && nextStep.isTourStep ? 'navigate' : 'learn';
     writeWizardStorage(wizardStep, false);
     renderWizard();
@@ -5443,15 +5530,25 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
     clearWizardFieldHighlights();
   }
 
+  function markOnboardingCompletedOnServer() {
+    if (wizardDebugMode) return; // don't pollute real state while debugging
+    // Fire-and-forget: records that this moderator has been through the walkthrough so it
+    // never shows again (setup completion counts as onboarding too).
+    void requestJson('/api/mod/onboarding/complete', {}).catch(() => {});
+  }
+
   function completeWizard() {
     writeWizardStorage(wizardStep, true);
+    markOnboardingCompletedOnServer();
     wizardStep = -1;
+    wizardMode = null;
+    wizardActiveSteps = [];
     wizardLastRenderedStep = -1;
     hideAllWizardUi();
   }
 
   function renderWizard() {
-    if (!state || !canAccessSettingsTab()) {
+    if (!state) {
       hideAllWizardUi();
       return;
     }
@@ -5460,15 +5557,19 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
         hideAllWizardUi();
         return;
       }
+      // Lock the mode + active step list for this run.
+      wizardMode = resolveWizardMode();
+      wizardActiveSteps = buildWizardActiveSteps(wizardMode);
       const stored = readWizardStorage();
-      wizardStep = (stored && typeof stored.step === 'number') ? stored.step : 0;
+      const storedStep = stored && typeof stored.step === 'number' ? stored.step : 0;
+      wizardStep = Math.min(Math.max(0, storedStep), wizardActiveSteps.length - 1);
       writeWizardStorage(wizardStep, false);
     }
     if (!shouldShowWizard()) {
       hideAllWizardUi();
       return;
     }
-    const stepDef = WIZARD_STEPS[wizardStep];
+    const stepDef = wizardActiveSteps[wizardStep];
     if (!stepDef) {
       hideAllWizardUi();
       return;
@@ -7540,7 +7641,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       }
       // Advance wizard from navigate phase when mod clicks the target settings sub-tab
       if (tab && wizardStep >= 0 && wizardPhase === 'navigate') {
-        const stepDef = WIZARD_STEPS[wizardStep];
+        const stepDef = wizardActiveSteps[wizardStep];
         if (stepDef && stepDef.isTourStep && stepDef.isSettingsSubTab && tab === stepDef.settingsTab) {
           wizardPhase = 'learn';
           hideWizardSpotlight();
@@ -7583,24 +7684,27 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
   window.addEventListener('scroll', repositionWizardSpotlightOnViewportChange, { passive: true });
   window.addEventListener('resize', repositionWizardSpotlightOnViewportChange);
   // Freeze page scrolling during spotlight steps so the highlight can't drift off target.
-  document.addEventListener(
-    'touchmove',
-    (event) => {
-      if (!wizardScrollLocked) return;
-      // Still allow scrolling/interaction inside the highlighted element itself (e.g. the
-      // horizontally scrollable denial-reason chips); block page scroll otherwise.
-      if (wizardSpotlightTargetEl && wizardSpotlightTargetEl.contains(event.target)) return;
-      event.preventDefault();
-    },
-    { passive: false }
-  );
+  // Scoped to the overlay (not document) so we don't register a non-passive touchmove
+  // globally — that would slow normal scrolling everywhere else. The overlay is display:none
+  // except during spotlight steps, and the spotlight target shows through a clip-path hole,
+  // so touches on the highlighted element never reach the overlay and stay interactive.
+  if (wizardOverlay) {
+    wizardOverlay.addEventListener(
+      'touchmove',
+      (event) => {
+        if (!wizardScrollLocked) return;
+        event.preventDefault();
+      },
+      { passive: false }
+    );
+  }
 
   if (wizardMinimizeBtn) {
     wizardMinimizeBtn.addEventListener('click', () => {
       wizardMinimized = true;
       // Free the mod to scroll and look around while minimized.
       hideWizardSpotlight();
-      const stepDef = WIZARD_STEPS[wizardStep];
+      const stepDef = wizardActiveSteps[wizardStep];
       if (stepDef) renderWizardBanner(stepDef);
     });
   }
@@ -7615,7 +7719,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
 
   if (wizardModalBtn) {
     wizardModalBtn.addEventListener('click', () => {
-      if (wizardStep === WIZARD_STEPS.length - 1) {
+      if (wizardStep === wizardActiveSteps.length - 1) {
         completeWizard();
       } else {
         advanceWizard();
@@ -7657,7 +7761,7 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       }
       // Advance wizard from navigate phase when mod clicks the target tab
       if (tab && wizardStep >= 0 && wizardPhase === 'navigate') {
-        const stepDef = WIZARD_STEPS[wizardStep];
+        const stepDef = wizardActiveSteps[wizardStep];
         if (stepDef && stepDef.isTourStep && !stepDef.isSettingsSubTab && tab === stepDef.tab) {
           wizardPhase = 'learn';
           hideWizardSpotlight();

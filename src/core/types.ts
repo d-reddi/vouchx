@@ -222,6 +222,7 @@ export type DashboardData = {
   canAccessSettingsTab: boolean;
   flairTemplateValidation: FlairTemplateValidationState;
   requiresInitialSetup: boolean;
+  needsOnboarding: boolean;
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerShouldDisplayVerified: boolean;
@@ -684,6 +685,7 @@ export type ModPanelStatePayload = {
   hasConfigAccess: boolean;
   canAccessSettingsTab: boolean;
   requiresInitialSetup: boolean;
+  needsOnboarding: boolean;
   flairTemplateValidation: FlairTemplateValidationState;
   pendingCount: number;
   pending: PendingPanelItem[];

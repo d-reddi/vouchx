@@ -853,6 +853,14 @@ body.wizard-scroll-locked {
   gap: var(--space-3);
 }
 
+/* The wizard's welcome/complete modals appear right as the panel loads. A full-screen
+   backdrop blur is GPU-expensive and composites a frame late, so the dialog looks like it
+   pops in after the panel. Use a plain dim (no blur) so it appears with the content. */
+.wizard-modal {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .wizard-dialog-card {
   max-width: 520px;
 }

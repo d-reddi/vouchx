@@ -155,3 +155,7 @@ export {
   buildModeratorUpdateNotice,
   dismissModeratorUpdateNotice,
 } from './core/update-notice.ts';
+export {
+  hasCompletedModeratorOnboarding,
+  markModeratorOnboardingCompleted,
+} from './core/onboarding.ts';
