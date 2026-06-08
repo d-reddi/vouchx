@@ -1,6 +1,7 @@
 import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
+import brandVxUrl from './brand-vx.png';
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
@@ -15,6 +16,11 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
   const settingsPrimaryTabButton =
     tabButtons.find((button) => String(button.dataset.tab || '') === 'settings') || null;
   const mainContent = document.getElementById('main-content');
+  const modLoadingScreen = document.getElementById('mod-loading-screen');
+  const modLoadingLogo = document.getElementById('mod-loading-logo');
+  if (modLoadingLogo) {
+    modLoadingLogo.src = brandVxUrl;
+  }
   const tabPanels = {
     pending: document.getElementById('tab-pending'),
     blocked: document.getElementById('tab-blocked'),
@@ -2837,6 +2843,9 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       syncSeededAuditResultsFromState();
       stateInitialized = true;
       setBusy(false);
+      if (modLoadingScreen) {
+        modLoadingScreen.classList.add('hidden');
+      }
       if (mainContent) {
         mainContent.classList.remove('hidden');
       }
@@ -7844,6 +7853,10 @@ import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_U
       if (readyRetries >= 8) {
         window.clearInterval(readyTimerId);
         readyTimerId = 0;
+        // Give up: drop the full-screen loader so the hero's Refresh button is reachable.
+        if (modLoadingScreen) {
+          modLoadingScreen.classList.add('hidden');
+        }
         showToast('Still waiting for moderator data. Tap Refresh.', 'error');
       }
     }, 900);
