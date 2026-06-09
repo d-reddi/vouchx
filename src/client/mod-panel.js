@@ -5588,6 +5588,9 @@ import brandVxUrl from './brand-vx.png';
     wizardActiveSteps = [];
     wizardLastRenderedStep = -1;
     hideAllWizardUi();
+    // The final steps leave the mod on the Settings/Templates tab — drop them back on the
+    // Queue so they land where day-to-day review happens.
+    setTab('pending');
   }
 
   function renderWizard() {
