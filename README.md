@@ -109,7 +109,7 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.2
+### v1.5.3
 
 #### Critical Fix:
 - Fixes a Cron job name mismatch that prevented the nightly user validation reconcile job from running.
@@ -118,6 +118,7 @@ Full changelog:
 
 - Fixes an issue where the auto flair repair could silently skip approved users verified before VouchX v1.3.0
 - TTL for newly approved records extended to 180 days to better support members who browse infrequently. Records for previously approved users are unaffected.
+- New Setup and Moderator onboarding wizard. 
 
 ---
 
@@ -141,34 +142,3 @@ Full changelog:
 - Improved moderator permission lookup resilience with retry behavior before falling back to cached permissions.
 - Updated queue lock TTL behavior.
 
----
-
-### v1.4.4
-
-#### New Features
-
-- Photo Instructions now support English, Spanish, French, and Portuguese (Brazil), configurable in **Mod Panel → Photo Instructions** (translation required)
-- History & Audit records now include links to submitted photos for approved verifications
-- Added batch queue actions for moderators
-- Added advisory user scoring badges for pending verifications (Spam Risk, Limited History, Standard, Established) based on account signals including overall & subreddit karma, previous denials, verified email, Reddit Premium, shadowban status, and recent activity. Individual signal results are available in the pending card **Stats** section to help moderators make informed decisions, configurable in Install Settings *(enabled by default)*
-- Added Content Creator badge for users who may be adult content creators, configurable in Install Settings *(enabled by default)*
-- Added optional automatic denial of shadowbanned accounts, configurable in Install Settings *(disabled by default)*
-- Added optional auto-archive support for pending-user modmail replies, configurable in Install Settings *(enabled by default)*
-- Added Markdown helper controls and placeholder insertion menus to photo instructions and modmail templates
-
-#### Photo Instructions Improvements
-
-- Added `{{username}}` placeholder support (`u/username`)
-- Added Android-specific “scroll down” helper pill
-- Added “Caps” helper button for ALL CAPS formatting
-
-#### Mod Panel Improvements
-
-- Desktop Mod Panel now supports expanded full-screen view
-
-#### Back-End / Technical Changes
-
-- Improved performance for flair and moderator lookups
-- Updated to Devvit 0.12.24
-- Added global blocklist support
-- Corrected verified-record retention behavior so the intended ninety (90) day retention window is now applied

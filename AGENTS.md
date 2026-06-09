@@ -30,15 +30,24 @@ structure — do not re-merge the modules back into one file.**
 | `flair.ts` | Approval flair config, template validation, viewer flair snapshots, verification flair checks |
 | `search.ts` | Pending/approved/history/audit search, moderator stats |
 | `dashboard.ts` | Hub/mod dashboard loaders, state payload builders (`toHubState` / `toModPanelState`) |
+| `onboarding.ts` | Per-moderator onboarding completion tracking for the mod panel walkthrough |
 | `settings.ts` | Runtime config, settings save handlers, validators, configurable deny reasons |
 | `theme.ts` | Theme presets + color derivation |
 | `retention.ts` | Validation scheduling, retention reconcile, history prune, audit purge (scheduled jobs) |
 | `purge.ts` | User data deletion, pending withdrawal |
 | `update-notice.ts` | Release metadata, moderator update notices |
 
-The client UI lives in `webroot/` (`hub-app.js`, `mod-panel.js`, etc.) and is a
-separate bundle — it talks to the server only over the HTTP routes defined in
-`src/index.ts`, never by importing `src/core`.
+The client UI lives in `src/client/` (`hub-app.js`, `mod-panel.js`,
+`mod-panel.css`, etc.) and is a separate bundle — it talks to the server only
+over the HTTP routes defined in `src/index.ts`, never by importing `src/core`.
+
+The mod panel setup/onboarding wizard lives in `src/client/mod-panel.html`,
+`src/client/mod-panel.js`, and `src/client/mod-panel.css`. Server state for the
+wizard flows through `DashboardData` / `ModPanelStatePayload`
+(`requiresInitialSetup`, `needsOnboarding`) and `/api/mod/onboarding/complete`;
+per-moderator completion storage belongs in `src/core/onboarding.ts`. Keep
+wizard debug controls production-safe: `wizardDebugMode` should be gated by
+`?vx_wizard_debug=1`, and forced mode should stay `null` in production.
 
 ## Import rules
 
@@ -63,6 +72,6 @@ separate bundle — it talks to the server only over the HTTP routes defined in
 
 ```
 npm run check     # tsc --noEmit
-npm test          # node --test src/core.test.ts (167 tests)
+npm test          # node --test src/core.test.ts (181 tests)
 npm run build     # vite build (client + server bundles)
 ```

@@ -487,13 +487,9 @@ import brandVxUrl from './brand-vx.png';
   } catch (_e) {
     // localStorage unavailable
   }
-  // TEMP: forced on for testing — always shows the wizard, ignoring the per-mod completion
-  // record. Revert to the line below before shipping:
-  //   const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
-  const wizardDebugMode = true;
-  // TEMP: force a specific mode while debugging ('setup' | 'onboarding' | null). Lets us
-  // test the setup flow even on a sub that's already configured. Set to null before shipping.
-  const wizardForceMode = 'setup';
+  const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
+  // Force a specific mode while debugging ('setup' | 'onboarding' | null). Keep null in production.
+  const wizardForceMode = null;
   let wizardMode = null; // 'setup' | 'onboarding' | null — locked once the wizard starts
   let wizardActiveSteps = []; // master steps filtered for the current mode + permissions
   let wizardStep = -1;
@@ -5004,7 +5000,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'demo-approve',
       type: 'banner',
       title: 'Approving a submission',
-      body: "Each card shows the member's photos and account stats. Approve verifies them and applies your approval flair. (These are examples — nothing here is real.)",
+      body: "Each card shows the member's photos and account stats. Approve verifies them and applies your approval flair. (This is an example queue card)",
       tab: 'pending',
       isDemoStep: true,
       spotlightElementId: 'wizard-demo-approve',
@@ -5035,7 +5031,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'demo-bulk',
       type: 'banner',
       title: 'Review in bulk',
-      body: 'Tick the checkmark on each card to select several at once, then approve or deny everything you picked from the bar at the top of the queue.',
+      body: 'Tick the checkmark on each card to select several at once, then approve or deny everything you picked from the bar at the bottom of the screen.',
       tab: 'pending',
       isDemoStep: true,
       isDemoBulk: true,
@@ -5046,7 +5042,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'history',
       type: 'banner',
       title: 'History',
-      body: "History keeps a complete record of every verification — approvals, denials, and removals. Use the search to look up a specific user's history at any time.",
+      body: "History keeps a complete record of every verification — approvals, denials, and removals. Use the filter button to search and look up a specific user's history at any time.",
       tab: 'history',
       isTourStep: true,
       navigateLabel: 'History',
