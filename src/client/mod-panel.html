@@ -155,6 +155,60 @@
                   <button id="batch-deny-btn" class="btn btn-danger" type="button">Deny selected</button>
                 </div>
               </div>
+              <div id="wizard-demo-queue" class="wizard-demo-queue hidden" role="group" aria-label="Example submissions">
+                <p class="wizard-demo-note">Example submissions — shown for this walkthrough only.</p>
+                <div id="wizard-demo-bulkbar" class="wizard-demo-bulkbar hidden">
+                  <span class="wizard-demo-bulkbar-count">2 selected</span>
+                  <div class="wizard-demo-bulkbar-actions">
+                    <button class="btn btn-success" type="button" tabindex="-1">Approve selected</button>
+                    <button class="btn btn-danger" type="button" tabindex="-1">Deny selected</button>
+                  </div>
+                </div>
+                <article class="item queue-card wizard-demo-card">
+                  <div class="queue-card-header">
+                    <div class="queue-card-identity">
+                      <label id="wizard-demo-select" class="pending-select-toggle"><input type="checkbox" class="wizard-demo-checkbox" tabindex="-1" aria-label="Example select" /></label>
+                      <span class="wizard-demo-username">u/example_member</span>
+                    </div>
+                    <span class="wizard-demo-badge">Example</span>
+                  </div>
+                  <p class="wizard-demo-meta">Account age 142d · 3.2k karma · 2 photos submitted</p>
+                  <div class="wizard-demo-thumbs" aria-hidden="true"><span></span><span></span></div>
+                  <div class="row wizard-demo-actions">
+                    <button id="wizard-demo-approve" class="btn btn-success" type="button" tabindex="-1">Approve</button>
+                    <button id="wizard-demo-deny" class="btn btn-danger" type="button" tabindex="-1">Deny</button>
+                  </div>
+                  <div id="wizard-demo-deny-panel" class="pending-deny wizard-demo-deny hidden">
+                    <select id="wizard-demo-deny-reason" class="field-select" tabindex="-1" aria-label="Example denial reason">
+                      <option>Choose a denial reason…</option>
+                      <option>Photo doesn't match requirements</option>
+                      <option>Unable to verify identity</option>
+                      <option>Account too new</option>
+                    </select>
+                    <textarea id="wizard-demo-deny-notes" class="field-textarea" rows="3" tabindex="-1" aria-label="Example denial notes" placeholder="Optional notes — saved to mod notes and can be included in the denial modmail"></textarea>
+                    <label id="wizard-demo-deny-block" class="toggle-row wizard-demo-block-row"><input type="checkbox" tabindex="-1" aria-label="Example block user" /><span>Block this user from submitting again</span></label>
+                    <div class="row pending-deny-actions">
+                      <button class="btn btn-secondary" type="button" tabindex="-1">Cancel</button>
+                      <button id="wizard-demo-deny-confirm" class="btn btn-danger" type="button" tabindex="-1">Confirm denial</button>
+                    </div>
+                  </div>
+                </article>
+                <article class="item queue-card wizard-demo-card">
+                  <div class="queue-card-header">
+                    <div class="queue-card-identity">
+                      <label class="pending-select-toggle"><input type="checkbox" class="wizard-demo-checkbox" tabindex="-1" aria-label="Example select" /></label>
+                      <span class="wizard-demo-username">u/another_member</span>
+                    </div>
+                    <span class="wizard-demo-badge">Example</span>
+                  </div>
+                  <p class="wizard-demo-meta">Account age 88d · 1.1k karma · 2 photos submitted</p>
+                  <div class="wizard-demo-thumbs" aria-hidden="true"><span></span><span></span></div>
+                  <div class="row wizard-demo-actions">
+                    <button class="btn btn-success" type="button" tabindex="-1">Approve</button>
+                    <button class="btn btn-danger" type="button" tabindex="-1">Deny</button>
+                  </div>
+                </article>
+              </div>
               <div id="pending-list" class="stack"></div>
             </div>
           </div>
@@ -1171,6 +1225,10 @@
         <p id="wizard-modal-kicker" class="wizard-modal-kicker hidden"></p>
         <h2 id="wizard-modal-title" class="wizard-modal-title"></h2>
         <p id="wizard-modal-body" class="wizard-modal-body"></p>
+        <div id="wizard-modal-hint" class="wizard-modal-hint hidden">
+          <span class="wizard-modal-hint-badge" aria-hidden="true">?</span>
+          <span class="wizard-modal-hint-text">Reminder: look for these <strong>?</strong> buttons around the panel — tap one anytime for extra context on a setting or action.</span>
+        </div>
         <div id="wizard-modal-extras" class="wizard-modal-extras hidden"></div>
         <div class="row wizard-modal-actions">
           <button id="wizard-modal-btn" class="btn btn-primary" type="button"></button>
