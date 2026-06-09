@@ -487,7 +487,10 @@ import brandVxUrl from './brand-vx.png';
   } catch (_e) {
     // localStorage unavailable
   }
-  const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
+  // Manual toggle: false in production (wizard shows based on real state). The Devvit mod
+  // panel webview can't take URL params, so flip this to `true` here in code to force the
+  // wizard on for testing.
+  const wizardDebugMode = false;
   // Force a specific mode while debugging ('setup' | 'onboarding' | null). Keep null in production.
   const wizardForceMode = null;
   let wizardMode = null; // 'setup' | 'onboarding' | null — locked once the wizard starts
