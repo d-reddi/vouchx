@@ -273,6 +273,10 @@ import brandVxUrl from './brand-vx.png';
   const wizardBannerBody = document.getElementById('wizard-banner-body');
   const wizardBannerExtra = document.getElementById('wizard-banner-extra');
   const wizardInlineDetail = document.getElementById('wizard-inline-detail');
+  const wizardDemoQueue = document.getElementById('wizard-demo-queue');
+  const wizardDemoBulkbar = document.getElementById('wizard-demo-bulkbar');
+  const wizardDemoDenyPanel = document.getElementById('wizard-demo-deny-panel');
+  const wizardDemoCheckboxes = Array.from(document.querySelectorAll('.wizard-demo-checkbox'));
   const wizardBackBtn = document.getElementById('wizard-back-btn');
   const wizardNextBtn = document.getElementById('wizard-next-btn');
   const wizardMinimizeBtn = document.getElementById('wizard-minimize-btn');
@@ -281,6 +285,7 @@ import brandVxUrl from './brand-vx.png';
   const wizardModalKicker = document.getElementById('wizard-modal-kicker');
   const wizardModalTitle = document.getElementById('wizard-modal-title');
   const wizardModalBody = document.getElementById('wizard-modal-body');
+  const wizardModalHint = document.getElementById('wizard-modal-hint');
   const wizardModalExtras = document.getElementById('wizard-modal-extras');
   const wizardModalBtn = document.getElementById('wizard-modal-btn');
   const externalNavigationLinks = Array.from(document.querySelectorAll('[data-open-external-url]'));
@@ -482,8 +487,13 @@ import brandVxUrl from './brand-vx.png';
   } catch (_e) {
     // localStorage unavailable
   }
-  // Data-driven in production; append ?vx_wizard_debug=1 to force the wizard for testing.
-  const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
+  // TEMP: forced on for testing — always shows the wizard, ignoring the per-mod completion
+  // record. Revert to the line below before shipping:
+  //   const wizardDebugMode = queryParams.get('vx_wizard_debug') === '1';
+  const wizardDebugMode = true;
+  // TEMP: force a specific mode while debugging ('setup' | 'onboarding' | null). Lets us
+  // test the setup flow even on a sub that's already configured. Set to null before shipping.
+  const wizardForceMode = 'setup';
   let wizardMode = null; // 'setup' | 'onboarding' | null — locked once the wizard starts
   let wizardActiveSteps = []; // master steps filtered for the current mode + permissions
   let wizardStep = -1;
@@ -4909,6 +4919,7 @@ import brandVxUrl from './brand-vx.png';
   // panel tour for reviewers after setup is complete. Debug mode forces whichever fits.
   function resolveWizardMode() {
     if (!state) return null;
+    if (wizardDebugMode && wizardForceMode) return wizardForceMode; // TEMP testing override
     if (state.requiresInitialSetup && state.canAccessSettingsTab) return 'setup';
     if (wizardDebugMode) return 'onboarding';
     if (state.needsOnboarding) return 'onboarding';
@@ -4988,6 +4999,48 @@ import brandVxUrl from './brand-vx.png';
       isTourStep: true,
       navigateLabel: 'Queue',
     },
+    // Demo: Approve — spotlight the Approve button on an inert example card
+    {
+      id: 'demo-approve',
+      type: 'banner',
+      title: 'Approving a submission',
+      body: "Each card shows the member's photos and account stats. Approve verifies them and applies your approval flair. (These are examples — nothing here is real.)",
+      tab: 'pending',
+      isDemoStep: true,
+      spotlightElementId: 'wizard-demo-approve',
+    },
+    // Demo: Deny opens the inline denial options
+    {
+      id: 'demo-deny',
+      type: 'banner',
+      title: 'Denying a submission',
+      body: 'Tap Deny on a card to open its denial options.',
+      tab: 'pending',
+      isDemoStep: true,
+      spotlightElementId: 'wizard-demo-deny',
+    },
+    // Demo: the whole denial panel in one stop (reason + notes + block + confirm)
+    {
+      id: 'demo-deny-options',
+      type: 'banner',
+      title: 'Denial options',
+      body: 'Pick a reason (the member gets the matching Template message), add optional notes (saved to your mod notes and the modmail), tick Block to stop resubmissions, then Confirm denial. Cancel backs out.',
+      tab: 'pending',
+      isDemoStep: true,
+      demoDenyOpen: true,
+      spotlightElementId: 'wizard-demo-deny-panel',
+    },
+    // Demo: bulk review — checkmarks select, bar acts on all
+    {
+      id: 'demo-bulk',
+      type: 'banner',
+      title: 'Review in bulk',
+      body: 'Tick the checkmark on each card to select several at once, then approve or deny everything you picked from the bar at the top of the queue.',
+      tab: 'pending',
+      isDemoStep: true,
+      isDemoBulk: true,
+      spotlightElementId: 'wizard-demo-bulkbar',
+    },
     // History
     {
       id: 'history',
@@ -5038,7 +5091,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'config',
       type: 'banner',
       title: 'Verification setup',
-      body: 'Two quick settings get your community ready. Both are highlighted below, with details right above them — no need to scroll back up. The Back and Next buttons stay pinned at the top.',
+      body: 'Two quick settings get your community ready. Both are highlighted below, with details right above them.',
       tab: 'settings',
       settingsTab: 'general',
       isFlairStep: true,
@@ -5063,12 +5116,12 @@ import brandVxUrl from './brand-vx.png';
         body: 'This is where the photo instructions members see when they submit are managed — edit them here anytime.',
       },
     },
-    // Templates — navigate phase spotlights the Templates settings sub-tab (setup only)
+    // Templates — one stop covering all outcome messages (tap the tabs to edit each)
     {
       id: 'templates',
       type: 'banner',
       title: 'Message Templates',
-      body: 'VouchX sends an automatic modmail for each verification outcome. We\'ll walk through each message so you know exactly what members receive.',
+      body: 'VouchX sends an automatic modmail for each outcome — Pending, Approval, Denial, and Removed. Tap the tabs here to edit any of them. Denial has an extra layer we’ll look at next.',
       tab: 'settings',
       settingsTab: 'templates',
       isTourStep: true,
@@ -5076,49 +5129,7 @@ import brandVxUrl from './brand-vx.png';
       navigateLabel: 'Templates',
       requiresConfigAccess: true,
     },
-    // Pending template (setup only)
-    {
-      id: 'template-pending',
-      type: 'banner',
-      title: 'Pending message',
-      body: 'Sent the moment a member submits — it confirms their request was received and is waiting for your review.',
-      tab: 'settings',
-      settingsTab: 'templates',
-      templateSubtab: 'pending',
-      isTourStep: true,
-      isTemplateSubtab: true,
-      navigateLabel: 'Pending',
-      requiresConfigAccess: true,
-    },
-    // Approval template (setup only)
-    {
-      id: 'template-approval',
-      type: 'banner',
-      title: 'Approval message',
-      body: 'Sent when you approve a member — it lets them know they have been verified.',
-      tab: 'settings',
-      settingsTab: 'templates',
-      templateSubtab: 'approval',
-      isTourStep: true,
-      isTemplateSubtab: true,
-      navigateLabel: 'Approval',
-      requiresConfigAccess: true,
-    },
-    // Denial template (setup only)
-    {
-      id: 'template-denial',
-      type: 'banner',
-      title: 'Denial message',
-      body: 'Sent when you deny a submission. Denial is special — each denial reason can have its own message. Let\'s look at that next.',
-      tab: 'settings',
-      settingsTab: 'templates',
-      templateSubtab: 'denial',
-      isTourStep: true,
-      isTemplateSubtab: true,
-      navigateLabel: 'Denial',
-      requiresConfigAccess: true,
-    },
-    // Denial reasons — spotlight the reason selector (setup only)
+    // Denial reasons — spotlight the reason selector
     {
       id: 'denial-reasons',
       type: 'banner',
@@ -5143,6 +5154,7 @@ import brandVxUrl from './brand-vx.png';
       body: 'Members can now submit verifications and you can start reviewing them. Read the moderator guide to learn about advanced workflows.',
       primaryBtn: 'Explore the Mod Panel',
       hasGuideLink: true,
+      hasHintReminder: true,
       onboarding: {
         kicker: 'All set',
         title: "You're all set!",
@@ -5393,6 +5405,30 @@ import brandVxUrl from './brand-vx.png';
     }
   }
 
+  function renderWizardDemo(stepDef) {
+    if (!wizardDemoQueue) return;
+    // The example cards live in the Queue panel, so make sure it's the visible tab before
+    // the spotlight measures the highlighted element.
+    setTab('pending');
+    wizardDemoQueue.classList.remove('hidden');
+    const denyOpen = Boolean(stepDef && stepDef.demoDenyOpen);
+    if (wizardDemoDenyPanel) wizardDemoDenyPanel.classList.toggle('hidden', !denyOpen);
+    const showBulk = Boolean(stepDef && stepDef.isDemoBulk);
+    if (wizardDemoBulkbar) wizardDemoBulkbar.classList.toggle('hidden', !showBulk);
+    for (const checkbox of wizardDemoCheckboxes) {
+      checkbox.checked = showBulk; // pre-select on the bulk-bar step to show the connection
+    }
+  }
+
+  function hideWizardDemo() {
+    if (wizardDemoQueue) wizardDemoQueue.classList.add('hidden');
+    if (wizardDemoDenyPanel) wizardDemoDenyPanel.classList.add('hidden');
+    if (wizardDemoBulkbar) wizardDemoBulkbar.classList.add('hidden');
+    for (const checkbox of wizardDemoCheckboxes) {
+      checkbox.checked = false;
+    }
+  }
+
   // Re-render the inline config detail when flair options finish loading, but only while
   // the combined config step is actually on screen.
   function refreshWizardConfigDetail() {
@@ -5481,6 +5517,7 @@ import brandVxUrl from './brand-vx.png';
     if (wizardModalTitle) wizardModalTitle.textContent = copy.title;
     if (wizardModalBody) wizardModalBody.textContent = copy.body;
     if (wizardModalBtn) wizardModalBtn.textContent = copy.primaryBtn || 'Continue';
+    if (wizardModalHint) wizardModalHint.classList.toggle('hidden', !stepDef.hasHintReminder);
     if (wizardModalExtras) {
       wizardModalExtras.innerHTML = '';
       if (stepDef.hasGuideLink) {
@@ -5537,6 +5574,7 @@ import brandVxUrl from './brand-vx.png';
     hideWizardSpotlight();
     hideWizardInlineDetail();
     clearWizardFieldHighlights();
+    hideWizardDemo();
   }
 
   function markOnboardingCompletedOnServer() {
@@ -5604,7 +5642,16 @@ import brandVxUrl from './brand-vx.png';
       hideWizardSpotlight();
       hideWizardInlineDetail();
       clearWizardFieldHighlights();
+      hideWizardDemo();
       return;
+    }
+
+    // Review demo steps: show the inert example queue, then fall through to the generic
+    // learn/spotlight handling below, which highlights the relevant example control.
+    if (stepDef.isDemoStep) {
+      renderWizardDemo(stepDef);
+    } else {
+      hideWizardDemo();
     }
 
     // Config step: highlight both fields in place (no dimming) with details shown inline

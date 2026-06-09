@@ -966,6 +966,45 @@ body.wizard-scroll-locked {
   margin-bottom: var(--space-7);
 }
 
+.wizard-modal-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--primary-soft) 22%, var(--panel-surface-strong) 78%);
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--panel-border) 76%);
+}
+
+/* Mirrors the real .team-stats-help-button so mods recognize the icon. */
+.wizard-modal-hint-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-surface-soft) 88%, var(--primary-soft) 12%);
+  color: color-mix(in srgb, var(--muted) 58%, var(--text) 42%);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+.wizard-modal-hint-text {
+  min-width: 0;
+  font-size: var(--text-small);
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--muted) 80%, var(--text) 20%);
+}
+
+.wizard-modal-hint-text strong {
+  color: var(--text);
+}
+
 .wizard-modal-extras {
   display: flex;
   flex-wrap: wrap;
@@ -1077,6 +1116,113 @@ body.wizard-scroll-locked {
   font-size: var(--text-small);
   color: var(--primary);
   font-weight: var(--font-weight-medium);
+}
+
+/* Inert example queue used by the review walkthrough steps. */
+.wizard-demo-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+.wizard-demo-note {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.wizard-demo-card {
+  position: relative;
+  scroll-margin-top: 120px;
+}
+
+.wizard-demo-card .btn,
+.wizard-demo-bulkbar .btn,
+.wizard-demo-checkbox {
+  cursor: default;
+}
+
+.wizard-demo-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 36%, transparent);
+}
+
+.wizard-demo-username {
+  font-family: var(--font-display);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+}
+
+.wizard-demo-meta {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+
+.wizard-demo-thumbs {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.wizard-demo-thumbs span {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-border) 40%, var(--panel-surface) 60%);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+}
+
+.wizard-demo-actions {
+  margin-top: var(--space-5);
+  gap: var(--space-3);
+}
+
+.wizard-demo-bulkbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: 12px;
+  scroll-margin-top: 120px;
+  background: color-mix(in srgb, var(--primary-soft) 30%, var(--panel-surface-strong) 70%);
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--panel-border) 72%);
+}
+
+.wizard-demo-bulkbar-count {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+}
+
+.wizard-demo-bulkbar-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* Example deny panel mirrors the real inline deny flow. */
+.wizard-demo-deny {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard-demo-block-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
 }
 
 .wizard-field-highlight {
