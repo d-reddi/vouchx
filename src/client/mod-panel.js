@@ -4195,7 +4195,7 @@ import brandVxUrl from './brand-vx.png';
     if (item.parentVerificationId && !isClaimedByOther) {
       const cancelReopenBtn = document.createElement('button');
       cancelReopenBtn.className = 'btn btn-secondary';
-      cancelReopenBtn.textContent = 'Cancel Re-review';
+      cancelReopenBtn.textContent = 'Keep Denied';
       cancelReopenBtn.disabled = actionInFlight;
       if (actionInFlight) {
         cancelReopenBtn.title = 'This request is being processed.';
