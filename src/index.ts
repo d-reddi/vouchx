@@ -39,7 +39,9 @@ import {
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
+  addPendingFlagNote,
   setPendingClaimState,
+  setPendingFlagState,
   reconcileApprovedUsersForRetention,
   submitVerification,
   moderatorPermissionLookupNeedsRetry,
@@ -992,6 +994,60 @@ app.post('/api/mod/unclaim', async (req, res) => {
       toast: {
         text: result.changed ? `Unlocked u/${result.item.username}'s verification.` : `u/${result.item.username} is already unlocked.`,
         tone: result.changed ? 'success' : 'info',
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/flag', async (req, res) => {
+  try {
+    const verificationId = String(req.body?.verificationId ?? '').trim();
+    if (!verificationId) {
+      throw httpError(400, 'Missing verification ID.');
+    }
+    const flagged = parseBooleanFlag(req.body?.flagged);
+    const note = String(req.body?.note ?? '').trim();
+    const appContext = currentContext();
+    const result = await setPendingFlagState(appContext, verificationId, flagged, note);
+    await sendRefreshSignals(appContext);
+    res.json({
+      ...(await buildModPayload(appContext)),
+      toast: {
+        text: flagged
+          ? result.changed
+            ? `Flagged u/${result.username} for 2nd review.`
+            : `u/${result.username} is already flagged for 2nd review.`
+          : result.changed
+            ? `Removed the 2nd review flag for u/${result.username}.`
+            : `u/${result.username} is not flagged.`,
+        tone: result.changed ? 'success' : 'info',
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/flag-note', async (req, res) => {
+  try {
+    const verificationId = String(req.body?.verificationId ?? '').trim();
+    const note = String(req.body?.note ?? '').trim();
+    if (!verificationId) {
+      throw httpError(400, 'Missing verification ID.');
+    }
+    if (!note) {
+      throw httpError(400, 'Enter a note before posting.');
+    }
+    const appContext = currentContext();
+    const result = await addPendingFlagNote(appContext, verificationId, note);
+    await sendRefreshSignals(appContext);
+    res.json({
+      ...(await buildModPayload(appContext)),
+      toast: {
+        text: `Note added for u/${result.username}.`,
+        tone: 'success',
       },
     });
   } catch (error) {

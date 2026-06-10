@@ -221,6 +221,7 @@ export function toPendingPanelItem(
     photoThreeUrl: normalizedRecord.photoThreeUrl ?? '',
     claimedBy: normalizedRecord.claimedBy ?? null,
     claimedAt: normalizedRecord.claimedAt ?? null,
+    reviewFlag: normalizedRecord.reviewFlag ?? null,
     parentVerificationId: normalizedRecord.parentVerificationId ?? null,
     isResubmission: Boolean(normalizedRecord.isResubmission),
     accountDetails,

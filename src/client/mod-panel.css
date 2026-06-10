@@ -2454,8 +2454,17 @@ body.wizard-scroll-locked {
   white-space: nowrap;
 }
 
+.queue-meta-icon-flag {
+  --queue-meta-icon-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='black' d='M6 2c.6 0 1 .4 1 1v1h11a1 1 0 0 1 .8 1.6L16.3 9l2.5 3.4A1 1 0 0 1 18 14H7v7a1 1 0 1 1-2 0V3c0-.6.4-1 1-1Zm1 4v6h9l-1.8-2.4a1 1 0 0 1 0-1.2L16 6H7Z'/%3E%3C/svg%3E");
+}
+
 .pending-claim-meta {
   color: var(--danger);
+  font-weight: var(--font-weight-semibold);
+}
+
+.pending-flag-meta {
+  color: var(--primary);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -2621,6 +2630,73 @@ body.wizard-scroll-locked {
 .pending-age-banned {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.pending-age-denied-before {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.pending-age-flagged {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.queue-card-flagged {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary), var(--card-shadow-soft);
+}
+
+.pending-flag-notes {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid color-mix(in srgb, var(--panel-divider) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pending-flag-notes-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.pending-flag-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pending-flag-note {
+  padding: var(--space-4) var(--space-5);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 36%, transparent);
+}
+
+.pending-flag-note-meta {
+  margin: 0 0 2px;
+}
+
+.pending-flag-note-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pending-flag-note-input {
+  min-height: 58px;
+}
+
+.pending-flag-note-actions {
+  justify-content: flex-end;
+}
+
+.stats-last-denial-notes {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .pending-grade-spam {
@@ -3520,6 +3596,57 @@ body.wizard-scroll-locked {
   color: #ffffff;
   padding: 8px 12px;
   cursor: pointer;
+}
+
+.image-nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 51;
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 16, 24, 0.82);
+  color: #ffffff;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 0 3px;
+  cursor: pointer;
+}
+
+.image-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.image-nav:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.image-nav-prev {
+  left: 10px;
+}
+
+.image-nav-next {
+  right: 10px;
+}
+
+.image-counter {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 16, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
 }
 
 .dialog-card {

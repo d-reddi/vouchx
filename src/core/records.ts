@@ -45,6 +45,7 @@ import {
 } from './normalize.ts';
 import { parseDenyReason } from './settings.ts';
 import { parsePendingAccountDetailsSnapshot } from './submission.ts';
+import { parsePendingReviewFlag } from './flags.ts';
 import { purgeAuditLogOlderThanDays, removeValidationTrackingForRecordIds } from './retention.ts';
 
 export function getRecordUserId(record: Pick<VerificationRecord, 'userId'> | null | undefined): string {
@@ -555,6 +556,7 @@ export function parseRecord(payload: string): VerificationRecord | null {
       denyNotes: typeof parsed.denyNotes === 'string' ? parsed.denyNotes : null,
       claimedBy: typeof parsed.claimedBy === 'string' ? parsed.claimedBy : null,
       claimedAt: typeof parsed.claimedAt === 'string' ? parsed.claimedAt : null,
+      reviewFlag: parsePendingReviewFlag(parsed.reviewFlag),
       parentVerificationId: typeof parsed.parentVerificationId === 'string' ? parsed.parentVerificationId : null,
       isResubmission: parsed.isResubmission === true,
       accountDetails: parsePendingAccountDetailsSnapshot(parsed.accountDetails),

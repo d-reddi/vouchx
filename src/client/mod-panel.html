@@ -125,6 +125,10 @@
                     </select>
                   </div>
                 </div>
+                <label class="toggle-row queue-flagged-filter-row">
+                  <input id="pending-flagged-filter" type="checkbox" />
+                  <span>Flagged for 2nd review only</span>
+                </label>
                 <div class="row history-filter-actions queue-filter-actions">
                   <button id="pending-clear-filter-btn" class="btn btn-secondary" type="button">Clear</button>
                 </div>
@@ -1116,7 +1120,10 @@
 
     <div id="image-modal" class="image-modal hidden">
       <button id="image-close" class="image-close">Close</button>
+      <button id="image-prev" class="image-nav image-nav-prev hidden" type="button" aria-label="Previous photo">&#8249;</button>
       <img id="image-preview" src="" alt="Verification preview" />
+      <button id="image-next" class="image-nav image-nav-next hidden" type="button" aria-label="Next photo">&#8250;</button>
+      <span id="image-counter" class="image-counter hidden" aria-live="polite"></span>
     </div>
 
     <div id="stats-modal" class="dialog-modal hidden">
@@ -1166,6 +1173,24 @@
               <span class="stats-label">Content creator</span>
               <span id="stats-content-creator" class="stats-value">Unknown</span>
             </div>
+          </div>
+          <div id="stats-last-denial-section" class="stats-reasons-section hidden">
+            <span class="stats-label">Previous denial</span>
+            <div class="stats-list">
+              <div class="stats-row">
+                <span class="stats-label">Reason</span>
+                <span id="stats-last-denial-reason" class="stats-value">Unknown</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Denied by</span>
+                <span id="stats-last-denial-by" class="stats-value">Unknown</span>
+              </div>
+              <div class="stats-row">
+                <span class="stats-label">Denied on</span>
+                <span id="stats-last-denial-at" class="stats-value">Unknown</span>
+              </div>
+            </div>
+            <p id="stats-last-denial-notes" class="muted small stats-last-denial-notes hidden"></p>
           </div>
           <div id="stats-reasons-section" class="stats-reasons-section hidden">
             <span class="stats-label">Why this grade</span>
