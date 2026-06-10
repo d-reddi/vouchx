@@ -46,8 +46,8 @@ The mod panel setup/onboarding wizard lives in `src/client/mod-panel.html`,
 wizard flows through `DashboardData` / `ModPanelStatePayload`
 (`requiresInitialSetup`, `needsOnboarding`) and `/api/mod/onboarding/complete`;
 per-moderator completion storage belongs in `src/core/onboarding.ts`. Keep
-wizard debug controls production-safe: `wizardDebugMode` should be gated by
-`?vx_wizard_debug=1`, and forced mode should stay `null` in production.
+wizard debug controls production-safe: `wizardDebugMode` is a manual boolean
+debug switch, and forced mode should stay `null` in production.
 
 ## Import rules
 
@@ -72,6 +72,6 @@ wizard debug controls production-safe: `wizardDebugMode` should be gated by
 
 ```
 npm run check     # tsc --noEmit
-npm test          # node --test src/core.test.ts (181 tests)
+npm test          # node --test src/core.test.ts (full suite)
 npm run build     # vite build (client + server bundles)
 ```

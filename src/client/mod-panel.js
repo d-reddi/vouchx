@@ -5,6 +5,7 @@ import brandVxUrl from './brand-vx.png';
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
+  const HISTORY_DEFAULT_DAYS = 45;
   const DEFAULT_DENY_REASON_LABELS = {
     reason_1: 'Altered or edited image',
     reason_2: 'Unclear image',
@@ -63,6 +64,7 @@ import brandVxUrl from './brand-vx.png';
   const pendingFlairWarningGuideBtn = document.getElementById('pending-flair-warning-guide-btn');
   const pendingFilterPanel = document.getElementById('pending-filter-panel');
   const pendingFilterSummary = document.getElementById('pending-filter-summary');
+  const pendingQueueLoadStatus = document.getElementById('pending-queue-load-status');
   const pendingList = document.getElementById('pending-list');
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSearchHint = document.getElementById('pending-search-hint');
@@ -251,6 +253,7 @@ import brandVxUrl from './brand-vx.png';
   const statsReasons = document.getElementById('stats-reasons');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
+  const blockReasonInput = document.getElementById('block-reason-input');
   const blockCancelBtn = document.getElementById('block-cancel-btn');
   const blockConfirmBtn = document.getElementById('block-confirm-btn');
   const approveBannedModal = document.getElementById('approve-banned-modal');
@@ -412,11 +415,13 @@ import brandVxUrl from './brand-vx.png';
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
   let selectedPendingIds = new Set();
+  const pendingActionIds = new Set();
   let batchApprovalFlairDraft = '';
   let batchApprovalOptionsExpanded = false;
   let batchDenyReasonDraft = '';
   let batchDenyNotesDraft = '';
   let batchDenyOptionsExpanded = false;
+  let batchReviewInFlight = false;
   // Per-verification in-progress denial drafts, preserved across re-renders
   // (realtime refresh, state updates) so opening the deny form isn't wiped.
   const pendingDenialDrafts = new Map();
@@ -2642,7 +2647,7 @@ import brandVxUrl from './brand-vx.png';
       }
 
       if (message.type === 'blockUser') {
-        applyMutationApiState(await requestJson('/api/mod/block', { username: message.username }));
+        applyMutationApiState(await requestJson('/api/mod/block', { username: message.username, reason: message.reason }));
         return;
       }
 
@@ -2716,6 +2721,14 @@ import brandVxUrl from './brand-vx.png';
         continue;
       }
       button.disabled = isBusy;
+      if (!isBusy) {
+        const pendingCard = button.closest('[data-pending-id]');
+        const pendingId = pendingCard ? String(pendingCard.dataset.pendingId || '').trim() : '';
+        if (pendingId && pendingActionIds.has(pendingId)) {
+          button.disabled = true;
+          continue;
+        }
+      }
       if (!isBusy && button.dataset.disableWhenApprovalBlocked === 'true' && !canApprovePendingItems()) {
         button.disabled = true;
       }
@@ -2739,13 +2752,75 @@ import brandVxUrl from './brand-vx.png';
     }
   }
 
+  function getPendingActionIdsForMessage(message) {
+    if (!message || typeof message !== 'object') {
+      return [];
+    }
+    if (message.type === 'batchReview') {
+      const ids = Array.isArray(message.verificationIds) ? message.verificationIds : [];
+      return ids.map((id) => String(id || '').trim()).filter(Boolean);
+    }
+    if (
+      message.type === 'approve' ||
+      message.type === 'deny' ||
+      message.type === 'claimPending' ||
+      message.type === 'unclaimPending' ||
+      message.type === 'cancelReopen'
+    ) {
+      const id = String(message.verificationId || '').trim();
+      return id ? [id] : [];
+    }
+    return [];
+  }
+
+  function setPendingActionBusy(ids, next) {
+    const uniqueIds = Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      return;
+    }
+    let changed = false;
+    for (const id of uniqueIds) {
+      if (next) {
+        if (!pendingActionIds.has(id)) {
+          pendingActionIds.add(id);
+          changed = true;
+        }
+      } else if (pendingActionIds.delete(id)) {
+        changed = true;
+      }
+    }
+    if (changed && state) {
+      renderPending();
+    }
+  }
+
   function postWithBusy(message) {
+    const pendingActionIdsForMessage = getPendingActionIdsForMessage(message);
+    if (pendingActionIdsForMessage.length > 0) {
+      if (pendingActionIdsForMessage.some((id) => pendingActionIds.has(id))) {
+        showToast('That request is already being processed.', 'error');
+        return;
+      }
+      const isBatchReview = message && message.type === 'batchReview';
+      if (isBatchReview) {
+        batchReviewInFlight = true;
+      }
+      setPendingActionBusy(pendingActionIdsForMessage, true);
+      void post(message).finally(() => {
+        if (isBatchReview) {
+          batchReviewInFlight = false;
+        }
+        setPendingActionBusy(pendingActionIdsForMessage, false);
+      });
+      return;
+    }
     setBusy(true);
     void post(message);
   }
 
   function showToast(text, tone) {
-    toastEl.textContent = text;
+    const toastText = String(text || '');
+    toastEl.textContent = toastText;
     toastEl.classList.remove('hidden', 'toast-success', 'toast-error');
     if (tone === 'success') {
       toastEl.classList.add('toast-success');
@@ -2753,7 +2828,13 @@ import brandVxUrl from './brand-vx.png';
       toastEl.classList.add('toast-error');
     }
     window.clearTimeout(showToast.timerId);
-    showToast.timerId = window.setTimeout(() => toastEl.classList.add('hidden'), 3000);
+    const durationMs =
+      tone === 'error'
+        ? Math.max(8000, Math.min(20000, 4000 + toastText.length * 60))
+        : tone === 'success'
+          ? 3000
+          : 5000;
+    showToast.timerId = window.setTimeout(() => toastEl.classList.add('hidden'), durationMs);
   }
   showToast.timerId = 0;
 
@@ -3071,7 +3152,7 @@ import brandVxUrl from './brand-vx.png';
 
   function getFilterDateSummary(fromInput, toInput) {
     if (isDefaultDateValue(fromInput) && isDefaultDateValue(toInput)) {
-      return 'Last 30 days';
+      return `Last ${HISTORY_DEFAULT_DAYS} days`;
     }
     if (fromInput && fromInput.value && toInput && toInput.value) {
       return `${fromInput.value} to ${toInput.value}`;
@@ -3274,15 +3355,39 @@ import brandVxUrl from './brand-vx.png';
     return Number.isFinite(score) ? score : 0;
   }
 
+  function getTotalPendingCount() {
+    if (!state) {
+      return 0;
+    }
+    return Number.isFinite(Number(state.pendingCount))
+      ? Math.max(0, Number(state.pendingCount))
+      : Array.isArray(state.pending)
+        ? state.pending.length
+        : 0;
+  }
+
+  function getLoadedPendingCount() {
+    return state && Array.isArray(state.pending) ? state.pending.length : 0;
+  }
+
+  function updatePendingQueueLoadStatus() {
+    if (!pendingQueueLoadStatus) {
+      return;
+    }
+    const totalPendingCount = getTotalPendingCount();
+    const loadedPendingCount = getLoadedPendingCount();
+    const hasOverflow = totalPendingCount > loadedPendingCount && loadedPendingCount > 0;
+    pendingQueueLoadStatus.classList.toggle('hidden', !hasOverflow);
+    pendingQueueLoadStatus.textContent = hasOverflow
+      ? `Showing oldest ${loadedPendingCount} of ${totalPendingCount} pending requests.`
+      : '';
+  }
+
   function updateHeroMeta() {
     if (!state) {
       return;
     }
-    const pendingCount = Number.isFinite(Number(state.pendingCount))
-      ? Number(state.pendingCount)
-      : Array.isArray(state.pending)
-        ? state.pending.length
-        : 0;
+    const pendingCount = getTotalPendingCount();
     const blockedCount = Array.isArray(state.blocked) ? state.blocked.length : 0;
     if (heroSubreddit) {
       const subredditName = String(state.subredditName || '').trim();
@@ -3396,9 +3501,14 @@ import brandVxUrl from './brand-vx.png';
     for (const checkbox of document.querySelectorAll('input[data-role="pending-select"]')) {
       const id = String(checkbox.value || '').trim();
       const checked = selectedPendingIds.has(id);
+      const actionInFlight = pendingActionIds.has(id);
       checkbox.checked = checked;
-      checkbox.disabled = !checked && atSelectionLimit;
-      checkbox.title = checkbox.disabled ? `Batch actions are limited to ${MAX_BATCH_REVIEW_ITEMS} requests.` : '';
+      checkbox.disabled = actionInFlight || (!checked && atSelectionLimit);
+      checkbox.title = actionInFlight
+        ? 'This request is being processed.'
+        : checkbox.disabled
+          ? `Batch actions are limited to ${MAX_BATCH_REVIEW_ITEMS} requests.`
+          : '';
     }
   }
 
@@ -3437,6 +3547,7 @@ import brandVxUrl from './brand-vx.png';
     const approvalFlairChoices = getConfiguredApprovalFlairChoices();
     const approvalFlairRequired = shouldBatchApprovalAskForFlair(approvalFlairChoices);
     const showBatchToolbar = selectedCount >= 2;
+    const batchControlsDisabled = batchReviewInFlight || pendingActionIds.size > 0;
     if (!showBatchToolbar) {
       batchApprovalOptionsExpanded = false;
       batchDenyOptionsExpanded = false;
@@ -3470,6 +3581,7 @@ import brandVxUrl from './brand-vx.png';
           batchApprovalFlairDraft = batchApprovalFlairSelect.value;
         }
       }
+      batchApprovalFlairSelect.disabled = batchControlsDisabled;
     }
 
     if (batchDenyReasonSelect) {
@@ -3484,16 +3596,22 @@ import brandVxUrl from './brand-vx.png';
         batchDenyReasonSelect.value = '';
         batchDenyReasonDraft = '';
       }
-      batchDenyReasonSelect.disabled = enabledReasons.length === 0;
+      batchDenyReasonSelect.disabled = batchControlsDisabled || enabledReasons.length === 0;
     }
     if (batchDenyNotesInput && batchDenyNotesInput.value !== batchDenyNotesDraft) {
       batchDenyNotesInput.value = batchDenyNotesDraft;
     }
+    if (batchDenyNotesInput) {
+      batchDenyNotesInput.disabled = batchControlsDisabled;
+    }
 
     if (batchApproveBtn) {
       batchApproveBtn.disabled = batchDenyOptionsExpanded
-        ? false
-        : selectedCount < 2 || !approvalsAllowed || (batchApprovalOptionsExpanded && approvalFlairRequired && !batchApprovalFlairDraft);
+        ? batchControlsDisabled
+        : batchControlsDisabled ||
+          selectedCount < 2 ||
+          !approvalsAllowed ||
+          (batchApprovalOptionsExpanded && approvalFlairRequired && !batchApprovalFlairDraft);
       batchApproveBtn.title = !batchDenyOptionsExpanded && !approvalsAllowed ? buildApproveBlockedMessage() : '';
       batchApproveBtn.textContent = batchDenyOptionsExpanded ? 'Back' : batchApprovalOptionsExpanded ? 'Confirm approval' : 'Approve';
       batchApproveBtn.classList.toggle('btn-success', !batchDenyOptionsExpanded);
@@ -3501,8 +3619,8 @@ import brandVxUrl from './brand-vx.png';
     }
     if (batchDenyBtn) {
       batchDenyBtn.disabled = batchApprovalOptionsExpanded
-        ? false
-        : denyEligibleCount < 2 || enabledReasons.length === 0 || (batchDenyOptionsExpanded && !batchDenyReasonDraft);
+        ? batchControlsDisabled
+        : batchControlsDisabled || denyEligibleCount < 2 || enabledReasons.length === 0 || (batchDenyOptionsExpanded && !batchDenyReasonDraft);
       batchDenyBtn.textContent = batchApprovalOptionsExpanded ? 'Back' : batchDenyOptionsExpanded ? 'Confirm denial' : 'Deny';
       batchDenyBtn.title =
         !batchApprovalOptionsExpanded && selectedCount >= 2 && denyEligibleCount < 2
@@ -3655,6 +3773,11 @@ import brandVxUrl from './brand-vx.png';
     const card = document.createElement('article');
     card.className = 'item queue-card';
     card.dataset.pendingId = String(item.id || '');
+    const actionInFlight = pendingActionIds.has(String(item.id || ''));
+    if (actionInFlight) {
+      card.classList.add('queue-card-busy');
+      card.setAttribute('aria-busy', 'true');
+    }
     const isReReview = Boolean(item.parentVerificationId);
     const isResubmission = Boolean(item.isResubmission);
 
@@ -3674,6 +3797,7 @@ import brandVxUrl from './brand-vx.png';
       selectCheckbox.value = String(item.id || '');
       selectCheckbox.dataset.role = 'pending-select';
       selectCheckbox.checked = selectedPendingIds.has(String(item.id || ''));
+      selectCheckbox.disabled = actionInFlight;
       selectCheckbox.setAttribute('aria-label', `Select u/${item.username} for batch review`);
       selectCheckbox.addEventListener('change', () => {
         togglePendingSelection(item.id, selectCheckbox.checked);
@@ -3688,6 +3812,7 @@ import brandVxUrl from './brand-vx.png';
     statsBtn.type = 'button';
     statsBtn.className = 'pending-stats-btn queue-stats-btn';
     statsBtn.textContent = 'Stats';
+    statsBtn.disabled = actionInFlight;
     statsBtn.addEventListener('click', () => openStatsModal(item));
     header.appendChild(statsBtn);
     card.appendChild(header);
@@ -3793,7 +3918,7 @@ import brandVxUrl from './brand-vx.png';
       }
       denyReason.selectedIndex = 0;
       denyReason.value = '';
-      denyReason.disabled = configuredReasons.length === 0;
+      denyReason.disabled = actionInFlight || configuredReasons.length === 0;
       denySection.appendChild(denyReason);
 
       if (configuredReasons.length === 0) {
@@ -3808,6 +3933,7 @@ import brandVxUrl from './brand-vx.png';
       denyNotes.rows = 3;
       denyNotes.placeholder =
         'Optional notes saved with the denial, written to mod notes, and included in denial modmail via {{denial_notes}} or the auto-include setting';
+      denyNotes.disabled = actionInFlight;
       denySection.appendChild(denyNotes);
 
       denyBlockRow = document.createElement('label');
@@ -3829,7 +3955,7 @@ import brandVxUrl from './brand-vx.png';
         }
         denyBlockRow.style.display = showBlockToggle ? 'flex' : 'none';
         denyBlockRow.setAttribute('aria-hidden', showBlockToggle ? 'false' : 'true');
-        denyBlockCheckbox.disabled = !showBlockToggle;
+        denyBlockCheckbox.disabled = actionInFlight || !showBlockToggle;
         if (!showBlockToggle) {
           denyBlockCheckbox.checked = false;
         }
@@ -3862,6 +3988,7 @@ import brandVxUrl from './brand-vx.png';
       denyCancelBtn.type = 'button';
       denyCancelBtn.className = 'btn btn-secondary';
       denyCancelBtn.textContent = 'Cancel';
+      denyCancelBtn.disabled = actionInFlight;
 
       denyConfirmBtn = document.createElement('button');
       denyConfirmBtn.type = 'button';
@@ -3876,16 +4003,16 @@ import brandVxUrl from './brand-vx.png';
           return;
         }
         const reasonId = denyReason.value;
-        denyConfirmBtn.disabled = !reasonId;
+        denyConfirmBtn.disabled = actionInFlight || !reasonId;
         denyConfirmBtn.textContent = 'Confirm denial';
-        denyConfirmBtn.title = reasonId ? '' : 'Pick a denial reason first';
+        denyConfirmBtn.title = actionInFlight ? 'This request is being processed.' : reasonId ? '' : 'Pick a denial reason first';
       };
       denyReason.addEventListener('change', syncDenyConfirmState);
       syncDenyConfirmState();
 
       if (denyNotes) {
         denyNotes.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' && !event.shiftKey && denyReason && denyReason.value) {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && denyReason && denyReason.value) {
             event.preventDefault();
             denyConfirmBtn.click();
           }
@@ -3911,6 +4038,7 @@ import brandVxUrl from './brand-vx.png';
         approvalChoiceSelect.appendChild(option);
       }
       approvalChoiceSelect.value = approvalFlairChoices[0].templateId;
+      approvalChoiceSelect.disabled = actionInFlight;
       row.appendChild(approvalChoiceSelect);
     }
 
@@ -3919,9 +4047,11 @@ import brandVxUrl from './brand-vx.png';
       approveBtn.className = 'btn btn-success';
       approveBtn.textContent = 'Approve';
       approveBtn.dataset.disableWhenApprovalBlocked = 'true';
-      approveBtn.disabled = !approvalsAllowed;
+      approveBtn.disabled = actionInFlight || !approvalsAllowed;
       if (!approvalsAllowed) {
         approveBtn.title = buildApproveBlockedMessage();
+      } else if (actionInFlight) {
+        approveBtn.title = 'This request is being processed.';
       }
       approveBtn.addEventListener('click', () => {
         if (!approvalsAllowed) {
@@ -3945,6 +4075,10 @@ import brandVxUrl from './brand-vx.png';
         const denyBtn = document.createElement('button');
         denyBtn.className = 'btn btn-danger';
         denyBtn.textContent = 'Deny';
+        denyBtn.disabled = actionInFlight;
+        if (actionInFlight) {
+          denyBtn.title = 'This request is being processed.';
+        }
 
         const setDenyMode = (active) => {
           if (!denySection) {
@@ -4036,6 +4170,10 @@ import brandVxUrl from './brand-vx.png';
       const unclaimBtn = document.createElement('button');
       unclaimBtn.className = 'btn btn-secondary';
       unclaimBtn.textContent = isClaimedByOther ? 'Force Unlock' : 'Unlock';
+      unclaimBtn.disabled = actionInFlight;
+      if (actionInFlight) {
+        unclaimBtn.title = 'This request is being processed.';
+      }
       unclaimBtn.addEventListener('click', () => {
         postWithBusy({ type: 'unclaimPending', verificationId: item.id });
       });
@@ -4044,6 +4182,10 @@ import brandVxUrl from './brand-vx.png';
       const claimBtn = document.createElement('button');
       claimBtn.className = 'btn btn-secondary';
       claimBtn.textContent = 'Lock';
+      claimBtn.disabled = actionInFlight;
+      if (actionInFlight) {
+        claimBtn.title = 'This request is being processed.';
+      }
       claimBtn.addEventListener('click', () => {
         postWithBusy({ type: 'claimPending', verificationId: item.id });
       });
@@ -4054,6 +4196,10 @@ import brandVxUrl from './brand-vx.png';
       const cancelReopenBtn = document.createElement('button');
       cancelReopenBtn.className = 'btn btn-secondary';
       cancelReopenBtn.textContent = 'Cancel Re-review';
+      cancelReopenBtn.disabled = actionInFlight;
+      if (actionInFlight) {
+        cancelReopenBtn.title = 'This request is being processed.';
+      }
       cancelReopenBtn.addEventListener('click', () => {
         postWithBusy({ type: 'cancelReopen', verificationId: item.id });
       });
@@ -4119,6 +4265,7 @@ import brandVxUrl from './brand-vx.png';
 
   function renderPending() {
     syncPendingFilterControls();
+    updatePendingQueueLoadStatus();
     setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
     pruneSelectedPendingIds();
@@ -4171,10 +4318,11 @@ import brandVxUrl from './brand-vx.png';
     const filtered = state.blocked.filter((item) => {
       const username = String(item.username || '').toLowerCase();
       const reason = String(item.reason || '').toLowerCase();
+      const blockedBy = String(item.blockedBy || '').toLowerCase();
       if (!query) {
         return true;
       }
-      return username.includes(query) || reason.includes(query);
+      return username.includes(query) || reason.includes(query) || blockedBy.includes(query);
     });
 
     if (filtered.length === 0) {
@@ -4194,6 +4342,11 @@ import brandVxUrl from './brand-vx.png';
       blockedAt.className = 'item-meta';
       blockedAt.textContent = `Blocked: ${formatTime(item.blockedAt)}`;
       card.appendChild(blockedAt);
+
+      const blockedBy = document.createElement('p');
+      blockedBy.className = 'item-meta';
+      blockedBy.textContent = `Blocked by: ${item.blockedBy ? `u/${String(item.blockedBy).replace(/^u\//i, '')}` : 'Unknown'}`;
+      card.appendChild(blockedBy);
 
       const deniedCount = document.createElement('p');
       deniedCount.className = 'item-meta';
@@ -6371,6 +6524,9 @@ import brandVxUrl from './brand-vx.png';
       return;
     }
     blockUsernameInput.value = '';
+    if (blockReasonInput) {
+      blockReasonInput.value = '';
+    }
     blockModal.classList.remove('hidden');
     window.setTimeout(() => blockUsernameInput.focus(), 0);
   }
@@ -6381,6 +6537,9 @@ import brandVxUrl from './brand-vx.png';
     }
     blockModal.classList.add('hidden');
     blockUsernameInput.value = '';
+    if (blockReasonInput) {
+      blockReasonInput.value = '';
+    }
   }
 
   function openApproveBannedModal(payload) {
@@ -6425,7 +6584,8 @@ import brandVxUrl from './brand-vx.png';
       showToast('Enter a valid username to block.', 'error');
       return;
     }
-    postWithBusy({ type: 'blockUser', username });
+    const reason = blockReasonInput ? blockReasonInput.value.trim() : '';
+    postWithBusy({ type: 'blockUser', username, reason });
     closeBlockModal();
   }
 
@@ -7278,7 +7438,7 @@ import brandVxUrl from './brand-vx.png';
       historySearchOffset = 0;
       historySearchHasMore = false;
       if (historySearchUserInput) historySearchUserInput.value = '';
-      applyDefaultDateRange(historySearchFromInput, historySearchToInput, 30);
+      applyDefaultDateRange(historySearchFromInput, historySearchToInput, HISTORY_DEFAULT_DAYS);
       setHistorySearchHintVisible(false);
       updateHistoryFilterSummaries();
       collapseHistoryFilterIfInactive(historyFilterPanel, getRecordsFilterActiveCount());
@@ -7305,7 +7465,7 @@ import brandVxUrl from './brand-vx.png';
       approvedSearchOffset = 0;
       approvedSearchHasMore = false;
       if (approvedSearchUserInput) approvedSearchUserInput.value = '';
-      applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, 30);
+      applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, HISTORY_DEFAULT_DAYS);
       setApprovedSearchHintVisible(false);
       updateHistoryFilterSummaries();
       collapseHistoryFilterIfInactive(approvedFilterPanel, getApprovedFilterActiveCount());
@@ -7334,7 +7494,7 @@ import brandVxUrl from './brand-vx.png';
       if (auditSearchUserInput) auditSearchUserInput.value = '';
       if (auditSearchActorInput) auditSearchActorInput.value = '';
       setAuditActionFilter('all');
-      applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, 30);
+      applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, HISTORY_DEFAULT_DAYS);
       setAuditSearchHintVisible(false);
       updateHistoryFilterSummaries();
       collapseHistoryFilterIfInactive(auditFilterPanel, getAuditFilterActiveCount());
@@ -7643,6 +7803,14 @@ import brandVxUrl from './brand-vx.png';
       }
     });
   }
+  if (blockReasonInput) {
+    blockReasonInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitManualBlock();
+      }
+    });
+  }
   if (blockModal) {
     blockModal.addEventListener('click', (event) => {
       if (event.target === blockModal) {
@@ -7871,9 +8039,9 @@ import brandVxUrl from './brand-vx.png';
 
   window.addEventListener('pagehide', closeRealtimeSubscription);
 
-  applyDefaultDateRange(historySearchFromInput, historySearchToInput, 30);
-  applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, 30);
-  applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, 30);
+  applyDefaultDateRange(historySearchFromInput, historySearchToInput, HISTORY_DEFAULT_DAYS);
+  applyDefaultDateRange(approvedSearchFromInput, approvedSearchToInput, HISTORY_DEFAULT_DAYS);
+  applyDefaultDateRange(auditSearchFromInput, auditSearchToInput, HISTORY_DEFAULT_DAYS);
   [
     historySearchFromInput,
     historySearchToInput,

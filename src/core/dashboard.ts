@@ -19,7 +19,7 @@ import {
   readMergedGlobalUsernameSettings,
   repairMissingAutoBlockForUser,
 } from './blocking.ts';
-import { DEFAULT_REQUIRED_PHOTO_COUNT, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES } from './constants.ts';
+import { DEFAULT_REQUIRED_PHOTO_COUNT, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES, HISTORY_RETENTION_DAYS } from './constants.ts';
 import {
   checkVerificationFlair,
   configuredApprovalTemplateIds,
@@ -295,12 +295,8 @@ export async function loadDashboardData(
         (await repairMissingAutoBlockForUser(context, subredditId, viewerLookupUsername, config))
       : null;
   const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
-  const pendingCount = canReviewUser
-    ? options.includeModData
-      ? pending.length
-      : await context.redis.zCard(pendingIndexKey(subredditId))
-    : 0;
-  const defaultSearchFromAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const pendingCount = canReviewUser ? await context.redis.zCard(pendingIndexKey(subredditId)) : 0;
+  const defaultSearchFromAt = new Date(Date.now() - HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const defaultSearchToAt = new Date().toISOString();
   const approvedSearch = canReviewUser && options.includeModData
     ? await searchApprovedRecords(context, subredditId, {

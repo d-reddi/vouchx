@@ -787,10 +787,13 @@ app.post('/api/mod/approve', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
+    const approvalUsername = result.username ? `u/${result.username}` : 'request';
     res.json({
       ...payload,
       toast: {
-        text: `${approvalFailed ? 'Approval failed' : success ? 'Approved' : 'Approved with issues'}: ${details.join('; ')}`,
+        text: success
+          ? `Approved ${approvalUsername}.`
+          : `${approvalFailed ? 'Approval failed' : 'Approved with issues'}: ${details.join('; ')}`,
         tone: success ? 'success' : 'error',
       },
     });
@@ -858,8 +861,17 @@ app.post('/api/mod/deny', async (req, res) => {
       `modmail ${result.modmail.status}${result.modmail.reason ? ` (${result.modmail.reason})` : ''}`,
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
+    const deniedUsername = result.username ? `u/${result.username}` : 'request';
+    const successBlockText =
+      result.manualBlockOutcome?.status === 'blocked' || result.userBlocked
+        ? ' and blocked'
+        : result.manualBlockOutcome?.status === 'already_blocked'
+          ? '; user already blocked'
+          : '';
     sendFastModRefreshResponse(res, appContext, {
-      text: `${success ? 'Denied' : 'Denied with issues'} (${result.denyReasonLabel || reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
+      text: success
+        ? `Denied ${deniedUsername}${successBlockText}.`
+        : `Denied with issues (${result.denyReasonLabel || reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
       tone: success ? 'success' : 'error',
     }, {
       mutation: {
@@ -1030,6 +1042,7 @@ app.post('/api/mod/remove', async (req, res) => {
 app.post('/api/mod/block', async (req, res) => {
   try {
     const username = String(req.body?.username ?? '').trim();
+    const reason = String(req.body?.reason ?? '').trim();
     if (!username) {
       throw httpError(400, 'Missing username for block.');
     }
@@ -1040,7 +1053,8 @@ app.post('/api/mod/block', async (req, res) => {
       sanitizeSubredditId(appContext.subredditId),
       subredditName,
       username,
-      moderator
+      moderator,
+      reason
     );
     await sendRefreshSignals(appContext);
     res.json({

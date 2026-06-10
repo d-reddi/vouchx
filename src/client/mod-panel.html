@@ -131,6 +131,7 @@
               </div>
             </details>
             <div class="content-card queue-list-card">
+              <p id="pending-queue-load-status" class="queue-load-status hidden"></p>
               <div id="batch-review-toolbar" class="batch-review-toolbar hidden" aria-live="polite">
                 <div class="batch-review-summary">
                   <div>
@@ -240,7 +241,7 @@
               <details id="approved-filter-panel" class="history-filter-panel">
                 <summary class="history-filter-summary">
                   <span class="history-filter-title">Filters</span>
-                  <span id="approved-filter-summary" class="history-filter-count">Last 30 days</span>
+                  <span id="approved-filter-summary" class="history-filter-count">Last 45 days</span>
                 </summary>
                 <div class="history-filter-body">
                   <div class="field-grid history-field-grid history-field-grid-approved">
@@ -274,7 +275,7 @@
               <details id="history-filter-panel" class="history-filter-panel">
                 <summary class="history-filter-summary">
                   <span class="history-filter-title">Filters</span>
-                  <span id="history-filter-summary" class="history-filter-count">Last 30 days</span>
+                  <span id="history-filter-summary" class="history-filter-count">Last 45 days</span>
                 </summary>
                 <div class="history-filter-body">
                   <div class="field-grid history-field-grid history-field-grid-records">
@@ -308,7 +309,7 @@
               <details id="audit-filter-panel" class="history-filter-panel">
                 <summary class="history-filter-summary">
                   <span class="history-filter-title">Filters</span>
-                  <span id="audit-filter-summary" class="history-filter-count">Last 30 days</span>
+                  <span id="audit-filter-summary" class="history-filter-count">Last 45 days</span>
                 </summary>
                 <div class="history-filter-body">
                   <div class="field-grid history-field-grid history-field-grid-audit">
@@ -1178,7 +1179,10 @@
       <div class="dialog-card">
         <h3>Block user</h3>
         <p class="muted small">Enter the username without u/.</p>
+        <label class="field-label" for="block-username-input">Username</label>
         <input id="block-username-input" class="field-input" type="text" placeholder="username" />
+        <label class="field-label" for="block-reason-input">Reason</label>
+        <textarea id="block-reason-input" class="field-textarea" rows="3" placeholder="Optional note shown in the Blocked tab"></textarea>
         <div class="row">
           <button id="block-cancel-btn" class="btn btn-secondary">Cancel</button>
           <button id="block-confirm-btn" class="btn btn-primary">Block User</button>
