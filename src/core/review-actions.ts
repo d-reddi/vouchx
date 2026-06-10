@@ -246,6 +246,7 @@ export async function approveVerification(
       return {
         outcome: 'completed',
         applied: false,
+        username: record.username,
         flair: { status: 'skipped', reason: 'already approved' },
         modmail: { status: 'skipped', reason: 'already approved' },
         modNote: { status: 'skipped', reason: 'already approved' },
@@ -325,6 +326,7 @@ export async function approveVerification(
       return {
         outcome: 'completed',
         applied: false,
+        username: record.username,
         flair,
         modmail: { status: 'skipped', reason: 'flair not applied' },
         modNote: { status: 'skipped', reason: 'flair not applied' },
@@ -430,6 +432,7 @@ export async function approveVerification(
     return {
       outcome: 'completed',
       applied: true,
+      username: validationScheduledRecord.username,
       flair,
       modmail,
       modNote,
@@ -691,6 +694,7 @@ export async function finalizeDeniedVerification(
     const blockedEntry: BlockedUserEntry = {
       username: normalizeUsernameForLookup(reviewedRecord.username),
       blockedAt: new Date().toISOString(),
+      blockedBy: normalizeUsernameStrict(actor) || actor,
       deniedCount: denialCount,
       reason: `Reached ${denialCount} denials`,
       scope: 'subreddit',
@@ -723,7 +727,8 @@ export async function finalizeDeniedVerification(
         normalizeUsernameStrict(reviewedRecord.username),
         actor,
         denialCount,
-        false
+        false,
+        `Blocked during denial: ${denyReasonLabel}`
       );
       manualBlockOutcome = {
         status: blockResult.alreadyBlocked ? 'already_blocked' : 'blocked',

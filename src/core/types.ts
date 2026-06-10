@@ -36,6 +36,7 @@ export type BlockScope = 'subreddit' | 'global';
 export type BlockedUserEntry = {
   username: string;
   blockedAt: string;
+  blockedBy?: string | null;
   deniedCount: number;
   reason: string;
   scope?: BlockScope;

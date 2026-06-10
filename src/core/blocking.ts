@@ -27,10 +27,15 @@ export function createGlobalBlockedUserEntry(
   return {
     username: normalizedUsername,
     blockedAt: '',
+    blockedBy: null,
     deniedCount: 0,
     reason: 'Blocked by developer',
     scope: 'global',
   };
+}
+
+function normalizeBlockReason(reason: string | null | undefined): string {
+  return String(reason ?? '').trim().slice(0, 500);
 }
 
 export async function getStoredDenialCount(context: RedisContext, subredditId: string, username: string): Promise<number> {
@@ -154,6 +159,7 @@ export async function repairMissingAutoBlockForUser(
   const entry: BlockedUserEntry = {
     username: normalizedUsername,
     blockedAt: new Date().toISOString(),
+    blockedBy: null,
     deniedCount,
     reason: `Reached ${deniedCount} denials`,
     scope: 'subreddit',
@@ -220,7 +226,8 @@ export async function blockUserForModerator(
   subredditId: string,
   subredditName: string,
   username: string,
-  moderator: string
+  moderator: string,
+  reason?: string | null
 ): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
   await assertCanReview(context, subredditName, moderator);
   const normalizedUsername = normalizeUsernameStrict(username);
@@ -250,7 +257,8 @@ export async function blockUserForModerator(
     normalizedUsername,
     moderator,
     deniedCount,
-    true
+    true,
+    reason
   );
 }
 
@@ -261,7 +269,8 @@ export async function setManualBlockedUserEntry(
   normalizedUsername: string,
   moderator: string,
   deniedCount: number,
-  syncDenialCountHash: boolean
+  syncDenialCountHash: boolean,
+  reason?: string | null
 ): Promise<{ alreadyBlocked: boolean; entry: BlockedUserEntry }> {
   const canonicalUsername = normalizeUsernameStrict(normalizedUsername);
   if (!canonicalUsername) {
@@ -276,8 +285,9 @@ export async function setManualBlockedUserEntry(
   const entry: BlockedUserEntry = {
     username: canonicalUsername,
     blockedAt: new Date().toISOString(),
+    blockedBy: normalizeUsernameStrict(moderator) || moderator,
     deniedCount,
-    reason: 'Blocked by moderator',
+    reason: normalizeBlockReason(reason) || 'Blocked by moderator',
     scope: 'subreddit',
   };
 
@@ -297,7 +307,7 @@ export async function setManualBlockedUserEntry(
       username: entry.username,
       actor: moderator,
       action: 'blocked',
-      notes: 'Manual moderator block.',
+      notes: `Manual moderator block: ${entry.reason}`,
     });
   } catch (error) {
     console.log(`Audit log write failed (manual_block): ${errorText(error)}`);
@@ -326,6 +336,10 @@ export function parseBlockedUserEntry(
     return {
       username,
       blockedAt: parsed.blockedAt,
+      blockedBy:
+        typeof parsed.blockedBy === 'string' && parsed.blockedBy.trim()
+          ? parsed.blockedBy.trim().replace(/^u\//i, '')
+          : null,
       deniedCount,
       reason:
         typeof parsed.reason === 'string' && parsed.reason.trim()

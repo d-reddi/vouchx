@@ -7,6 +7,7 @@ import {
   archivePendingVerificationModmailReply,
   autoDenyShadowbannedSubmission,
   batchReviewVerifications,
+  blockUserForModerator,
   buildBatchReviewToast,
   buildModeratorUpdateNotice,
   checkVerificationFlair,
@@ -28,6 +29,7 @@ import {
   isViewerAwaitingFlairPropagation,
   loadApprovalFlairOptionsForSettings,
   loadHubDashboard,
+  loadModDashboard,
   looksLikeInternalModmailArchiveError,
   onSaveFlairTemplateValues,
   removeApprovedVerificationByModerator,
@@ -881,6 +883,7 @@ function createHubDashboardContext(options?: {
   subredditName?: string;
   userId?: string;
   currentUsername?: string | null;
+  permissions?: string[];
   settingsValues?: Record<string, unknown>;
   currentUserResponses?: Array<
     | {
@@ -959,6 +962,9 @@ function createHubDashboardContext(options?: {
           flairTemplateId: response.flair.flairTemplateId ?? '',
         };
       },
+      async getModPermissionsForSubreddit() {
+        return options?.permissions ?? ['all'];
+      },
     };
   };
 
@@ -996,6 +1002,13 @@ function createHubDashboardContext(options?: {
         async getUserByUsername() {
           const responses = options?.currentUserResponses ?? [];
           return toHubDashboardUser(responses[0] ?? null);
+        },
+        async getSubredditByName() {
+          return {
+            async getUserFlairTemplates() {
+              return [];
+            },
+          };
         },
       },
       settings: {
@@ -1044,6 +1057,9 @@ function createHubDashboardContext(options?: {
             }
           }
           return removed;
+        },
+        async hLen(key: string) {
+          return (hashStore.get(key) ?? new Map()).size;
         },
         async zAdd(key: string, entry: { member: string; score: number }) {
           ensureTestZSet(zsetStore, key).set(entry.member, entry.score);
@@ -2714,6 +2730,48 @@ test('loadHubDashboard backfills userId pointers from legacy username pointers',
     hubContext.redisStore.get(userPendingByIdTestKey('t5_example', 't2_legacy')),
     record.id
   );
+});
+
+test('loadModDashboard reports total pending count while loading the oldest capped queue records', async () => {
+  const modContext = createHubDashboardContext({
+    userId: 't2_mod',
+    currentUsername: 'mod_one',
+    currentUserResponses: [
+      {
+        username: 'mod_one',
+        id: 't2_mod',
+      },
+    ],
+    permissions: ['access'],
+    hashValues: {
+      flair_template_id: '',
+    },
+  });
+  const subredditId = 't5_example';
+  const pendingIndex = pendingIndexTestKey(subredditId);
+
+  for (let index = 0; index < 175; index++) {
+    const id = `verification_${String(index).padStart(3, '0')}`;
+    const submittedAt = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+    const record = buildRecord({
+      id,
+      username: `pending_user_${index}`,
+      status: 'pending',
+      submittedAt,
+      subredditId,
+      subredditName: 'example',
+    });
+    modContext.redisStore.set(verificationRecordTestKey(subredditId, id), JSON.stringify(record));
+    ensureTestZSet(modContext.zsetStore, pendingIndex).set(id, new Date(submittedAt).getTime());
+  }
+
+  const dashboard = await loadModDashboard(modContext.context as never);
+
+  assert.equal(dashboard.pendingCount, 175);
+  assert.equal(dashboard.pending.length, 150);
+  assert.equal(dashboard.pending[0]?.id, 'verification_000');
+  assert.equal(dashboard.pending[149]?.id, 'verification_149');
+  assert.equal(dashboard.pending.some((record) => record.id === 'verification_174'), false);
 });
 
 test('loadHubDashboard applies global blocks and exposes the developer panel to authorized developers', async () => {
@@ -4523,6 +4581,29 @@ test('denyVerification removes invalid accounts without incrementing denials or 
   assert.equal(reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.size ?? 0, 0);
 });
 
+test('blockUserForModerator stores the moderator and manual reason with the block', async () => {
+  const reviewContext = createReviewActionContext();
+
+  const result = await blockUserForModerator(
+    reviewContext.context as never,
+    reviewContext.subredditId,
+    reviewContext.record.subredditName,
+    'Manual_Target',
+    'Mod_One',
+    'Missing age proof'
+  );
+  const blockedEntryRaw = reviewContext.hashStore.get(blockedUsersTestKey(reviewContext.subredditId))?.get('manual_target');
+  const blockedEntry = blockedEntryRaw ? JSON.parse(blockedEntryRaw) : null;
+
+  assert.equal(result.alreadyBlocked, false);
+  assert.equal(result.entry.username, 'manual_target');
+  assert.equal(result.entry.blockedBy, 'mod_one');
+  assert.equal(result.entry.reason, 'Missing age proof');
+  assert.equal(blockedEntry?.blockedBy, 'mod_one');
+  assert.equal(blockedEntry?.reason, 'Missing age proof');
+  assert.equal(reviewContext.getUserByUsernameCalls[0], 'manual_target');
+});
+
 test('denyVerification keeps valid denials working and exposes the denied username', async () => {
   const reviewContext = createReviewActionContext();
 
@@ -4552,7 +4633,8 @@ test('denyVerification can manually block during denial without re-validating th
   assert.equal(result.manualBlockOutcome?.status, 'blocked');
   assert.equal(result.manualBlockOutcome?.username, reviewContext.record.username);
   assert.equal(blockedEntry?.username, reviewContext.record.username);
-  assert.equal(blockedEntry?.reason, 'Blocked by moderator');
+  assert.equal(blockedEntry?.blockedBy, 'mod_one');
+  assert.equal(blockedEntry?.reason, 'Blocked during denial: Altered or edited image');
   assert.equal(reviewContext.getUserByUsernameCalls.length, 1);
   assert.equal(reviewContext.getUserByUsernameCalls[0], reviewContext.record.username);
 });
@@ -4578,6 +4660,7 @@ test('denyVerification auto-blocks once the configured denial threshold is reach
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '2');
   assert.equal(blockedEntry?.username, reviewContext.record.username);
   assert.equal(blockedEntry?.deniedCount, 2);
+  assert.equal(blockedEntry?.blockedBy, 'mod_one');
   assert.equal(blockedEntry?.reason, 'Reached 2 denials');
 });
 

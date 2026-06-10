@@ -45,7 +45,6 @@ import { removeValidationTrackingForRecordIds } from './retention.ts';
 export async function listPendingVerifications(context: Devvit.Context, subredditId: string): Promise<VerificationRecord[]> {
   const members = await context.redis.zRange(pendingIndexKey(subredditId), 0, MAX_PENDING_TO_LOAD - 1, {
     by: 'rank',
-    reverse: true,
   });
 
   if (members.length === 0) {

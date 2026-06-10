@@ -2100,6 +2100,13 @@ body.wizard-scroll-locked {
   box-shadow: none;
 }
 
+.queue-load-status {
+  margin: 0 0 var(--space-4);
+  color: var(--muted);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
+
 .batch-review-toolbar {
   position: fixed;
   right: max(14px, calc((100vw - 1120px) / 2 + 14px));
@@ -2318,6 +2325,10 @@ body.wizard-scroll-locked {
   border-radius: var(--radius-card);
   background: var(--surface-card);
   box-shadow: var(--card-shadow-soft);
+}
+
+.queue-card-busy {
+  opacity: 0.72;
 }
 
 #pending-list .queue-card {
