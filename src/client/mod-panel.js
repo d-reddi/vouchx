@@ -257,7 +257,9 @@ import brandVxUrl from './brand-vx.png';
   const statsLastDenialReason = document.getElementById('stats-last-denial-reason');
   const statsLastDenialBy = document.getElementById('stats-last-denial-by');
   const statsLastDenialAt = document.getElementById('stats-last-denial-at');
+  const statsLastDenialCommentsRow = document.getElementById('stats-last-denial-comments-row');
   const statsLastDenialNotes = document.getElementById('stats-last-denial-notes');
+  const statsLastDenialContext = document.getElementById('stats-last-denial-context');
   const statsReasonsSection = document.getElementById('stats-reasons-section');
   const statsReasons = document.getElementById('stats-reasons');
   const blockModal = document.getElementById('block-modal');
@@ -3403,6 +3405,23 @@ import brandVxUrl from './brand-vx.png';
     return Number.isFinite(score) ? score : 0;
   }
 
+  function getPendingReviewFlagSortScore(item) {
+    const score = new Date(item && item.reviewFlag ? item.reviewFlag.flaggedAt : '').getTime();
+    return Number.isFinite(score) ? score : 0;
+  }
+
+  function comparePendingItems(left, right) {
+    const leftFlagged = Boolean(left && left.reviewFlag);
+    const rightFlagged = Boolean(right && right.reviewFlag);
+    if (leftFlagged !== rightFlagged) {
+      return leftFlagged ? -1 : 1;
+    }
+    if (leftFlagged && rightFlagged) {
+      return getPendingReviewFlagSortScore(left) - getPendingReviewFlagSortScore(right);
+    }
+    return getPendingSortScore(left) - getPendingSortScore(right);
+  }
+
   function getTotalPendingCount() {
     if (!state) {
       return 0;
@@ -3513,7 +3532,7 @@ import brandVxUrl from './brand-vx.png';
     if (!state || !Array.isArray(state.pending)) {
       return [];
     }
-    return state.pending.filter(matchesPendingFilters).sort((left, right) => getPendingSortScore(left) - getPendingSortScore(right));
+    return state.pending.filter(matchesPendingFilters).sort(comparePendingItems);
   }
 
   function isPendingItemClaimedByOther(item) {
@@ -3522,8 +3541,12 @@ import brandVxUrl from './brand-vx.png';
     return Boolean(claimedByNormalized && (!viewerUsername || claimedByNormalized !== viewerUsername));
   }
 
+  function canCurrentModeratorActOnPendingItem(item) {
+    return Boolean(item && !isPendingItemClaimedByOther(item));
+  }
+
   function isPendingItemDenyEligible(item) {
-    return Boolean(item && !item.parentVerificationId && !isPendingItemClaimedByOther(item));
+    return Boolean(item && !item.parentVerificationId && canCurrentModeratorActOnPendingItem(item));
   }
 
   function pruneSelectedPendingIds() {
@@ -3533,7 +3556,8 @@ import brandVxUrl from './brand-vx.png';
     }
     const selectableIds = new Set(
       state.pending
-        .filter((item) => item && item.id && !isPendingItemClaimedByOther(item))
+        .filter((item) => item && item.id)
+        .filter((item) => canCurrentModeratorActOnPendingItem(item))
         .map((item) => String(item.id))
     );
     for (const id of Array.from(selectedPendingIds)) {
@@ -3547,7 +3571,7 @@ import brandVxUrl from './brand-vx.png';
     if (!state || !Array.isArray(state.pending) || selectedPendingIds.size === 0) {
       return [];
     }
-    return state.pending.filter((item) => selectedPendingIds.has(String(item && item.id || '')) && !isPendingItemClaimedByOther(item));
+    return state.pending.filter((item) => selectedPendingIds.has(String(item && item.id || '')) && canCurrentModeratorActOnPendingItem(item));
   }
 
   function syncPendingSelectionCheckboxes() {
@@ -3722,14 +3746,6 @@ import brandVxUrl from './brand-vx.png';
       badge.textContent = '>72h';
     }
     badge.title = `Submitted ${Math.floor(ageHours)} hour(s) ago`;
-    return badge;
-  }
-
-  function createPendingResubmitBadge() {
-    const badge = document.createElement('span');
-    badge.className = 'pending-age-badge pending-age-resubmitted';
-    badge.textContent = 'Resubmitted';
-    badge.title = 'This request was reopened for another review.';
     return badge;
   }
 
@@ -3944,13 +3960,12 @@ import brandVxUrl from './brand-vx.png';
       card.setAttribute('aria-busy', 'true');
     }
     const isReReview = Boolean(item.parentVerificationId);
-    const isResubmission = Boolean(item.isResubmission);
-
     const claimedByNormalized = normalizeUsernameForCompare(item.claimedBy);
     const isClaimed = Boolean(claimedByNormalized);
     const isClaimedByOther = isPendingItemClaimedByOther(item);
     const reviewFlag = item.reviewFlag && typeof item.reviewFlag === 'object' ? item.reviewFlag : null;
     const isFlagged = Boolean(reviewFlag);
+    const canActOnCard = canCurrentModeratorActOnPendingItem(item);
     if (isFlagged) {
       card.classList.add('queue-card-flagged');
     }
@@ -3959,7 +3974,7 @@ import brandVxUrl from './brand-vx.png';
     header.className = 'queue-card-header';
     const headerIdentity = document.createElement('div');
     headerIdentity.className = 'queue-card-identity';
-    if (!isClaimedByOther) {
+    if (canActOnCard) {
       const selectLabel = document.createElement('label');
       selectLabel.className = 'pending-select-toggle';
       const selectCheckbox = document.createElement('input');
@@ -4011,9 +4026,6 @@ import brandVxUrl from './brand-vx.png';
     const creatorBadge = createPendingCreatorBadge(accountDetails);
     if (creatorBadge) {
       badgeRow.appendChild(creatorBadge);
-    }
-    if (isResubmission) {
-      badgeRow.appendChild(createPendingResubmitBadge());
     }
     if (badgeRow.childNodes.length > 0) {
       card.appendChild(badgeRow);
@@ -4084,7 +4096,7 @@ import brandVxUrl from './brand-vx.png';
     let denyCancelBtn = null;
     let denyConfirmBtn = null;
     let syncDenyConfirmState = null;
-    if (!isClaimedByOther && !isReReview) {
+    if (canActOnCard && !isReReview) {
       denySection = document.createElement('div');
       denySection.className = 'pending-deny hidden';
       const configuredReasons = getEnabledDenyReasons();
@@ -4214,7 +4226,7 @@ import brandVxUrl from './brand-vx.png';
     const approvalFlairChoices = getConfiguredApprovalFlairChoices();
     let approvalChoiceSelect = null;
 
-    if (!isClaimedByOther && state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1) {
+    if (canActOnCard && state && state.config && state.config.multipleApprovalFlairsEnabled === true && approvalFlairChoices.length > 1) {
       approvalChoiceSelect = document.createElement('select');
       approvalChoiceSelect.className = 'field-select';
       approvalChoiceSelect.dataset.role = 'approval-flair-choice';
@@ -4230,7 +4242,7 @@ import brandVxUrl from './brand-vx.png';
       row.appendChild(approvalChoiceSelect);
     }
 
-    if (!isClaimedByOther) {
+    if (canActOnCard) {
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn btn-success';
       approveBtn.textContent = 'Approve';
@@ -4354,9 +4366,9 @@ import brandVxUrl from './brand-vx.png';
       }
     }
 
-    if (isClaimed) {
+    if (!isFlagged && isClaimed) {
       const unclaimBtn = document.createElement('button');
-      unclaimBtn.className = 'btn btn-secondary';
+      unclaimBtn.className = 'btn btn-secondary pending-lock-btn';
       unclaimBtn.textContent = isClaimedByOther ? 'Force Unlock' : 'Unlock';
       unclaimBtn.disabled = actionInFlight;
       if (actionInFlight) {
@@ -4366,9 +4378,9 @@ import brandVxUrl from './brand-vx.png';
         postWithBusy({ type: 'unclaimPending', verificationId: item.id });
       });
       row.appendChild(unclaimBtn);
-    } else {
+    } else if (!isFlagged) {
       const claimBtn = document.createElement('button');
-      claimBtn.className = 'btn btn-secondary';
+      claimBtn.className = 'btn btn-secondary pending-lock-btn';
       claimBtn.textContent = 'Lock';
       claimBtn.disabled = actionInFlight;
       if (actionInFlight) {
@@ -4380,7 +4392,7 @@ import brandVxUrl from './brand-vx.png';
       row.appendChild(claimBtn);
     }
 
-    if (item.parentVerificationId && !isClaimedByOther) {
+    if (item.parentVerificationId && canActOnCard) {
       const cancelReopenBtn = document.createElement('button');
       cancelReopenBtn.className = 'btn btn-secondary';
       cancelReopenBtn.textContent = 'Keep Denied';
@@ -4394,22 +4406,24 @@ import brandVxUrl from './brand-vx.png';
       row.appendChild(cancelReopenBtn);
     }
 
-    const flagBtn = document.createElement('button');
-    flagBtn.className = 'btn btn-secondary pending-flag-btn';
-    flagBtn.textContent = isFlagged ? 'Unflag' : 'Flag';
-    flagBtn.title = actionInFlight
-      ? 'This request is being processed.'
-      : isFlagged
-        ? 'Remove the 2nd review flag. This also removes its notes.'
+    if (!isFlagged && !isClaimedByOther) {
+      const flagBtn = document.createElement('button');
+      flagBtn.className = 'btn btn-secondary pending-flag-btn';
+      flagBtn.textContent = 'Flag';
+      flagBtn.title = actionInFlight
+        ? 'This request is being processed.'
         : 'Flag this request so another moderator takes a 2nd look.';
-    flagBtn.disabled = actionInFlight;
-    flagBtn.addEventListener('click', () => {
-      pendingFlagNoteDrafts.delete(item.id);
-      postWithBusy({ type: 'flagPending', verificationId: item.id, flagged: !isFlagged });
-    });
-    row.appendChild(flagBtn);
+      flagBtn.disabled = actionInFlight;
+      flagBtn.addEventListener('click', () => {
+        pendingFlagNoteDrafts.delete(item.id);
+        postWithBusy({ type: 'flagPending', verificationId: item.id, flagged: true });
+      });
+      row.appendChild(flagBtn);
+    }
 
-    controlsCol.appendChild(row);
+    if (row.childElementCount > 0) {
+      controlsCol.appendChild(row);
+    }
 
     if (denySection) {
       controlsCol.appendChild(denySection);
@@ -7054,12 +7068,21 @@ import brandVxUrl from './brand-vx.png';
     if (statsLastDenialSection) {
       const lastDenial = accountDetails && accountDetails.lastDenial ? accountDetails.lastDenial : null;
       const previousDenials = accountDetails ? Number(accountDetails.previousDeniedAttempts || 0) : 0;
-      const setLastDenialNotes = (text) => {
+      const setLastDenialComments = (text) => {
         if (!statsLastDenialNotes) {
           return;
         }
         statsLastDenialNotes.textContent = text;
-        statsLastDenialNotes.classList.toggle('hidden', !text);
+        if (statsLastDenialCommentsRow) {
+          statsLastDenialCommentsRow.classList.toggle('hidden', !text);
+        }
+      };
+      const setLastDenialContext = (text) => {
+        if (!statsLastDenialContext) {
+          return;
+        }
+        statsLastDenialContext.textContent = text;
+        statsLastDenialContext.classList.toggle('hidden', !text);
       };
       if (lastDenial) {
         if (statsLastDenialReason) {
@@ -7075,7 +7098,8 @@ import brandVxUrl from './brand-vx.png';
         if (statsLastDenialAt) {
           statsLastDenialAt.textContent = lastDenial.deniedAt ? formatQueueDateTime(lastDenial.deniedAt) : 'Unknown';
         }
-        setLastDenialNotes(lastDenial.denyNotes ? `Notes: ${lastDenial.denyNotes}` : '');
+        setLastDenialComments(lastDenial.denyNotes || '');
+        setLastDenialContext('');
         statsLastDenialSection.classList.remove('hidden');
       } else if (previousDenials > 0) {
         if (statsLastDenialReason) {
@@ -7087,9 +7111,12 @@ import brandVxUrl from './brand-vx.png';
         if (statsLastDenialAt) {
           statsLastDenialAt.textContent = 'Unknown';
         }
-        setLastDenialNotes('The denied record is older than the retention window or pre-dates this version.');
+        setLastDenialComments('');
+        setLastDenialContext('The denied record is older than the retention window or pre-dates this version.');
         statsLastDenialSection.classList.remove('hidden');
       } else {
+        setLastDenialComments('');
+        setLastDenialContext('');
         statsLastDenialSection.classList.add('hidden');
       }
     }
