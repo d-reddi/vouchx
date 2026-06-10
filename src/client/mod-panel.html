@@ -127,7 +127,7 @@
                 </div>
                 <label class="toggle-row queue-flagged-filter-row">
                   <input id="pending-flagged-filter" type="checkbox" />
-                  <span>Flagged for 2nd review only</span>
+                  <span>Flagged for 2nd review</span>
                 </label>
                 <div class="row history-filter-actions queue-filter-actions">
                   <button id="pending-clear-filter-btn" class="btn btn-secondary" type="button">Clear</button>
@@ -1189,8 +1189,12 @@
                 <span class="stats-label">Denied on</span>
                 <span id="stats-last-denial-at" class="stats-value">Unknown</span>
               </div>
+              <div id="stats-last-denial-comments-row" class="stats-row hidden">
+                <span class="stats-label">Comments</span>
+                <span id="stats-last-denial-notes" class="stats-value stats-last-denial-notes">Unknown</span>
+              </div>
             </div>
-            <p id="stats-last-denial-notes" class="muted small stats-last-denial-notes hidden"></p>
+            <p id="stats-last-denial-context" class="muted small stats-last-denial-context hidden"></p>
           </div>
           <div id="stats-reasons-section" class="stats-reasons-section hidden">
             <span class="stats-label">Why this grade</span>

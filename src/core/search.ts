@@ -27,7 +27,7 @@ import {
   reopenedStateByDeniedKey,
   verificationRecordKey,
 } from './keys.ts';
-import { getFiniteTimestampMs, normalizeUsername, normalizeUsernameForLookup } from './normalize.ts';
+import { getFiniteTimestampMs, normalizeUsername, normalizeUsernameForLookup, parseTimestampMs } from './normalize.ts';
 import {
   addApprovedPrefixIndexEntry,
   asAuditAction,
@@ -41,6 +41,24 @@ import {
 import { clearExpiredPendingClaim, pendingClaimChanged } from './locks.ts';
 import { normalizeSubmittedPhotoUrl, parseDenyReason } from './settings.ts';
 import { removeValidationTrackingForRecordIds } from './retention.ts';
+
+function getPendingReviewSortScore(record: VerificationRecord): number {
+  const flaggedAtMs = parseTimestampMs(record.reviewFlag?.flaggedAt);
+  if (Number.isFinite(flaggedAtMs) && flaggedAtMs > 0) {
+    return flaggedAtMs;
+  }
+  const submittedAtMs = parseTimestampMs(record.submittedAt);
+  return Number.isFinite(submittedAtMs) && submittedAtMs > 0 ? submittedAtMs : 0;
+}
+
+function comparePendingQueueRecords(left: VerificationRecord, right: VerificationRecord): number {
+  const leftFlagged = Boolean(left.reviewFlag);
+  const rightFlagged = Boolean(right.reviewFlag);
+  if (leftFlagged !== rightFlagged) {
+    return leftFlagged ? -1 : 1;
+  }
+  return getPendingReviewSortScore(left) - getPendingReviewSortScore(right);
+}
 
 export async function listPendingVerifications(context: Devvit.Context, subredditId: string): Promise<VerificationRecord[]> {
   const members = await context.redis.zRange(pendingIndexKey(subredditId), 0, MAX_PENDING_TO_LOAD - 1, {
@@ -87,7 +105,7 @@ export async function listPendingVerifications(context: Devvit.Context, subreddi
     await removeValidationTrackingForRecordIds(context, subredditId, stalePendingIds);
   }
 
-  return records;
+  return records.sort(comparePendingQueueRecords);
 }
 
 export function toSearchPhotoLinkFields(

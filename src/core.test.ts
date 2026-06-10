@@ -2795,6 +2795,62 @@ test('loadModDashboard reports total pending count while loading the oldest capp
   assert.equal(dashboard.pending.some((record) => record.id === 'verification_174'), false);
 });
 
+test('loadModDashboard prioritizes flagged records by oldest flag time', async () => {
+  const modContext = createHubDashboardContext({
+    userId: 't2_mod',
+    currentUsername: 'mod_one',
+    currentUserResponses: [
+      {
+        username: 'mod_one',
+        id: 't2_mod',
+      },
+    ],
+    permissions: ['access'],
+    hashValues: {
+      flair_template_id: '',
+    },
+  });
+  const subredditId = 't5_example';
+  const pendingIndex = pendingIndexTestKey(subredditId);
+  const records = [
+    buildRecord({
+      id: 'normal_oldest',
+      username: 'normal_oldest',
+      submittedAt: '2026-03-10T08:00:00.000Z',
+      subredditId,
+      subredditName: 'example',
+    }),
+    buildRecord({
+      id: 'flagged_newer',
+      username: 'flagged_newer',
+      submittedAt: '2026-03-12T08:00:00.000Z',
+      subredditId,
+      subredditName: 'example',
+      reviewFlag: { flaggedBy: 'Mod_Two', flaggedAt: '2026-03-12T09:00:00.000Z', notes: [] },
+    }),
+    buildRecord({
+      id: 'flagged_older',
+      username: 'flagged_older',
+      submittedAt: '2026-03-13T08:00:00.000Z',
+      subredditId,
+      subredditName: 'example',
+      reviewFlag: { flaggedBy: 'Mod_Three', flaggedAt: '2026-03-11T09:00:00.000Z', notes: [] },
+    }),
+  ];
+
+  for (const record of records) {
+    modContext.redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
+    ensureTestZSet(modContext.zsetStore, pendingIndex).set(record.id, new Date(record.submittedAt).getTime());
+  }
+
+  const dashboard = await loadModDashboard(modContext.context as never);
+
+  assert.deepEqual(
+    dashboard.pending.slice(0, 3).map((record) => record.id),
+    ['flagged_older', 'flagged_newer', 'normal_oldest']
+  );
+});
+
 test('loadHubDashboard applies global blocks and exposes the developer panel to authorized developers', async () => {
   const record = buildRecord({
     id: 'verification_global_blocked',
@@ -3287,6 +3343,8 @@ test('parseRecord preserves the 2nd-review flag on pending records', () => {
 
 test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clears the thread', async () => {
   const reviewContext = createReviewActionContext();
+  const pendingIndex = ensureTestZSet(reviewContext.zsetStore, pendingIndexTestKey(reviewContext.subredditId));
+  const originalPendingScore = pendingIndex.get(reviewContext.record.id);
 
   const flagged = await setPendingFlagState(
     reviewContext.context as never,
@@ -3298,6 +3356,7 @@ test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clea
   assert.equal(flagged.item.reviewFlag?.flaggedBy, 'Mod_One');
   assert.equal(flagged.item.reviewFlag?.notes.length, 1);
   assert.equal(flagged.item.reviewFlag?.notes[0]?.text, 'Check photo 2 against the instructions');
+  assert.ok((pendingIndex.get(reviewContext.record.id) ?? 0) < 0);
 
   const repeat = await setPendingFlagState(reviewContext.context as never, reviewContext.record.id, true);
   assert.equal(repeat.changed, false);
@@ -3318,6 +3377,7 @@ test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clea
   assert.equal(unflagged.changed, true);
   assert.equal(unflagged.item.reviewFlag, null);
   assert.equal(reviewContext.getParsedRecord()?.reviewFlag, null);
+  assert.equal(pendingIndex.get(reviewContext.record.id), originalPendingScore);
 
   await assert.rejects(
     addPendingFlagNote(reviewContext.context as never, reviewContext.record.id, 'orphan note'),
@@ -3325,11 +3385,58 @@ test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clea
   );
 });
 
+test('review flags do not lock status actions or unflagging to the flagging moderator', async () => {
+  const freshFlag = {
+    flaggedBy: 'Mod_One',
+    flaggedAt: new Date().toISOString(),
+    notes: [],
+  };
+  const approveContext = createReviewActionContext({
+    moderatorName: 'Mod_Two',
+    recordOverrides: { reviewFlag: freshFlag },
+  });
+
+  const approved = await approveVerification(approveContext.context as never, approveContext.record.id);
+  assert.equal(approved.outcome, 'completed');
+  assert.equal(approveContext.getParsedRecord()?.status, 'approved');
+  assert.equal(approveContext.getParsedRecord()?.reviewFlag, null);
+
+  const denyContext = createReviewActionContext({
+    moderatorName: 'Mod_Two',
+    recordOverrides: { reviewFlag: freshFlag },
+  });
+  const denied = await denyVerification(denyContext.context as never, denyContext.record.id, 'reason_1');
+  assert.equal(denied.outcome, 'completed');
+  assert.equal(denyContext.getParsedRecord()?.status, 'denied');
+  assert.equal(denyContext.getParsedRecord()?.reviewFlag, null);
+
+  const unflagContext = createReviewActionContext({
+    moderatorName: 'Mod_Two',
+    recordOverrides: { reviewFlag: freshFlag },
+  });
+  const unflagged = await setPendingFlagState(unflagContext.context as never, unflagContext.record.id, false);
+  assert.equal(unflagged.changed, true);
+  assert.equal(unflagContext.getParsedRecord()?.reviewFlag, null);
+
+  const otherModeratorContext = createReviewActionContext({
+    moderatorName: 'Mod_Two',
+    recordOverrides: { reviewFlag: freshFlag },
+  });
+  const notedByOtherModerator = await addPendingFlagNote(
+    otherModeratorContext.context as never,
+    otherModeratorContext.record.id,
+    'I can add context but not decide this one'
+  );
+  assert.equal(notedByOtherModerator.item.reviewFlag?.notes.length, 1);
+  assert.equal(notedByOtherModerator.item.reviewFlag?.notes[0]?.author, 'Mod_Two');
+  assert.equal(otherModeratorContext.getParsedRecord()?.status, 'pending');
+});
+
 test('approveVerification and denyVerification clear the 2nd-review flag', async () => {
   const reviewFlag = {
-    flaggedBy: 'Mod_Two',
+    flaggedBy: 'Mod_One',
     flaggedAt: '2026-03-11T12:00:00.000Z',
-    notes: [{ author: 'Mod_Two', at: '2026-03-11T12:00:00.000Z', text: 'Needs a 2nd opinion' }],
+    notes: [{ author: 'Mod_One', at: '2026-03-11T12:00:00.000Z', text: 'Needs a 2nd opinion' }],
   };
 
   const approveContext = createReviewActionContext({ recordOverrides: { reviewFlag } });

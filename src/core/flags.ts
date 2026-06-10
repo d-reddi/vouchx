@@ -1,18 +1,22 @@
 import type { Devvit } from '@devvit/public-api';
 import type { PendingPanelItem, PendingReviewFlag, PendingReviewFlagNote, VerificationRecord } from './types.ts';
-import { MAX_REVIEW_FLAG_NOTES, MAX_REVIEW_FLAG_NOTE_LENGTH, REVIEW_FLAG_FORCE_UNLOCK_AFTER_MS } from './constants.ts';
+import {
+  MAX_REVIEW_FLAG_NOTES,
+  MAX_REVIEW_FLAG_NOTE_LENGTH,
+  REVIEW_FLAG_PENDING_INDEX_SCORE_OFFSET_MS,
+} from './constants.ts';
 import { toPendingPanelItem } from './dashboard.ts';
-import { withVerificationActionLock } from './locks.ts';
+import { assertClaimAllowsAction, withVerificationActionLock } from './locks.ts';
 import { assertCanReview } from './moderator-access.ts';
 import {
   getCurrentSubredditNameCompat,
   normalizeOptionalIsoTimestamp,
   parseTimestampMs,
   sanitizeSubredditId,
-  usernamesEqual,
 } from './normalize.ts';
 import { getRecord, setRecord } from './records.ts';
 import { getRuntimeConfig } from './settings.ts';
+import { pendingIndexKey } from './keys.ts';
 
 export function normalizeReviewFlagNoteText(value: unknown): string {
   if (typeof value !== 'string') {
@@ -55,6 +59,29 @@ export function parsePendingReviewFlag(value: unknown): PendingReviewFlag | null
   return { flaggedBy, flaggedAt, notes };
 }
 
+export function pendingIndexScoreForRecord(record: VerificationRecord): number {
+  const reviewFlag = parsePendingReviewFlag(record.reviewFlag);
+  if (reviewFlag) {
+    const flaggedAtMs = parseTimestampMs(reviewFlag.flaggedAt);
+    if (Number.isFinite(flaggedAtMs) && flaggedAtMs > 0) {
+      return flaggedAtMs - REVIEW_FLAG_PENDING_INDEX_SCORE_OFFSET_MS;
+    }
+  }
+  const submittedAtMs = parseTimestampMs(record.submittedAt);
+  return Number.isFinite(submittedAtMs) && submittedAtMs > 0 ? submittedAtMs : Date.now();
+}
+
+async function updatePendingIndexScoreForRecord(
+  context: Pick<Devvit.Context, 'redis'>,
+  subredditId: string,
+  record: VerificationRecord
+): Promise<void> {
+  await context.redis.zAdd(pendingIndexKey(subredditId), {
+    member: record.id,
+    score: pendingIndexScoreForRecord(record),
+  });
+}
+
 async function loadPendingRecordForFlagAction(
   context: Devvit.Context,
   verificationId: string
@@ -90,6 +117,7 @@ export async function setPendingFlagState(
     let updatedRecord = record;
     let changed = false;
     if (shouldFlag && !record.reviewFlag) {
+      assertClaimAllowsAction(record, moderator);
       const now = new Date().toISOString();
       const noteText = normalizeReviewFlagNoteText(initialNote);
       const notes: PendingReviewFlagNote[] = noteText ? [{ author: moderator, at: now, text: noteText }] : [];
@@ -106,6 +134,7 @@ export async function setPendingFlagState(
 
     if (changed) {
       await setRecord(context, subredditId, updatedRecord);
+      await updatePendingIndexScoreForRecord(context, subredditId, updatedRecord);
     }
 
     const config = await getRuntimeConfig(context, subredditId);

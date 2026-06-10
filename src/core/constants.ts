@@ -102,9 +102,10 @@ export const MAX_REVIEW_FLAG_NOTE_LENGTH = 300;
 
 export const MAX_REVIEW_FLAG_NOTES = 20;
 
-// A 2nd-review flag locks the record to the flagging moderator. After this window,
-// any moderator may force-unlock (unflag) it.
-export const REVIEW_FLAG_FORCE_UNLOCK_AFTER_MS = 24 * 60 * 60 * 1000;
+// Pending index scores are normally submission timestamps. Flagged records receive
+// a large negative offset so they sort above the normal queue while preserving
+// flagged-at order.
+export const REVIEW_FLAG_PENDING_INDEX_SCORE_OFFSET_MS = 8_000_000_000_000_000;
 
 export const MAX_DENY_REASON_LABEL_LENGTH = 48;
 
