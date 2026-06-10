@@ -22,6 +22,7 @@ structure — do not re-merge the modules back into one file.**
 | `keys.ts` | All Redis key builders |
 | `records.ts` | Verification record read/write, user pointers, global indexes, audit-log storage, storage metering |
 | `locks.ts` | Redis locks + pending-claim state |
+| `flags.ts` | 2nd-review flag state + internal flag notes on pending records |
 | `moderator-access.ts` | Viewer identity, moderator permission lookups/caches, access assertions, hub moderator UI state |
 | `blocking.ts` | Blocked-user storage, denial counts, block/unblock, global blocklist readers |
 | `submission.ts` | `submitVerification`, user grading/scoring, content-creator detection, pending account snapshot |

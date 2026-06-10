@@ -69,6 +69,7 @@ import brandVxUrl from './brand-vx.png';
   const pendingSearchUserInput = document.getElementById('pending-search-user');
   const pendingSearchHint = document.getElementById('pending-search-hint');
   const pendingSlaSelect = document.getElementById('pending-sla-filter');
+  const pendingFlaggedFilterCheckbox = document.getElementById('pending-flagged-filter');
   const pendingClearFilterBtn = document.getElementById('pending-clear-filter-btn');
   const batchReviewToolbar = document.getElementById('batch-review-toolbar');
   const batchSelectedCount = document.getElementById('batch-selected-count');
@@ -236,6 +237,9 @@ import brandVxUrl from './brand-vx.png';
   const imageModal = document.getElementById('image-modal');
   const imagePreview = document.getElementById('image-preview');
   const imageClose = document.getElementById('image-close');
+  const imagePrevBtn = document.getElementById('image-prev');
+  const imageNextBtn = document.getElementById('image-next');
+  const imageCounter = document.getElementById('image-counter');
   const statsModal = document.getElementById('stats-modal');
   const statsCloseBtn = document.getElementById('stats-close-btn');
   const statsUsername = document.getElementById('stats-username');
@@ -249,6 +253,11 @@ import brandVxUrl from './brand-vx.png';
   const statsShadowbanned = document.getElementById('stats-shadowbanned');
   const statsRecentActivity = document.getElementById('stats-recent-activity');
   const statsContentCreator = document.getElementById('stats-content-creator');
+  const statsLastDenialSection = document.getElementById('stats-last-denial-section');
+  const statsLastDenialReason = document.getElementById('stats-last-denial-reason');
+  const statsLastDenialBy = document.getElementById('stats-last-denial-by');
+  const statsLastDenialAt = document.getElementById('stats-last-denial-at');
+  const statsLastDenialNotes = document.getElementById('stats-last-denial-notes');
   const statsReasonsSection = document.getElementById('stats-reasons-section');
   const statsReasons = document.getElementById('stats-reasons');
   const blockModal = document.getElementById('block-modal');
@@ -414,8 +423,14 @@ import brandVxUrl from './brand-vx.png';
   let isSavingFlairSettings = false;
   let pendingUsernameFilter = '';
   let selectedPendingSlaFilter = 'all';
+  let pendingFlaggedOnlyFilter = false;
   let selectedPendingIds = new Set();
   const pendingActionIds = new Set();
+  // Lightbox gallery state: the photo set currently open in the image modal.
+  let lightboxPhotos = [];
+  let lightboxIndex = 0;
+  let lightboxTouchStartX = null;
+  let lightboxTouchStartY = null;
   let batchApprovalFlairDraft = '';
   let batchApprovalOptionsExpanded = false;
   let batchDenyReasonDraft = '';
@@ -425,6 +440,9 @@ import brandVxUrl from './brand-vx.png';
   // Per-verification in-progress denial drafts, preserved across re-renders
   // (realtime refresh, state updates) so opening the deny form isn't wiped.
   const pendingDenialDrafts = new Map();
+  // Per-verification in-progress 2nd-review note drafts, same preservation rules.
+  const pendingFlagNoteDrafts = new Map();
+  const MAX_FLAG_NOTES = 20;
   let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
@@ -2626,6 +2644,28 @@ import brandVxUrl from './brand-vx.png';
         return;
       }
 
+      if (message.type === 'flagPending') {
+        applyMutationApiState(
+          await requestJson('/api/mod/flag', {
+            verificationId: message.verificationId,
+            flagged: Boolean(message.flagged),
+            note: message.note || '',
+          })
+        );
+        return;
+      }
+
+      if (message.type === 'flagNote') {
+        const payload = await requestJson('/api/mod/flag-note', {
+          verificationId: message.verificationId,
+          note: message.note || '',
+        });
+        // Drop the draft only once the note is saved so a failed request keeps the typed text.
+        pendingFlagNoteDrafts.delete(message.verificationId);
+        applyMutationApiState(payload);
+        return;
+      }
+
       if (message.type === 'reopenDenied') {
         applyMutationApiState(await requestJson('/api/mod/reopen', { verificationId: message.verificationId }));
         return;
@@ -2765,6 +2805,8 @@ import brandVxUrl from './brand-vx.png';
       message.type === 'deny' ||
       message.type === 'claimPending' ||
       message.type === 'unclaimPending' ||
+      message.type === 'flagPending' ||
+      message.type === 'flagNote' ||
       message.type === 'cancelReopen'
     ) {
       const id = String(message.verificationId || '').trim();
@@ -3309,6 +3351,9 @@ import brandVxUrl from './brand-vx.png';
     if (selectedPendingSlaFilter !== 'all') {
       count += 1;
     }
+    if (pendingFlaggedOnlyFilter) {
+      count += 1;
+    }
     return count;
   }
 
@@ -3346,6 +3391,9 @@ import brandVxUrl from './brand-vx.png';
     }
     if (selectedPendingSlaFilter !== 'all') {
       parts.push(getPendingSlaFilterLabel(selectedPendingSlaFilter));
+    }
+    if (pendingFlaggedOnlyFilter) {
+      parts.push('Flagged');
     }
     pendingFilterSummary.textContent = parts.join(' · ');
   }
@@ -3442,6 +3490,9 @@ import brandVxUrl from './brand-vx.png';
     if (pendingUsernameFilter && !normalizedUsername.includes(pendingUsernameFilter)) {
       return false;
     }
+    if (pendingFlaggedOnlyFilter && !item.reviewFlag) {
+      return false;
+    }
     if (selectedPendingSlaFilter === 'all') {
       return true;
     }
@@ -3451,6 +3502,9 @@ import brandVxUrl from './brand-vx.png';
   function syncPendingFilterControls() {
     if (pendingSlaSelect && pendingSlaSelect.value !== selectedPendingSlaFilter) {
       pendingSlaSelect.value = selectedPendingSlaFilter;
+    }
+    if (pendingFlaggedFilterCheckbox && pendingFlaggedFilterCheckbox.checked !== pendingFlaggedOnlyFilter) {
+      pendingFlaggedFilterCheckbox.checked = pendingFlaggedOnlyFilter;
     }
     updatePendingFilterSummary();
   }
@@ -3687,6 +3741,117 @@ import brandVxUrl from './brand-vx.png';
     return badge;
   }
 
+  function createPendingDeniedBeforeBadge(accountDetails) {
+    if (!accountDetails) {
+      return null;
+    }
+    // The denial counter resets when a block is removed, so also key off the captured
+    // last-denial context — either signal means this user has been denied before.
+    const count = Number(accountDetails.previousDeniedAttempts || 0);
+    const hasCount = Number.isFinite(count) && count > 0;
+    if (!hasCount && !accountDetails.lastDenial) {
+      return null;
+    }
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge pending-age-denied-before';
+    badge.textContent = hasCount && count > 1 ? `Denied x${count}` : 'Denied before';
+    badge.title = 'This user was denied previously. Open Stats for details.';
+    return badge;
+  }
+
+  function createPendingFlaggedBadge(reviewFlag) {
+    const badge = document.createElement('span');
+    badge.className = 'pending-age-badge pending-age-flagged';
+    badge.textContent = '2nd review';
+    const flaggedBy = reviewFlag && reviewFlag.flaggedBy ? String(reviewFlag.flaggedBy).replace(/^u\//i, '') : '';
+    badge.title = flaggedBy ? `Flagged for a 2nd review by u/${flaggedBy}.` : 'Flagged for a 2nd review.';
+    return badge;
+  }
+
+  function buildFlagNotesSection(item, reviewFlag, actionInFlight) {
+    const section = document.createElement('div');
+    section.className = 'pending-flag-notes';
+
+    const notes = Array.isArray(reviewFlag.notes) ? reviewFlag.notes : [];
+    const heading = document.createElement('p');
+    heading.className = 'pending-flag-notes-title';
+    heading.textContent = `2nd review notes (${notes.length})`;
+    section.appendChild(heading);
+
+    if (notes.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'muted small';
+      empty.textContent = 'No notes yet. Add context for the next reviewer.';
+      section.appendChild(empty);
+    } else {
+      const list = document.createElement('div');
+      list.className = 'pending-flag-note-list';
+      for (const note of notes) {
+        const entry = document.createElement('div');
+        entry.className = 'pending-flag-note';
+        const meta = document.createElement('p');
+        meta.className = 'pending-flag-note-meta muted small';
+        const author = String(note.author || 'unknown').replace(/^u\//i, '');
+        meta.textContent = `u/${author} • ${formatQueueDateTime(note.at)}`;
+        const text = document.createElement('p');
+        text.className = 'pending-flag-note-text';
+        text.textContent = String(note.text || '');
+        entry.append(meta, text);
+        list.appendChild(entry);
+      }
+      section.appendChild(list);
+    }
+
+    if (notes.length >= MAX_FLAG_NOTES) {
+      const capNotice = document.createElement('p');
+      capNotice.className = 'muted small';
+      capNotice.textContent = `Note limit reached (${MAX_FLAG_NOTES}).`;
+      section.appendChild(capNotice);
+      return section;
+    }
+
+    const noteInput = document.createElement('textarea');
+    noteInput.className = 'field-textarea pending-flag-note-input';
+    noteInput.rows = 2;
+    noteInput.maxLength = 300;
+    noteInput.placeholder = 'Internal note for other moderators. Removed when the request is reviewed or unflagged.';
+    noteInput.disabled = actionInFlight;
+    const draft = pendingFlagNoteDrafts.get(item.id);
+    if (draft) {
+      noteInput.value = draft;
+    }
+    noteInput.addEventListener('input', () => {
+      pendingFlagNoteDrafts.set(item.id, noteInput.value);
+    });
+
+    const addNoteBtn = document.createElement('button');
+    addNoteBtn.type = 'button';
+    addNoteBtn.className = 'btn btn-secondary';
+    addNoteBtn.textContent = 'Add note';
+    addNoteBtn.disabled = actionInFlight;
+    const submitNote = () => {
+      const text = noteInput.value.trim();
+      if (!text) {
+        showToast('Enter a note before posting.', 'error');
+        return;
+      }
+      postWithBusy({ type: 'flagNote', verificationId: item.id, note: text });
+    };
+    addNoteBtn.addEventListener('click', submitNote);
+    noteInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitNote();
+      }
+    });
+
+    const noteRow = document.createElement('div');
+    noteRow.className = 'row pending-flag-note-actions';
+    noteRow.appendChild(addNoteBtn);
+    section.append(noteInput, noteRow);
+    return section;
+  }
+
   const GRADE_BADGE_META = {
     spam_risk: { label: 'Spam Risk', className: 'pending-grade-spam' },
     low_engagement: { label: 'Limited History', className: 'pending-grade-low' },
@@ -3784,6 +3949,11 @@ import brandVxUrl from './brand-vx.png';
     const claimedByNormalized = normalizeUsernameForCompare(item.claimedBy);
     const isClaimed = Boolean(claimedByNormalized);
     const isClaimedByOther = isPendingItemClaimedByOther(item);
+    const reviewFlag = item.reviewFlag && typeof item.reviewFlag === 'object' ? item.reviewFlag : null;
+    const isFlagged = Boolean(reviewFlag);
+    if (isFlagged) {
+      card.classList.add('queue-card-flagged');
+    }
 
     const header = document.createElement('div');
     header.className = 'queue-card-header';
@@ -3827,6 +3997,13 @@ import brandVxUrl from './brand-vx.png';
     if (accountDetails && accountDetails.banStatus === 'banned') {
       badgeRow.appendChild(createPendingBannedBadge());
     }
+    const deniedBeforeBadge = createPendingDeniedBeforeBadge(accountDetails);
+    if (deniedBeforeBadge) {
+      badgeRow.appendChild(deniedBeforeBadge);
+    }
+    if (isFlagged) {
+      badgeRow.appendChild(createPendingFlaggedBadge(reviewFlag));
+    }
     const gradeBadge = createPendingGradeBadge(accountDetails);
     if (gradeBadge) {
       badgeRow.appendChild(gradeBadge);
@@ -3864,6 +4041,17 @@ import brandVxUrl from './brand-vx.png';
       );
     }
 
+    if (isFlagged) {
+      metaGroup.appendChild(
+        createQueueMetaRow(
+          'flag',
+          'Flagged',
+          `u/${String(reviewFlag.flaggedBy || '').replace(/^u\//i, '')}`,
+          'pending-flag-meta'
+        )
+      );
+    }
+
     card.appendChild(metaGroup);
 
     const decision = document.createElement('div');
@@ -3875,16 +4063,16 @@ import brandVxUrl from './brand-vx.png';
 
     const imageGrid = document.createElement('div');
     imageGrid.className = 'image-grid';
-    const photos = [
+    const galleryPhotos = [
       { url: item.photoOneUrl, label: `u/${item.username} photo 1` },
       { url: item.photoTwoUrl, label: `u/${item.username} photo 2` },
       { url: item.photoThreeUrl, label: `u/${item.username} photo 3` },
-    ];
-    for (const photo of photos) {
-      const safeUrl = normalizeExternalUrl(photo.url);
-      if (safeUrl) {
-        imageGrid.appendChild(createPhotoWrap(safeUrl, photo.label));
-      }
+    ]
+      .map((photo) => ({ ...photo, url: normalizeExternalUrl(photo.url) }))
+      .filter((photo) => photo.url);
+    for (let photoIndex = 0; photoIndex < galleryPhotos.length; photoIndex++) {
+      const photo = galleryPhotos[photoIndex];
+      imageGrid.appendChild(createPhotoWrap(photo.url, photo.label, galleryPhotos, photoIndex));
     }
     photoCol.appendChild(imageGrid);
 
@@ -4206,10 +4394,29 @@ import brandVxUrl from './brand-vx.png';
       row.appendChild(cancelReopenBtn);
     }
 
+    const flagBtn = document.createElement('button');
+    flagBtn.className = 'btn btn-secondary pending-flag-btn';
+    flagBtn.textContent = isFlagged ? 'Unflag' : 'Flag';
+    flagBtn.title = actionInFlight
+      ? 'This request is being processed.'
+      : isFlagged
+        ? 'Remove the 2nd review flag. This also removes its notes.'
+        : 'Flag this request so another moderator takes a 2nd look.';
+    flagBtn.disabled = actionInFlight;
+    flagBtn.addEventListener('click', () => {
+      pendingFlagNoteDrafts.delete(item.id);
+      postWithBusy({ type: 'flagPending', verificationId: item.id, flagged: !isFlagged });
+    });
+    row.appendChild(flagBtn);
+
     controlsCol.appendChild(row);
 
     if (denySection) {
       controlsCol.appendChild(denySection);
+    }
+
+    if (isFlagged) {
+      controlsCol.appendChild(buildFlagNotesSection(item, reviewFlag, actionInFlight));
     }
 
     if (imageGrid.childElementCount > 0) {
@@ -4269,13 +4476,18 @@ import brandVxUrl from './brand-vx.png';
     setPendingSearchHintVisible(isShortNonEmptyPrefix(pendingSearchUserInput ? pendingSearchUserInput.value : ''));
     pendingList.innerHTML = '';
     pruneSelectedPendingIds();
-    if (pendingDenialDrafts.size > 0) {
+    if (pendingDenialDrafts.size > 0 || pendingFlagNoteDrafts.size > 0) {
       const activeIds = new Set(
         state && Array.isArray(state.pending) ? state.pending.map((entry) => entry && entry.id).filter(Boolean) : []
       );
       for (const id of Array.from(pendingDenialDrafts.keys())) {
         if (!activeIds.has(id)) {
           pendingDenialDrafts.delete(id);
+        }
+      }
+      for (const id of Array.from(pendingFlagNoteDrafts.keys())) {
+        if (!activeIds.has(id)) {
+          pendingFlagNoteDrafts.delete(id);
         }
       }
     }
@@ -6428,7 +6640,7 @@ import brandVxUrl from './brand-vx.png';
     bugReportLink.setAttribute('href', bugReportUrl || '#');
   }
 
-  function createPhotoWrap(url, alt) {
+  function createPhotoWrap(url, alt, gallery, galleryIndex) {
     const wrap = document.createElement('div');
     wrap.className = 'photo-wrap';
     const safeUrl = normalizeExternalUrl(url);
@@ -6440,6 +6652,9 @@ import brandVxUrl from './brand-vx.png';
       return wrap;
     }
 
+    const galleryPhotos = Array.isArray(gallery) && gallery.length > 0 ? gallery : [{ url: safeUrl, label: alt }];
+    const galleryStartIndex = Array.isArray(gallery) && gallery.length > 0 ? galleryIndex : 0;
+
     const img = document.createElement('img');
     img.className = 'photo';
     img.src = safeUrl;
@@ -6448,11 +6663,11 @@ import brandVxUrl from './brand-vx.png';
     img.tabIndex = 0;
     img.setAttribute('role', 'button');
     img.setAttribute('aria-label', `Open ${alt}`);
-    img.addEventListener('click', () => openImage(safeUrl));
+    img.addEventListener('click', () => openImage(galleryPhotos, galleryStartIndex));
     img.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        openImage(safeUrl);
+        openImage(galleryPhotos, galleryStartIndex);
       }
     });
     wrap.appendChild(img);
@@ -6478,12 +6693,13 @@ import brandVxUrl from './brand-vx.png';
     const label = document.createElement('span');
     label.textContent = 'View photos:';
     meta.appendChild(label);
-    for (const photo of photos) {
+    for (let photoIndex = 0; photoIndex < photos.length; photoIndex++) {
+      const photo = photos[photoIndex];
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'photo-button';
       button.textContent = photo.label;
-      button.addEventListener('click', () => openImage(photo.url));
+      button.addEventListener('click', () => openImage(photos, photoIndex));
       meta.appendChild(button);
     }
     container.appendChild(meta);
@@ -6509,14 +6725,78 @@ import brandVxUrl from './brand-vx.png';
     return title;
   }
 
-  function openImage(url) {
-    imagePreview.src = url;
+  function normalizeLightboxPhotos(photosOrUrl) {
+    const list = Array.isArray(photosOrUrl) ? photosOrUrl : [photosOrUrl];
+    const normalized = [];
+    for (const entry of list) {
+      const url = normalizeExternalUrl(typeof entry === 'string' ? entry : entry && entry.url);
+      if (url) {
+        normalized.push({
+          url,
+          label: entry && typeof entry === 'object' && entry.label ? String(entry.label) : 'Verification photo',
+        });
+      }
+    }
+    return normalized;
+  }
+
+  function renderLightbox() {
+    const photo = lightboxPhotos[lightboxIndex];
+    if (!photo) {
+      closeImage();
+      return;
+    }
+    imagePreview.src = photo.url;
+    imagePreview.alt = photo.label;
+    const hasMultiplePhotos = lightboxPhotos.length > 1;
+    if (imagePrevBtn) {
+      imagePrevBtn.classList.toggle('hidden', !hasMultiplePhotos);
+      imagePrevBtn.disabled = lightboxIndex <= 0;
+    }
+    if (imageNextBtn) {
+      imageNextBtn.classList.toggle('hidden', !hasMultiplePhotos);
+      imageNextBtn.disabled = lightboxIndex >= lightboxPhotos.length - 1;
+    }
+    if (imageCounter) {
+      imageCounter.classList.toggle('hidden', !hasMultiplePhotos);
+      imageCounter.textContent = hasMultiplePhotos ? `${lightboxIndex + 1} of ${lightboxPhotos.length}` : '';
+    }
+    // Preload neighbors so swiping between photos is instant.
+    for (const neighborIndex of [lightboxIndex - 1, lightboxIndex + 1]) {
+      const neighbor = lightboxPhotos[neighborIndex];
+      if (neighbor) {
+        new Image().src = neighbor.url;
+      }
+    }
+  }
+
+  function stepLightbox(delta) {
+    const nextIndex = lightboxIndex + delta;
+    if (nextIndex < 0 || nextIndex >= lightboxPhotos.length) {
+      return;
+    }
+    lightboxIndex = nextIndex;
+    renderLightbox();
+  }
+
+  function openImage(photosOrUrl, startIndex) {
+    lightboxPhotos = normalizeLightboxPhotos(photosOrUrl);
+    if (lightboxPhotos.length === 0) {
+      return;
+    }
+    const requestedIndex = Math.floor(Number(startIndex));
+    lightboxIndex = Number.isFinite(requestedIndex)
+      ? Math.min(Math.max(0, requestedIndex), lightboxPhotos.length - 1)
+      : 0;
+    renderLightbox();
     imageModal.classList.remove('hidden');
   }
 
   function closeImage() {
     imageModal.classList.add('hidden');
     imagePreview.src = '';
+    lightboxPhotos = [];
+    lightboxIndex = 0;
   }
 
   function openBlockModal() {
@@ -6770,6 +7050,48 @@ import brandVxUrl from './brand-vx.png';
           : accountDetails
             ? 'No'
             : 'Unknown';
+    }
+    if (statsLastDenialSection) {
+      const lastDenial = accountDetails && accountDetails.lastDenial ? accountDetails.lastDenial : null;
+      const previousDenials = accountDetails ? Number(accountDetails.previousDeniedAttempts || 0) : 0;
+      const setLastDenialNotes = (text) => {
+        if (!statsLastDenialNotes) {
+          return;
+        }
+        statsLastDenialNotes.textContent = text;
+        statsLastDenialNotes.classList.toggle('hidden', !text);
+      };
+      if (lastDenial) {
+        if (statsLastDenialReason) {
+          statsLastDenialReason.textContent = lastDenial.denyReason
+            ? getDenyReasonLabel(lastDenial.denyReason)
+            : 'Not recorded';
+        }
+        if (statsLastDenialBy) {
+          statsLastDenialBy.textContent = lastDenial.deniedBy
+            ? `u/${String(lastDenial.deniedBy).replace(/^u\//i, '')}`
+            : 'Unknown';
+        }
+        if (statsLastDenialAt) {
+          statsLastDenialAt.textContent = lastDenial.deniedAt ? formatQueueDateTime(lastDenial.deniedAt) : 'Unknown';
+        }
+        setLastDenialNotes(lastDenial.denyNotes ? `Notes: ${lastDenial.denyNotes}` : '');
+        statsLastDenialSection.classList.remove('hidden');
+      } else if (previousDenials > 0) {
+        if (statsLastDenialReason) {
+          statsLastDenialReason.textContent = 'Details unavailable';
+        }
+        if (statsLastDenialBy) {
+          statsLastDenialBy.textContent = 'Unknown';
+        }
+        if (statsLastDenialAt) {
+          statsLastDenialAt.textContent = 'Unknown';
+        }
+        setLastDenialNotes('The denied record is older than the retention window or pre-dates this version.');
+        statsLastDenialSection.classList.remove('hidden');
+      } else {
+        statsLastDenialSection.classList.add('hidden');
+      }
     }
     if (statsReasons && statsReasonsSection) {
       const reasons = accountDetails && Array.isArray(accountDetails.reasons) ? accountDetails.reasons : [];
@@ -7354,12 +7676,24 @@ import brandVxUrl from './brand-vx.png';
     });
   }
 
+  if (pendingFlaggedFilterCheckbox) {
+    pendingFlaggedFilterCheckbox.addEventListener('change', () => {
+      pendingFlaggedOnlyFilter = pendingFlaggedFilterCheckbox.checked;
+      updatePendingFilterSummary();
+      renderPending();
+    });
+  }
+
   if (pendingClearFilterBtn) {
     pendingClearFilterBtn.addEventListener('click', () => {
       pendingUsernameFilter = '';
       selectedPendingSlaFilter = 'all';
+      pendingFlaggedOnlyFilter = false;
       if (pendingSearchUserInput) {
         pendingSearchUserInput.value = '';
+      }
+      if (pendingFlaggedFilterCheckbox) {
+        pendingFlaggedFilterCheckbox.checked = false;
       }
       setPendingSearchHintVisible(false);
       updatePendingFilterSummary();
@@ -7774,6 +8108,64 @@ import brandVxUrl from './brand-vx.png';
   imageClose.addEventListener('click', closeImage);
   imageModal.addEventListener('click', (event) => {
     if (event.target === imageModal) {
+      closeImage();
+    }
+  });
+  if (imagePrevBtn) {
+    imagePrevBtn.addEventListener('click', () => stepLightbox(-1));
+  }
+  if (imageNextBtn) {
+    imageNextBtn.addEventListener('click', () => stepLightbox(1));
+  }
+  imageModal.addEventListener(
+    'touchstart',
+    (event) => {
+      if (event.touches.length !== 1) {
+        lightboxTouchStartX = null;
+        lightboxTouchStartY = null;
+        return;
+      }
+      lightboxTouchStartX = event.touches[0].clientX;
+      lightboxTouchStartY = event.touches[0].clientY;
+    },
+    { passive: true }
+  );
+  imageModal.addEventListener(
+    'touchend',
+    (event) => {
+      if (lightboxTouchStartX === null || lightboxTouchStartY === null) {
+        return;
+      }
+      const touch = event.changedTouches && event.changedTouches[0];
+      const startX = lightboxTouchStartX;
+      const startY = lightboxTouchStartY;
+      lightboxTouchStartX = null;
+      lightboxTouchStartY = null;
+      if (!touch) {
+        return;
+      }
+      const deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      // Only treat clearly horizontal gestures as swipes so vertical scrolling stays untouched.
+      if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) {
+        return;
+      }
+      stepLightbox(deltaX < 0 ? 1 : -1);
+    },
+    { passive: true }
+  );
+  document.addEventListener('keydown', (event) => {
+    if (imageModal.classList.contains('hidden')) {
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepLightbox(-1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepLightbox(1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
       closeImage();
     }
   });

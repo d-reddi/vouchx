@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  addPendingFlagNote,
   assertCanReview,
   approveVerification,
   archivePendingVerificationModmailReply,
@@ -17,6 +18,8 @@ import {
   detectContentCreator,
   extractModmailUserSignals,
   parsePendingAccountDetailsSnapshot,
+  parsePendingLastDenialSnapshot,
+  parsePendingReviewFlag,
   denyVerification,
   dismissModeratorUpdateNotice,
   ensureUserValidationSchedule,
@@ -34,6 +37,7 @@ import {
   onSaveFlairTemplateValues,
   removeApprovedVerificationByModerator,
   sendUserModmailWithFallback,
+  setPendingFlagState,
   searchApprovedRecords,
   searchAuditEntries,
   searchHistoryRecords,
@@ -121,6 +125,7 @@ function buildPendingAccountDetailsSnapshot(overrides: Record<string, unknown> =
     socialLinkCount: 0,
     isContentCreator: false,
     creatorLinkTypes: [] as string[],
+    lastDenial: null,
     ...overrides,
   };
 }
@@ -496,10 +501,13 @@ function createPendingAccountDetailsContext(options?: {
   karmaResponses?: Array<unknown | Error>;
   bannedResponses?: Array<unknown[] | Error>;
   denialCount?: string | null;
+  historyRecords?: Array<Record<string, unknown>>;
 }) {
   const userResponses = options?.userResponses ?? [];
   const karmaResponses = options?.karmaResponses ?? [];
   const bannedResponses = options?.bannedResponses ?? [];
+  // Newest-first, matching the reverse-rank order of the history index scan.
+  const historyRecords = options?.historyRecords ?? [];
   let userCallCount = 0;
   let karmaCallCount = 0;
   let bannedCallCount = 0;
@@ -548,6 +556,19 @@ function createPendingAccountDetailsContext(options?: {
         async hGet() {
           denialCountCallCount += 1;
           return options?.denialCount ?? null;
+        },
+        async zRange() {
+          return historyRecords.map((record, index) => ({
+            member: String(record.id ?? `record-${index}`),
+            score: historyRecords.length - index,
+          }));
+        },
+        async mGet(keys: string[]) {
+          return keys.map((key) => {
+            const id = key.split(':').pop();
+            const match = historyRecords.find((record) => String(record.id ?? '') === id);
+            return match ? JSON.stringify(match) : null;
+          });
         },
       },
     },
@@ -2998,6 +3019,7 @@ test('parseRecord preserves legacy pending account details snapshots without tot
     socialLinkCount: 0,
     isContentCreator: false,
     creatorLinkTypes: [],
+    lastDenial: null,
   });
 });
 
@@ -3163,6 +3185,162 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test('collectPendingAccountDetailsSnapshot captures the most recent denial from user history', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [{ createdAt: new Date('2026-03-01T12:00:00.000Z'), commentKarma: 7, linkKarma: 8 }],
+    karmaResponses: [{ fromComments: 1, fromPosts: 2 }],
+    bannedResponses: [[]],
+    denialCount: '2',
+    historyRecords: [
+      buildRecord({ id: 'rec-approved-new', status: 'approved', moderator: 'mod_two', reviewedAt: '2026-03-09T12:00:00.000Z' }),
+      buildRecord({
+        id: 'rec-denied-new',
+        status: 'denied',
+        moderator: 'mod_one',
+        reviewedAt: '2026-03-08T12:00:00.000Z',
+        denyReason: 'reason_2',
+        denyNotes: 'Photo was blurry',
+      }),
+      buildRecord({
+        id: 'rec-denied-old',
+        status: 'denied',
+        moderator: 'mod_three',
+        reviewedAt: '2026-03-01T12:00:00.000Z',
+        denyReason: 'reason_1',
+      }),
+    ],
+  });
+
+  const snapshot = await collectPendingAccountDetailsSnapshot(
+    snapshotContext.context as never,
+    't5_example',
+    'example',
+    'example_user',
+    '2026-03-11T12:00:00.000Z'
+  );
+
+  assert.ok(snapshot.lastDenial);
+  assert.equal(snapshot.lastDenial?.deniedAt, '2026-03-08T12:00:00.000Z');
+  assert.equal(snapshot.lastDenial?.deniedBy, 'mod_one');
+  assert.equal(snapshot.lastDenial?.denyReason, 'reason_2');
+  assert.equal(snapshot.lastDenial?.denyNotes, 'Photo was blurry');
+});
+
+test('collectPendingAccountDetailsSnapshot stores null last denial when history has no denied records', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [{ createdAt: new Date('2026-03-01T12:00:00.000Z'), commentKarma: 7, linkKarma: 8 }],
+    karmaResponses: [{ fromComments: 1, fromPosts: 2 }],
+    bannedResponses: [[]],
+    denialCount: null,
+    historyRecords: [buildRecord({ id: 'rec-approved', status: 'approved', moderator: 'mod_two' })],
+  });
+
+  const snapshot = await collectPendingAccountDetailsSnapshot(
+    snapshotContext.context as never,
+    't5_example',
+    'example',
+    'example_user',
+    '2026-03-11T12:00:00.000Z'
+  );
+
+  assert.equal(snapshot.lastDenial, null);
+});
+
+test('parsePendingReviewFlag validates flag payloads and drops malformed notes', () => {
+  assert.equal(parsePendingReviewFlag(null), null);
+  assert.equal(parsePendingReviewFlag({ flaggedBy: 'mod_one', notes: [] }), null);
+  assert.equal(parsePendingReviewFlag({ flaggedAt: '2026-03-11T12:00:00.000Z', notes: [] }), null);
+
+  const parsed = parsePendingReviewFlag({
+    flaggedBy: 'Mod_One',
+    flaggedAt: '2026-03-11T12:00:00.000Z',
+    notes: [
+      { author: 'Mod_Two', at: '2026-03-11T13:00:00.000Z', text: ` ${'x'.repeat(400)} ` },
+      { author: 'Mod_Three', at: 'not-a-date', text: 'dropped because the timestamp is invalid' },
+      { author: 'Mod_Four', at: '2026-03-11T14:00:00.000Z', text: '   ' },
+      'garbage',
+    ],
+  });
+  assert.ok(parsed);
+  assert.equal(parsed?.flaggedBy, 'Mod_One');
+  assert.equal(parsed?.notes.length, 1);
+  assert.equal(parsed?.notes[0]?.author, 'Mod_Two');
+  assert.equal(parsed?.notes[0]?.text.length, 300);
+});
+
+test('parseRecord preserves the 2nd-review flag on pending records', () => {
+  const reviewFlag = {
+    flaggedBy: 'Mod_One',
+    flaggedAt: '2026-03-11T12:00:00.000Z',
+    notes: [{ author: 'Mod_Two', at: '2026-03-11T13:00:00.000Z', text: 'Take a second look at photo 2' }],
+  };
+  const parsed = parseRecord(JSON.stringify(buildRecord({ reviewFlag })));
+  assert.ok(parsed);
+  assert.deepEqual(parsed.reviewFlag, reviewFlag);
+
+  const withoutFlag = parseRecord(JSON.stringify(buildRecord()));
+  assert.ok(withoutFlag);
+  assert.equal(withoutFlag.reviewFlag, null);
+});
+
+test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clears the thread', async () => {
+  const reviewContext = createReviewActionContext();
+
+  const flagged = await setPendingFlagState(
+    reviewContext.context as never,
+    reviewContext.record.id,
+    true,
+    '  Check photo 2 against the instructions  '
+  );
+  assert.equal(flagged.changed, true);
+  assert.equal(flagged.item.reviewFlag?.flaggedBy, 'Mod_One');
+  assert.equal(flagged.item.reviewFlag?.notes.length, 1);
+  assert.equal(flagged.item.reviewFlag?.notes[0]?.text, 'Check photo 2 against the instructions');
+
+  const repeat = await setPendingFlagState(reviewContext.context as never, reviewContext.record.id, true);
+  assert.equal(repeat.changed, false);
+  assert.equal(repeat.item.reviewFlag?.notes.length, 1);
+
+  const noted = await addPendingFlagNote(
+    reviewContext.context as never,
+    reviewContext.record.id,
+    'Photos look consistent to me'
+  );
+  assert.equal(noted.item.reviewFlag?.notes.length, 2);
+  assert.equal(noted.item.reviewFlag?.notes[1]?.author, 'Mod_One');
+
+  const stored = reviewContext.getParsedRecord();
+  assert.equal(stored?.reviewFlag?.notes.length, 2);
+
+  const unflagged = await setPendingFlagState(reviewContext.context as never, reviewContext.record.id, false);
+  assert.equal(unflagged.changed, true);
+  assert.equal(unflagged.item.reviewFlag, null);
+  assert.equal(reviewContext.getParsedRecord()?.reviewFlag, null);
+
+  await assert.rejects(
+    addPendingFlagNote(reviewContext.context as never, reviewContext.record.id, 'orphan note'),
+    /Flag this request/
+  );
+});
+
+test('approveVerification and denyVerification clear the 2nd-review flag', async () => {
+  const reviewFlag = {
+    flaggedBy: 'Mod_Two',
+    flaggedAt: '2026-03-11T12:00:00.000Z',
+    notes: [{ author: 'Mod_Two', at: '2026-03-11T12:00:00.000Z', text: 'Needs a 2nd opinion' }],
+  };
+
+  const approveContext = createReviewActionContext({ recordOverrides: { reviewFlag } });
+  const approveResult = await approveVerification(approveContext.context as never, approveContext.record.id);
+  assert.equal(approveResult.applied, true);
+  assert.equal(approveContext.getParsedRecord()?.reviewFlag, null);
+
+  const denyContext = createReviewActionContext({ recordOverrides: { reviewFlag } });
+  const denyResult = await denyVerification(denyContext.context as never, denyContext.record.id, 'reason_1');
+  assert.equal(denyResult.applied, true);
+  assert.equal(denyContext.getParsedRecord()?.reviewFlag, null);
 });
 
 test('getViewerFlairSnapshot resolves flair through the username lookup after confirming the viewer identity', async () => {
@@ -5690,6 +5868,33 @@ test('parsePendingAccountDetailsSnapshot defaults new fields for legacy records'
   assert.equal(parsed?.socialLinkCount, 0);
   assert.equal(parsed?.isContentCreator, false);
   assert.deepEqual(parsed?.creatorLinkTypes, []);
+  assert.equal(parsed?.lastDenial, null);
+});
+
+test('parsePendingLastDenialSnapshot validates and truncates stored denial context', () => {
+  assert.equal(parsePendingLastDenialSnapshot(null), null);
+  assert.equal(parsePendingLastDenialSnapshot({ deniedBy: 'mod_one' }), null);
+
+  const parsed = parsePendingLastDenialSnapshot({
+    deniedAt: '2026-03-10T12:00:00.000Z',
+    deniedBy: ' mod_one ',
+    denyReason: 'reason_2',
+    denyNotes: ` ${'n'.repeat(400)} `,
+  });
+  assert.ok(parsed);
+  assert.equal(parsed?.deniedAt, '2026-03-10T12:00:00.000Z');
+  assert.equal(parsed?.deniedBy, 'mod_one');
+  assert.equal(parsed?.denyReason, 'reason_2');
+  assert.equal(parsed?.denyNotes?.length, 300);
+
+  const invalidReason = parsePendingLastDenialSnapshot({
+    deniedAt: '2026-03-10T12:00:00.000Z',
+    denyReason: 'reason_99',
+    denyNotes: '   ',
+  });
+  assert.equal(invalidReason?.denyReason, null);
+  assert.equal(invalidReason?.deniedBy, null);
+  assert.equal(invalidReason?.denyNotes, null);
 });
 
 test('computeUserGrade ignores prior denied attempts', () => {

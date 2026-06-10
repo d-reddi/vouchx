@@ -43,6 +43,11 @@ export {
   validateFlairTemplateIdForSubreddit,
 } from './core/flair.ts';
 export {
+  addPendingFlagNote,
+  parsePendingReviewFlag,
+  setPendingFlagState,
+} from './core/flags.ts';
+export {
   clearExpiredPendingClaim,
   releaseRedisLockIfOwned,
   setPendingClaimState,
@@ -119,7 +124,9 @@ export {
   collectPendingAccountDetailsSnapshot,
   computeUserGrade,
   detectContentCreator,
+  findLastDenialSnapshotForUser,
   parsePendingAccountDetailsSnapshot,
+  parsePendingLastDenialSnapshot,
   submitVerification,
 } from './core/submission.ts';
 export {

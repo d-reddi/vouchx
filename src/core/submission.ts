@@ -3,6 +3,7 @@ import type {
   ContentCreatorDetection,
   ModmailUserSignals,
   PendingAccountDetailsSnapshot,
+  PendingLastDenialSnapshot,
   SubmitVerificationResult,
   SubmitVerificationValues,
   UserGrade,
@@ -21,13 +22,16 @@ import {
   BLOCKED_SUBMISSION_MESSAGE,
   DEFAULT_REQUIRED_PHOTO_COUNT,
   HISTORY_RETENTION_DAYS,
+  MAX_PENDING_LAST_DENIAL_NOTES_LENGTH,
   MILLIS_PER_DAY,
+  PENDING_LAST_DENIAL_HISTORY_SCAN_LIMIT,
 } from './constants.ts';
 import {
   historyByUserIndexKey,
   historyDateIndexKey,
   makeVerificationId,
   pendingIndexKey,
+  verificationRecordKey,
 } from './keys.ts';
 import { addPendingSubmissionModNote, sendPendingSubmissionModmail } from './modmail.ts';
 import {
@@ -47,6 +51,7 @@ import {
 import {
   getLatestRecordForUser,
   getRecord,
+  parseRecord,
   setRecord,
   setUserLatestPointer,
   setUserPendingPointer,
@@ -56,6 +61,7 @@ import {
   getRuntimeConfig,
   normalizePhotoInput,
   normalizeSubmittedPhotoUrl,
+  parseDenyReason,
   parseRequiredPhotoCount,
 } from './settings.ts';
 import { autoDenyShadowbannedSubmission } from './review-actions.ts';
@@ -63,6 +69,39 @@ import { removeAllVerificationRecordsForUser } from './purge.ts';
 
 export function normalizePendingBanStatus(value: unknown): PendingAccountDetailsSnapshot['banStatus'] {
   return value === 'banned' || value === 'not_banned' || value === 'unknown' ? value : 'unknown';
+}
+
+export function normalizePendingLastDenialNotes(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, MAX_PENDING_LAST_DENIAL_NOTES_LENGTH) : null;
+}
+
+export function parsePendingLastDenialSnapshot(value: unknown): PendingLastDenialSnapshot | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const parsed = value as {
+    deniedAt?: unknown;
+    deniedBy?: unknown;
+    denyReason?: unknown;
+    denyNotes?: unknown;
+  };
+
+  const deniedAt = normalizeOptionalIsoTimestamp(parsed.deniedAt);
+  if (!deniedAt) {
+    return null;
+  }
+
+  return {
+    deniedAt,
+    deniedBy: typeof parsed.deniedBy === 'string' && parsed.deniedBy.trim() ? parsed.deniedBy.trim() : null,
+    denyReason: parseDenyReason(typeof parsed.denyReason === 'string' ? parsed.denyReason : null),
+    denyNotes: normalizePendingLastDenialNotes(parsed.denyNotes),
+  };
 }
 
 export function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccountDetailsSnapshot | null {
@@ -84,6 +123,7 @@ export function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccou
     socialLinkCount?: unknown;
     isContentCreator?: unknown;
     creatorLinkTypes?: unknown;
+    lastDenial?: unknown;
   };
 
   const capturedAt = normalizeOptionalIsoTimestamp(parsed.capturedAt);
@@ -105,6 +145,7 @@ export function parsePendingAccountDetailsSnapshot(value: unknown): PendingAccou
     socialLinkCount: normalizeNonNegativeWholeNumber(parsed.socialLinkCount),
     isContentCreator: parsed.isContentCreator === true,
     creatorLinkTypes: normalizeCreatorLinkTypeList(parsed.creatorLinkTypes),
+    lastDenial: parsePendingLastDenialSnapshot(parsed.lastDenial),
   };
 }
 
@@ -356,6 +397,50 @@ export async function lookupCurrentSubredditBanStatus(
   return bannedUsers.length > 0 ? 'banned' : 'not_banned';
 }
 
+export function toPendingLastDenialSnapshot(record: VerificationRecord): PendingLastDenialSnapshot {
+  return {
+    deniedAt: record.reviewedAt ?? record.submittedAt,
+    deniedBy: typeof record.moderator === 'string' && record.moderator.trim() ? record.moderator.trim() : null,
+    denyReason: parseDenyReason(record.denyReason),
+    denyNotes: normalizePendingLastDenialNotes(record.denyNotes),
+  };
+}
+
+export async function findLastDenialSnapshotForUser(
+  context: Pick<Devvit.Context, 'redis'>,
+  subredditId: string,
+  username: string
+): Promise<PendingLastDenialSnapshot | null> {
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  const historyEntries = await context.redis.zRange(
+    historyByUserIndexKey(subredditId, normalizedUsername),
+    0,
+    PENDING_LAST_DENIAL_HISTORY_SCAN_LIMIT - 1,
+    { by: 'rank', reverse: true }
+  );
+  if (historyEntries.length === 0) {
+    return null;
+  }
+
+  const payloads = await context.redis.mGet(
+    historyEntries.map((entry) => verificationRecordKey(subredditId, entry.member))
+  );
+  for (const payload of payloads) {
+    if (!payload) {
+      continue;
+    }
+    const parsed = parseRecord(payload);
+    if (parsed && parsed.status === 'denied') {
+      return toPendingLastDenialSnapshot(parsed);
+    }
+  }
+  return null;
+}
+
 export async function collectPendingAccountDetailsSnapshot(
   context: Devvit.Context,
   subredditId: string,
@@ -431,10 +516,17 @@ export async function collectPendingAccountDetailsSnapshot(
     async () => await lookupCurrentSubredditBanStatus(context, sanitizedSubreddit, username)
   );
 
-  const [userSnapshot, banStatus, previousDeniedAttempts] = await Promise.all([
+  const lastDenialTask = withSingleRetry(
+    `Pending account details last denial lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
+    null as PendingLastDenialSnapshot | null,
+    async () => await findLastDenialSnapshotForUser(context, subredditId, username)
+  );
+
+  const [userSnapshot, banStatus, previousDeniedAttempts, lastDenial] = await Promise.all([
     userSnapshotTask,
     banStatusTask,
     getStoredDenialCount(context, subredditId, username),
+    lastDenialTask,
   ]);
 
   return {
@@ -451,6 +543,7 @@ export async function collectPendingAccountDetailsSnapshot(
     socialLinkCount: userSnapshot.socialLinkCount,
     isContentCreator: userSnapshot.isContentCreator,
     creatorLinkTypes: userSnapshot.creatorLinkTypes,
+    lastDenial,
   };
 }
 
@@ -533,10 +626,10 @@ export async function submitVerification(
   const isResubmission = Boolean(priorLatestRecord && priorLatestRecord.status !== 'pending');
   const userId = context.userId;
   const now = new Date();
-  await removeAllVerificationRecordsForUser(context, subredditId, normalizedUsername);
-
   const verificationId = makeVerificationId(now);
   const acknowledgedAt = now.toISOString();
+  // Capture the snapshot before purging prior records: the previous-denial context is
+  // read from the user's denied history record, which the purge below deletes.
   const accountDetails = await collectPendingAccountDetailsSnapshot(
     context,
     subredditId,
@@ -544,6 +637,7 @@ export async function submitVerification(
     username,
     acknowledgedAt
   );
+  await removeAllVerificationRecordsForUser(context, subredditId, normalizedUsername);
 
   const record: VerificationRecord = {
     id: verificationId,

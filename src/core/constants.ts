@@ -92,6 +92,20 @@ export const GLOBAL_SETTING_DEVELOPER_UI_USERNAMES = 'developer_ui_usernames';
 
 export const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 
+// Bounds for the previous-denial context captured in the pending account snapshot.
+export const MAX_PENDING_LAST_DENIAL_NOTES_LENGTH = 300;
+
+export const PENDING_LAST_DENIAL_HISTORY_SCAN_LIMIT = 25;
+
+// Bounds for 2nd-review flag notes stored on a pending verification record.
+export const MAX_REVIEW_FLAG_NOTE_LENGTH = 300;
+
+export const MAX_REVIEW_FLAG_NOTES = 20;
+
+// A 2nd-review flag locks the record to the flagging moderator. After this window,
+// any moderator may force-unlock (unflag) it.
+export const REVIEW_FLAG_FORCE_UNLOCK_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export const MAX_DENY_REASON_LABEL_LENGTH = 48;
 
 export const PENDING_CLAIM_TTL_MS = 24 * 60 * 60 * 1000;

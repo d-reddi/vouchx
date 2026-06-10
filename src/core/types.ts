@@ -57,6 +57,27 @@ export type UserGradeResult = {
   reasons: string[];
 };
 
+export type PendingLastDenialSnapshot = {
+  deniedAt: string;
+  deniedBy: string | null;
+  denyReason: DenyReason | null;
+  denyNotes: string | null;
+};
+
+export type PendingReviewFlagNote = {
+  author: string;
+  at: string;
+  text: string;
+};
+
+// Internal moderator-only flag asking for a second opinion on a pending card.
+// Lives only while the record is pending: every review transition resets it.
+export type PendingReviewFlag = {
+  flaggedBy: string;
+  flaggedAt: string;
+  notes: PendingReviewFlagNote[];
+};
+
 export type PendingAccountDetailsSnapshot = {
   capturedAt: string;
   accountCreatedAt: string | null;
@@ -71,6 +92,7 @@ export type PendingAccountDetailsSnapshot = {
   socialLinkCount: number;
   isContentCreator: boolean;
   creatorLinkTypes: string[];
+  lastDenial?: PendingLastDenialSnapshot | null;
 };
 
 export type VerificationRecord = {
@@ -93,6 +115,7 @@ export type VerificationRecord = {
   denyNotes: string | null;
   claimedBy?: string | null;
   claimedAt?: string | null;
+  reviewFlag?: PendingReviewFlag | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
   accountDetails?: PendingAccountDetailsSnapshot | null;
@@ -572,6 +595,7 @@ export type PendingPanelItem = {
   photoThreeUrl?: string;
   claimedBy?: string | null;
   claimedAt?: string | null;
+  reviewFlag?: PendingReviewFlag | null;
   parentVerificationId?: string | null;
   isResubmission?: boolean;
   accountDetails?: PendingAccountDetailsDisplay | null;
