@@ -7,6 +7,8 @@ import type {
   AuditWindowCandidate,
   HistorySearchPanelItem,
   HistorySearchResponsePayload,
+  ModeratorStatsDecisionTiming,
+  ModeratorStatsDenialReasonRow,
   ModeratorStatsModeratorRow,
   ModeratorStatsPayload,
   ModeratorStatsRange,
@@ -625,6 +627,8 @@ export async function getModeratorStats(
   let approvals = 0;
   let denials = 0;
   let reopens = 0;
+  const decisionTurnaroundSamples: number[] = [];
+  const denialReasonCounts = new Map<ModeratorStatsDenialReasonRow['reason'], number>();
 
   // Period counts come from the audit trail, while current verified comes from the live approved index.
   for (const candidate of auditCandidates) {
@@ -654,7 +658,27 @@ export async function getModeratorStats(
     }
     current.totalActions += 1;
     moderatorsByActor.set(moderatorKey, current);
+
+    if (entry.action === 'approved' || entry.action === 'denied') {
+      if (typeof entry.turnaroundMs === 'number' && Number.isFinite(entry.turnaroundMs) && entry.turnaroundMs >= 0) {
+        decisionTurnaroundSamples.push(entry.turnaroundMs);
+      }
+    }
+    if (entry.action === 'denied' && entry.denyReason !== undefined) {
+      // null marks automated denials; legacy entries without the field are excluded.
+      const reasonKey: ModeratorStatsDenialReasonRow['reason'] = entry.denyReason ?? 'auto';
+      denialReasonCounts.set(reasonKey, (denialReasonCounts.get(reasonKey) ?? 0) + 1);
+    }
   }
+
+  const denialReasons: ModeratorStatsDenialReasonRow[] = Array.from(denialReasonCounts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      return left.reason.localeCompare(right.reason);
+    });
 
   const moderators = Array.from(moderatorsByActor.values()).sort((left, right) => {
     if (right.totalActions !== left.totalActions) {
@@ -701,7 +725,21 @@ export async function getModeratorStats(
         ? { moderator: topDenierSource.moderator, count: topDenierSource.denials }
         : null,
     },
+    decisionTiming: computeDecisionTimingSummary(decisionTurnaroundSamples),
+    denialReasons,
     moderators,
+  };
+}
+
+export function computeDecisionTimingSummary(samples: number[]): ModeratorStatsDecisionTiming {
+  const validSamples = samples.filter((value) => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
+  if (validSamples.length === 0) {
+    return { sampleCount: 0, percentile90Ms: null };
+  }
+  const percentile90Index = Math.max(0, Math.ceil(validSamples.length * 0.9) - 1);
+  return {
+    sampleCount: validSamples.length,
+    percentile90Ms: Math.round(validSamples[percentile90Index]!),
   };
 }
 

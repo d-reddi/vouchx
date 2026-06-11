@@ -127,6 +127,9 @@ import brandVxUrl from './brand-vx.png';
   const teamStatsTopApproverCount = document.getElementById('team-stats-top-approver-count');
   const teamStatsTopDenierName = document.getElementById('team-stats-top-denier-name');
   const teamStatsTopDenierCount = document.getElementById('team-stats-top-denier-count');
+  const teamStatsDecisionP90 = document.getElementById('team-stats-decision-p90');
+  const teamStatsDecisionSample = document.getElementById('team-stats-decision-sample');
+  const teamStatsDenialReasons = document.getElementById('team-stats-denial-reasons');
   const teamStatsBreakdownToggle = document.getElementById('team-stats-breakdown-toggle');
   const teamStatsBreakdown = document.getElementById('team-stats-breakdown');
   const blockedList = document.getElementById('blocked-list');
@@ -253,15 +256,18 @@ import brandVxUrl from './brand-vx.png';
   const statsShadowbanned = document.getElementById('stats-shadowbanned');
   const statsRecentActivity = document.getElementById('stats-recent-activity');
   const statsContentCreator = document.getElementById('stats-content-creator');
-  const statsLastDenialSection = document.getElementById('stats-last-denial-section');
-  const statsLastDenialReason = document.getElementById('stats-last-denial-reason');
-  const statsLastDenialBy = document.getElementById('stats-last-denial-by');
-  const statsLastDenialAt = document.getElementById('stats-last-denial-at');
-  const statsLastDenialCommentsRow = document.getElementById('stats-last-denial-comments-row');
-  const statsLastDenialNotes = document.getElementById('stats-last-denial-notes');
-  const statsLastDenialContext = document.getElementById('stats-last-denial-context');
   const statsReasonsSection = document.getElementById('stats-reasons-section');
   const statsReasons = document.getElementById('stats-reasons');
+  const previousDenialModal = document.getElementById('previous-denial-modal');
+  const previousDenialCloseBtn = document.getElementById('previous-denial-close-btn');
+  const previousDenialTitle = document.getElementById('previous-denial-title');
+  const previousDenialSummary = document.getElementById('previous-denial-summary');
+  const previousDenialDate = document.getElementById('previous-denial-date');
+  const previousDenialReason = document.getElementById('previous-denial-reason');
+  const previousDenialBy = document.getElementById('previous-denial-by');
+  const previousDenialCommentsRow = document.getElementById('previous-denial-comments-row');
+  const previousDenialComments = document.getElementById('previous-denial-comments');
+  const previousDenialContext = document.getElementById('previous-denial-context');
   const blockModal = document.getElementById('block-modal');
   const blockUsernameInput = document.getElementById('block-username-input');
   const blockReasonInput = document.getElementById('block-reason-input');
@@ -442,9 +448,10 @@ import brandVxUrl from './brand-vx.png';
   // Per-verification in-progress denial drafts, preserved across re-renders
   // (realtime refresh, state updates) so opening the deny form isn't wiped.
   const pendingDenialDrafts = new Map();
-  // Per-verification in-progress 2nd-review note drafts, same preservation rules.
+  // Per-verification in-progress peer-review note drafts, same preservation rules.
   const pendingFlagNoteDrafts = new Map();
   const MAX_FLAG_NOTES = 20;
+  const MIN_DECISION_TIMING_SAMPLE_COUNT = 10;
   let activePrimaryTab = 'pending';
   let activeHistoryView = 'records';
   let activeSettingsTab = 'general';
@@ -3395,7 +3402,7 @@ import brandVxUrl from './brand-vx.png';
       parts.push(getPendingSlaFilterLabel(selectedPendingSlaFilter));
     }
     if (pendingFlaggedOnlyFilter) {
-      parts.push('Flagged');
+      parts.push('Peer Review');
     }
     pendingFilterSummary.textContent = parts.join(' · ');
   }
@@ -3757,7 +3764,7 @@ import brandVxUrl from './brand-vx.png';
     return badge;
   }
 
-  function createPendingDeniedBeforeBadge(accountDetails) {
+  function createPendingDeniedBeforeBadge(accountDetails, item) {
     if (!accountDetails) {
       return null;
     }
@@ -3768,19 +3775,22 @@ import brandVxUrl from './brand-vx.png';
     if (!hasCount && !accountDetails.lastDenial) {
       return null;
     }
-    const badge = document.createElement('span');
+    const badge = document.createElement('button');
+    badge.type = 'button';
     badge.className = 'pending-age-badge pending-age-denied-before';
     badge.textContent = hasCount && count > 1 ? `Denied x${count}` : 'Denied before';
-    badge.title = 'This user was denied previously. Open Stats for details.';
+    badge.title = 'Show previous denial details.';
+    badge.setAttribute('aria-haspopup', 'dialog');
+    badge.addEventListener('click', () => openPreviousDenialModal(item));
     return badge;
   }
 
   function createPendingFlaggedBadge(reviewFlag) {
     const badge = document.createElement('span');
     badge.className = 'pending-age-badge pending-age-flagged';
-    badge.textContent = '2nd review';
+    badge.textContent = 'Peer Review';
     const flaggedBy = reviewFlag && reviewFlag.flaggedBy ? String(reviewFlag.flaggedBy).replace(/^u\//i, '') : '';
-    badge.title = flaggedBy ? `Flagged for a 2nd review by u/${flaggedBy}.` : 'Flagged for a 2nd review.';
+    badge.title = flaggedBy ? `Peer review requested by u/${flaggedBy}.` : 'Peer review requested from the mod team.';
     return badge;
   }
 
@@ -3791,7 +3801,7 @@ import brandVxUrl from './brand-vx.png';
     const notes = Array.isArray(reviewFlag.notes) ? reviewFlag.notes : [];
     const heading = document.createElement('p');
     heading.className = 'pending-flag-notes-title';
-    heading.textContent = `2nd review notes (${notes.length})`;
+    heading.textContent = `Peer review notes (${notes.length})`;
     section.appendChild(heading);
 
     if (notes.length === 0) {
@@ -3830,7 +3840,7 @@ import brandVxUrl from './brand-vx.png';
     noteInput.className = 'field-textarea pending-flag-note-input';
     noteInput.rows = 2;
     noteInput.maxLength = 300;
-    noteInput.placeholder = 'Internal note for other moderators. Removed when the request is reviewed or unflagged.';
+    noteInput.placeholder = 'Internal note for other moderators. Removed when the request is reviewed or peer review is cleared.';
     noteInput.disabled = actionInFlight;
     const draft = pendingFlagNoteDrafts.get(item.id);
     if (draft) {
@@ -3945,11 +3955,6 @@ import brandVxUrl from './brand-vx.png';
     return createQueueMetaRow('calendar', 'Submitted', formatQueueDateTime(item.submittedAt));
   }
 
-  function appendQueueVerificationChecks(container, item) {
-    const acceptedAt = item.acknowledgedAt ? formatDateOnly(item.acknowledgedAt) : 'Not recorded';
-    container.appendChild(createQueueMetaRow('check', 'Terms & Age Confirmed', acceptedAt, 'pending-ack-meta'));
-  }
-
   function buildPendingCard(item) {
     const card = document.createElement('article');
     card.className = 'item queue-card';
@@ -4012,7 +4017,7 @@ import brandVxUrl from './brand-vx.png';
     if (accountDetails && accountDetails.banStatus === 'banned') {
       badgeRow.appendChild(createPendingBannedBadge());
     }
-    const deniedBeforeBadge = createPendingDeniedBeforeBadge(accountDetails);
+    const deniedBeforeBadge = createPendingDeniedBeforeBadge(accountDetails, item);
     if (deniedBeforeBadge) {
       badgeRow.appendChild(deniedBeforeBadge);
     }
@@ -4036,7 +4041,6 @@ import brandVxUrl from './brand-vx.png';
 
     metaGroup.appendChild(createPendingSubmittedMeta(item));
     metaGroup.appendChild(createPendingAccountAgeMeta(item));
-    appendQueueVerificationChecks(metaGroup, item);
 
     if (isClaimed && !isClaimedByOther) {
       metaGroup.appendChild(createQueueMetaRow('lock', 'Locked', 'You', 'pending-claim-meta'));
@@ -4057,7 +4061,7 @@ import brandVxUrl from './brand-vx.png';
       metaGroup.appendChild(
         createQueueMetaRow(
           'flag',
-          'Flagged',
+          'Peer review requested by',
           `u/${String(reviewFlag.flaggedBy || '').replace(/^u\//i, '')}`,
           'pending-flag-meta'
         )
@@ -4409,16 +4413,31 @@ import brandVxUrl from './brand-vx.png';
     if (!isFlagged && !isClaimedByOther) {
       const flagBtn = document.createElement('button');
       flagBtn.className = 'btn btn-secondary pending-flag-btn';
-      flagBtn.textContent = 'Flag';
+      flagBtn.textContent = 'Peer Review';
       flagBtn.title = actionInFlight
         ? 'This request is being processed.'
-        : 'Flag this request so another moderator takes a 2nd look.';
+        : 'Ask the mod team for peer review on this request.';
       flagBtn.disabled = actionInFlight;
       flagBtn.addEventListener('click', () => {
         pendingFlagNoteDrafts.delete(item.id);
         postWithBusy({ type: 'flagPending', verificationId: item.id, flagged: true });
       });
       row.appendChild(flagBtn);
+    }
+
+    if (isFlagged) {
+      const unflagBtn = document.createElement('button');
+      unflagBtn.className = 'btn btn-secondary pending-flag-btn pending-unflag-btn';
+      unflagBtn.textContent = 'Cancel Peer Review';
+      unflagBtn.title = actionInFlight
+        ? 'This request is being processed.'
+        : 'Clear peer review from this record.';
+      unflagBtn.disabled = actionInFlight;
+      unflagBtn.addEventListener('click', () => {
+        pendingFlagNoteDrafts.delete(item.id);
+        postWithBusy({ type: 'flagPending', verificationId: item.id, flagged: false });
+      });
+      row.appendChild(unflagBtn);
     }
 
     if (row.childElementCount > 0) {
@@ -4684,6 +4703,78 @@ import brandVxUrl from './brand-vx.png';
     return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '--';
   }
 
+  function formatStatsDuration(ms) {
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) {
+      return '--';
+    }
+    const totalMinutes = Math.round(ms / 60000);
+    if (totalMinutes < 1) {
+      return '<1m';
+    }
+    if (totalMinutes < 60) {
+      return `${totalMinutes}m`;
+    }
+    const totalHours = Math.floor(totalMinutes / 60);
+    if (totalHours < 24) {
+      const minutes = totalMinutes % 60;
+      return minutes > 0 ? `${totalHours}h ${minutes}m` : `${totalHours}h`;
+    }
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+
+  function getDenialReasonStatsLabel(reason) {
+    if (reason === 'auto') {
+      return 'Auto-denied (shadowbanned)';
+    }
+    return getDenyReasonLabel(reason);
+  }
+
+  function renderStatsDenialReasons(payload, hasPayload) {
+    if (!teamStatsDenialReasons) {
+      return;
+    }
+    teamStatsDenialReasons.innerHTML = '';
+    const rows = hasPayload && Array.isArray(payload.denialReasons) ? payload.denialReasons : [];
+    if (rows.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'muted small';
+      empty.textContent = hasPayload ? 'No denials recorded in this range.' : 'Not loaded';
+      teamStatsDenialReasons.appendChild(empty);
+      return;
+    }
+
+    const total = rows.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
+    for (const row of rows) {
+      const count = Number(row.count) || 0;
+      const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+
+      const reasonRow = document.createElement('div');
+      reasonRow.className = 'denial-reason-row';
+
+      const head = document.createElement('div');
+      head.className = 'denial-reason-head';
+      const label = document.createElement('span');
+      label.className = 'denial-reason-label';
+      label.textContent = getDenialReasonStatsLabel(row.reason);
+      const countEl = document.createElement('span');
+      countEl.className = 'denial-reason-count muted';
+      countEl.textContent = `${formatStatsMetricValue(count)} · ${percent}%`;
+      head.append(label, countEl);
+
+      const bar = document.createElement('div');
+      bar.className = 'denial-reason-bar';
+      const fill = document.createElement('div');
+      fill.className = 'denial-reason-bar-fill';
+      fill.style.width = `${Math.max(2, percent)}%`;
+      bar.appendChild(fill);
+
+      reasonRow.append(head, bar);
+      teamStatsDenialReasons.appendChild(reasonRow);
+    }
+  }
+
   function formatStatsModeratorName(value) {
     const normalized = normalizeUsernameForCompare(value);
     if (!normalized || normalized === 'unknown') {
@@ -4872,6 +4963,25 @@ import brandVxUrl from './brand-vx.png';
           ? 'No denials yet'
           : 'Not loaded';
     }
+
+    const decisionTiming =
+      hasPayload && payload.decisionTiming && typeof payload.decisionTiming === 'object' ? payload.decisionTiming : null;
+    const decisionSampleCount = decisionTiming ? Number(decisionTiming.sampleCount) || 0 : 0;
+    if (teamStatsDecisionSample) {
+      teamStatsDecisionSample.textContent = hasPayload
+        ? `${formatStatsMetricValue(decisionSampleCount)} decision${decisionSampleCount === 1 ? '' : 's'}`
+        : '-- decisions';
+    }
+    if (teamStatsDecisionP90) {
+      const hasEnoughSamples = decisionSampleCount >= MIN_DECISION_TIMING_SAMPLE_COUNT;
+      teamStatsDecisionP90.textContent = hasEnoughSamples
+        ? formatStatsDuration(decisionTiming.percentile90Ms)
+        : hasPayload
+          ? 'Not enough data yet'
+          : '--';
+      teamStatsDecisionP90.classList.toggle('is-muted', !hasEnoughSamples);
+    }
+    renderStatsDenialReasons(payload, hasPayload);
 
     if (!teamStatsBreakdown) {
       renderStatsBreakdownToggle(0);
@@ -7030,6 +7140,11 @@ import brandVxUrl from './brand-vx.png';
     if (statsPreviousDenials) {
       statsPreviousDenials.textContent =
         accountDetails ? formatStatCount(accountDetails.previousDeniedAttempts) : 'Unknown';
+      const previousDenialsRow = statsPreviousDenials.closest('.stats-row');
+      if (previousDenialsRow) {
+        const previousDenialsCount = accountDetails ? Number(accountDetails.previousDeniedAttempts || 0) : null;
+        previousDenialsRow.classList.toggle('hidden', previousDenialsCount === 0);
+      }
     }
     if (statsGrade) {
       const gradeMeta = accountDetails && GRADE_BADGE_META[accountDetails.grade];
@@ -7065,61 +7180,6 @@ import brandVxUrl from './brand-vx.png';
             ? 'No'
             : 'Unknown';
     }
-    if (statsLastDenialSection) {
-      const lastDenial = accountDetails && accountDetails.lastDenial ? accountDetails.lastDenial : null;
-      const previousDenials = accountDetails ? Number(accountDetails.previousDeniedAttempts || 0) : 0;
-      const setLastDenialComments = (text) => {
-        if (!statsLastDenialNotes) {
-          return;
-        }
-        statsLastDenialNotes.textContent = text;
-        if (statsLastDenialCommentsRow) {
-          statsLastDenialCommentsRow.classList.toggle('hidden', !text);
-        }
-      };
-      const setLastDenialContext = (text) => {
-        if (!statsLastDenialContext) {
-          return;
-        }
-        statsLastDenialContext.textContent = text;
-        statsLastDenialContext.classList.toggle('hidden', !text);
-      };
-      if (lastDenial) {
-        if (statsLastDenialReason) {
-          statsLastDenialReason.textContent = lastDenial.denyReason
-            ? getDenyReasonLabel(lastDenial.denyReason)
-            : 'Not recorded';
-        }
-        if (statsLastDenialBy) {
-          statsLastDenialBy.textContent = lastDenial.deniedBy
-            ? `u/${String(lastDenial.deniedBy).replace(/^u\//i, '')}`
-            : 'Unknown';
-        }
-        if (statsLastDenialAt) {
-          statsLastDenialAt.textContent = lastDenial.deniedAt ? formatQueueDateTime(lastDenial.deniedAt) : 'Unknown';
-        }
-        setLastDenialComments(lastDenial.denyNotes || '');
-        setLastDenialContext('');
-        statsLastDenialSection.classList.remove('hidden');
-      } else if (previousDenials > 0) {
-        if (statsLastDenialReason) {
-          statsLastDenialReason.textContent = 'Details unavailable';
-        }
-        if (statsLastDenialBy) {
-          statsLastDenialBy.textContent = 'Unknown';
-        }
-        if (statsLastDenialAt) {
-          statsLastDenialAt.textContent = 'Unknown';
-        }
-        setLastDenialComments('');
-        setLastDenialContext('The denied record is older than the retention window or pre-dates this version.');
-        statsLastDenialSection.classList.remove('hidden');
-      } else {
-        setLastDenialComments('');
-        setLastDenialContext('');
-        statsLastDenialSection.classList.add('hidden');
-      }
-    }
     if (statsReasons && statsReasonsSection) {
       const reasons = accountDetails && Array.isArray(accountDetails.reasons) ? accountDetails.reasons : [];
       statsReasons.textContent = '';
@@ -7146,6 +7206,87 @@ import brandVxUrl from './brand-vx.png';
       return;
     }
     statsModal.classList.add('hidden');
+  }
+
+  function closePreviousDenialModal() {
+    if (!previousDenialModal) {
+      return;
+    }
+    previousDenialModal.classList.add('hidden');
+  }
+
+  function openPreviousDenialModal(item) {
+    if (!previousDenialModal) {
+      return;
+    }
+    const accountDetails = normalizePendingAccountDetails(item);
+    const lastDenial = accountDetails && accountDetails.lastDenial ? accountDetails.lastDenial : null;
+    const previousDenials = accountDetails ? Number(accountDetails.previousDeniedAttempts || 0) : 0;
+    const username = String(item && item.username ? item.username : '').trim().replace(/^u\//i, '');
+    const title = username ? `Previous denial for u/${username}` : 'Previous denial';
+
+    if (previousDenialTitle) {
+      previousDenialTitle.textContent = title;
+    }
+    if (previousDenialSummary) {
+      previousDenialSummary.textContent =
+        previousDenials > 1
+          ? `${formatStatCount(previousDenials)} denied attempts recorded. Showing the most recent detail.`
+          : 'Most recent denied attempt.';
+    }
+
+    if (lastDenial) {
+      if (previousDenialDate) {
+        previousDenialDate.textContent = lastDenial.deniedAt ? formatQueueDateTime(lastDenial.deniedAt) : 'Unknown';
+      }
+      if (previousDenialReason) {
+        previousDenialReason.textContent = lastDenial.denyReason
+          ? getDenyReasonLabel(lastDenial.denyReason)
+          : 'Not recorded';
+      }
+      if (previousDenialBy) {
+        previousDenialBy.textContent = lastDenial.deniedBy
+          ? `u/${String(lastDenial.deniedBy).replace(/^u\//i, '')}`
+          : 'Unknown';
+      }
+      const comments = String(lastDenial.denyNotes || '').trim();
+      if (previousDenialComments) {
+        previousDenialComments.textContent = comments;
+      }
+      if (previousDenialCommentsRow) {
+        previousDenialCommentsRow.classList.toggle('hidden', !comments);
+      }
+      if (previousDenialContext) {
+        previousDenialContext.textContent = '';
+        previousDenialContext.classList.add('hidden');
+      }
+    } else {
+      if (previousDenialDate) {
+        previousDenialDate.textContent = 'Unknown';
+      }
+      if (previousDenialReason) {
+        previousDenialReason.textContent = 'Details unavailable';
+      }
+      if (previousDenialBy) {
+        previousDenialBy.textContent = 'Unknown';
+      }
+      if (previousDenialComments) {
+        previousDenialComments.textContent = '';
+      }
+      if (previousDenialCommentsRow) {
+        previousDenialCommentsRow.classList.add('hidden');
+      }
+      if (previousDenialContext) {
+        previousDenialContext.textContent =
+          'The denied record is older than the retention window or pre-dates this version.';
+        previousDenialContext.classList.remove('hidden');
+      }
+    }
+
+    previousDenialModal.classList.remove('hidden');
+    if (previousDenialCloseBtn) {
+      window.setTimeout(() => previousDenialCloseBtn.focus(), 0);
+    }
   }
 
   function appendAcknowledgementMeta(container, label, iso, extraClass) {
@@ -8196,6 +8337,15 @@ import brandVxUrl from './brand-vx.png';
       closeImage();
     }
   });
+  document.addEventListener('keydown', (event) => {
+    if (!previousDenialModal || previousDenialModal.classList.contains('hidden')) {
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closePreviousDenialModal();
+    }
+  });
 
   if (statsCloseBtn) {
     statsCloseBtn.addEventListener('click', closeStatsModal);
@@ -8204,6 +8354,16 @@ import brandVxUrl from './brand-vx.png';
     statsModal.addEventListener('click', (event) => {
       if (event.target === statsModal) {
         closeStatsModal();
+      }
+    });
+  }
+  if (previousDenialCloseBtn) {
+    previousDenialCloseBtn.addEventListener('click', closePreviousDenialModal);
+  }
+  if (previousDenialModal) {
+    previousDenialModal.addEventListener('click', (event) => {
+      if (event.target === previousDenialModal) {
+        closePreviousDenialModal();
       }
     });
   }

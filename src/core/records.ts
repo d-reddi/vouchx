@@ -365,6 +365,10 @@ export async function appendAuditLog(
     at: input.at ?? new Date().toISOString(),
     verificationId: input.verificationId,
     notes: input.notes,
+    ...(typeof input.turnaroundMs === 'number' && Number.isFinite(input.turnaroundMs) && input.turnaroundMs >= 0
+      ? { turnaroundMs: Math.floor(input.turnaroundMs) }
+      : {}),
+    ...(input.denyReason !== undefined ? { denyReason: input.denyReason } : {}),
   };
   const entryAtMs = getFiniteTimestampMs(entry.at, Date.now());
 
@@ -617,6 +621,7 @@ export function parseAuditEntry(payload: string): AuditLogEntry | null {
     ) {
       return null;
     }
+    const denyReason = parseDenyReason(typeof parsed.denyReason === 'string' ? parsed.denyReason : undefined);
     return {
       id: parsed.id,
       subredditId:
@@ -630,6 +635,15 @@ export function parseAuditEntry(payload: string): AuditLogEntry | null {
       at: parsed.at,
       verificationId: typeof parsed.verificationId === 'string' ? parsed.verificationId : undefined,
       notes: typeof parsed.notes === 'string' ? parsed.notes : undefined,
+      ...(typeof parsed.turnaroundMs === 'number' && Number.isFinite(parsed.turnaroundMs) && parsed.turnaroundMs >= 0
+        ? { turnaroundMs: Math.floor(parsed.turnaroundMs) }
+        : {}),
+      // null marks automated denials; absent/invalid stays undefined (legacy entries).
+      ...(parsed.denyReason === null
+        ? { denyReason: null }
+        : denyReason
+          ? { denyReason }
+          : {}),
     };
   } catch {
     return null;

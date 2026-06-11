@@ -127,7 +127,7 @@
                 </div>
                 <label class="toggle-row queue-flagged-filter-row">
                   <input id="pending-flagged-filter" type="checkbox" />
-                  <span>Flagged for 2nd review</span>
+                  <span>Peer Review</span>
                 </label>
                 <div class="row history-filter-actions queue-filter-actions">
                   <button id="pending-clear-filter-btn" class="btn btn-secondary" type="button">Clear</button>
@@ -431,6 +431,32 @@
                 <p id="team-stats-top-denier-count" class="stat-leader-count">Not loaded</p>
               </article>
             </div>
+          </section>
+
+          <section class="team-stats-section team-stats-section-decisions">
+            <div class="stats-section-head">
+              <h3 class="stats-section-title">Decision Quality</h3>
+              <details class="team-stats-help stats-section-help">
+                <summary class="team-stats-help-button" aria-label="Explain decision quality stats">?</summary>
+                <div class="team-stats-help-tooltip" role="note">
+                  <p><strong>90% decided within</strong> shows the P90 decision time: 90% of timed approve or deny decisions finished within this duration.</p>
+                  <p><strong>Denial reasons</strong> shows which reasons were used. If one reason dominates, your photo instructions may need clarifying.</p>
+                  <p>Timing requires at least 10 recorded decisions in the selected range. Older decisions without timing metadata are not included.</p>
+                </div>
+              </details>
+            </div>
+            <div class="stat-tile-grid" aria-live="polite">
+              <article class="stat-tile stat-tile-primary stat-tile-decision-p90">
+                <span class="stat-tile-marker" aria-hidden="true"></span>
+                <div class="stat-tile-label-row">
+                  <p class="stat-tile-label">90% Decided Within</p>
+                  <span id="team-stats-decision-sample" class="stat-tile-sample">-- decisions</span>
+                </div>
+                <p id="team-stats-decision-p90" class="stat-tile-value">--</p>
+              </article>
+            </div>
+            <p class="stats-section-copy muted small">Denial reasons in this range</p>
+            <div id="team-stats-denial-reasons" class="team-stats-denial-reasons"></div>
           </section>
 
           <section class="team-stats-section team-stats-section-breakdown">
@@ -1174,32 +1200,43 @@
               <span id="stats-content-creator" class="stats-value">Unknown</span>
             </div>
           </div>
-          <div id="stats-last-denial-section" class="stats-reasons-section hidden">
-            <span class="stats-label">Previous denial</span>
-            <div class="stats-list">
-              <div class="stats-row">
-                <span class="stats-label">Reason</span>
-                <span id="stats-last-denial-reason" class="stats-value">Unknown</span>
-              </div>
-              <div class="stats-row">
-                <span class="stats-label">Denied by</span>
-                <span id="stats-last-denial-by" class="stats-value">Unknown</span>
-              </div>
-              <div class="stats-row">
-                <span class="stats-label">Denied on</span>
-                <span id="stats-last-denial-at" class="stats-value">Unknown</span>
-              </div>
-              <div id="stats-last-denial-comments-row" class="stats-row hidden">
-                <span class="stats-label">Comments</span>
-                <span id="stats-last-denial-notes" class="stats-value stats-last-denial-notes">Unknown</span>
-              </div>
-            </div>
-            <p id="stats-last-denial-context" class="muted small stats-last-denial-context hidden"></p>
-          </div>
           <div id="stats-reasons-section" class="stats-reasons-section hidden">
             <span class="stats-label">Why this grade</span>
             <ul id="stats-reasons" class="stats-reasons-list"></ul>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="previous-denial-modal" class="dialog-modal hidden" role="dialog" aria-modal="true" aria-labelledby="previous-denial-title">
+      <div class="dialog-card previous-denial-dialog-card">
+        <div class="stats-dialog-head">
+          <div>
+            <h3 id="previous-denial-title">Previous denial</h3>
+            <p id="previous-denial-summary" class="muted small"></p>
+          </div>
+          <button id="previous-denial-close-btn" class="btn btn-secondary" type="button">Close</button>
+        </div>
+        <div class="stats-section previous-denial-section">
+          <div class="stats-list">
+            <div class="stats-row">
+              <span class="stats-label">Date</span>
+              <span id="previous-denial-date" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Reason</span>
+              <span id="previous-denial-reason" class="stats-value">Unknown</span>
+            </div>
+            <div class="stats-row">
+              <span class="stats-label">Moderator</span>
+              <span id="previous-denial-by" class="stats-value">Unknown</span>
+            </div>
+            <div id="previous-denial-comments-row" class="stats-row hidden">
+              <span class="stats-label">Comments</span>
+              <span id="previous-denial-comments" class="stats-value denial-detail-notes">Unknown</span>
+            </div>
+          </div>
+          <p id="previous-denial-context" class="muted small denial-detail-context hidden"></p>
         </div>
       </div>
     </div>

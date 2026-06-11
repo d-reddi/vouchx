@@ -85,6 +85,7 @@ export {
   withdrawCurrentUserPendingVerification,
 } from './core/purge.ts';
 export {
+  parseAuditEntry,
   parseRecord,
 } from './core/records.ts';
 export {
@@ -99,12 +100,14 @@ export {
   batchReviewVerifications,
   buildBatchReviewToast,
   cancelReopenedVerification,
+  computeDecisionTurnaroundMs,
   denyVerification,
   normalizeBatchReviewVerificationIds,
   removeApprovedVerificationByModerator,
   reopenDeniedVerification,
 } from './core/review-actions.ts';
 export {
+  computeDecisionTimingSummary,
   getModeratorStats,
   searchApprovedRecords,
   searchAuditEntries,

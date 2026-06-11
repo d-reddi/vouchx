@@ -2620,6 +2620,7 @@ body.wizard-scroll-locked {
   border-radius: var(--radius-control);
   font-size: var(--text-label);
   font-weight: var(--font-weight-semibold);
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -2646,6 +2647,27 @@ body.wizard-scroll-locked {
 .pending-age-denied-before {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+button.pending-age-denied-before {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  border-left: 2px solid currentColor;
+  font-family: inherit;
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  cursor: pointer;
+}
+
+button.pending-age-denied-before:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+button.pending-age-denied-before:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .pending-age-flagged {
@@ -2705,7 +2727,7 @@ body.wizard-scroll-locked {
   justify-content: flex-end;
 }
 
-.stats-last-denial-notes {
+.denial-detail-notes {
   margin: 0;
   max-width: min(28rem, 64%);
   white-space: pre-wrap;
@@ -2713,7 +2735,7 @@ body.wizard-scroll-locked {
   text-align: right;
 }
 
-.stats-last-denial-context {
+.denial-detail-context {
   margin: var(--space-2) 0 0;
   overflow-wrap: anywhere;
 }
@@ -3695,6 +3717,10 @@ body.wizard-scroll-locked {
   width: min(560px, 100%);
 }
 
+.previous-denial-dialog-card {
+  width: min(520px, 100%);
+}
+
 .stats-dialog-head {
   display: flex;
   align-items: flex-start;
@@ -3947,6 +3973,20 @@ body.wizard-scroll-locked {
   text-transform: uppercase;
 }
 
+.stat-tile-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.stat-tile-sample {
+  color: var(--muted);
+  font-size: var(--text-meta);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
 .stat-tile-value {
   color: color-mix(in srgb, var(--text) 92%, white 8%);
   font-family: var(--font-display);
@@ -4038,6 +4078,62 @@ body.wizard-scroll-locked {
   font-size: var(--text-meta);
   font-weight: var(--font-weight-medium);
   font-variant-numeric: tabular-nums;
+}
+
+/* Decision quality ----------------------------------------------------------- */
+
+.stat-tile-decision-p90 .stat-tile-marker {
+  background: var(--primary);
+}
+
+.stat-tile-decision-p90 .stat-tile-value.is-muted {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+}
+
+.team-stats-denial-reasons {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.denial-reason-row {
+  display: grid;
+  gap: 4px;
+}
+
+.denial-reason-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.denial-reason-label {
+  color: var(--text);
+  font-size: var(--text-meta);
+  font-weight: var(--font-weight-medium);
+}
+
+.denial-reason-count {
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.denial-reason-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-border) 40%, transparent);
+  overflow: hidden;
+}
+
+.denial-reason-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 75%, transparent);
 }
 
 /* Moderator activity rows --------------------------------------------------- */
