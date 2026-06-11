@@ -22,7 +22,7 @@ structure — do not re-merge the modules back into one file.**
 | `keys.ts` | All Redis key builders |
 | `records.ts` | Verification record read/write, user pointers, global indexes, audit-log storage, storage metering |
 | `locks.ts` | Redis locks + pending-claim state |
-| `flags.ts` | 2nd-review flag state + internal flag notes on pending records |
+| `flags.ts` | Peer Review state + internal review notes on pending records |
 | `moderator-access.ts` | Viewer identity, moderator permission lookups/caches, access assertions, hub moderator UI state |
 | `blocking.ts` | Blocked-user storage, denial counts, block/unblock, global blocklist readers |
 | `submission.ts` | `submitVerification`, user grading/scoring, content-creator detection, pending account snapshot |
@@ -49,6 +49,37 @@ wizard flows through `DashboardData` / `ModPanelStatePayload`
 per-moderator completion storage belongs in `src/core/onboarding.ts`. Keep
 wizard debug controls production-safe: `wizardDebugMode` is a manual boolean
 debug switch, and forced mode should stay `null` in production.
+
+## Current product behavior
+
+- The moderator-facing name for the old flag / second-review workflow is
+  **Peer Review**. Keep user-facing copy on that term. Internal names such as
+  `reviewFlag`, `flagPending`, and `setPendingFlagState` may remain for storage
+  and API compatibility; do not churn them without a dedicated migration.
+- Peer Review is **not a lock**. Any moderator who can normally act on the
+  request may approve, deny, clear Peer Review, or add Peer Review notes,
+  subject only to the existing pending-claim lock rules. Approve/deny actions
+  clear Peer Review state.
+- While a request is in Peer Review, hide the normal Lock/Unlock controls and
+  show **Clear Peer Review**. Do not show stale 24-hour hold, force-unlock, or
+  note-only language for Peer Review.
+- Peer Review requests stay prioritized at the top of the pending queue. When
+  multiple requests are in Peer Review, sort them by `flaggedAt`, oldest first,
+  until they are resolved, cleared, or removed from pending.
+- Pending queue cards should not show the Terms & Age confirmation row. The
+  acknowledgement timestamp still must be stored and can appear in record
+  details/history/modmail audit copy, but it is redundant with Submitted on the
+  pending card.
+- Previous-denial details belong behind the clickable `Denied before` /
+  `Denied xN` badge on the pending card. Do not duplicate the full previous
+  denial detail block in the Stats card.
+- Moderator Stats decision quality uses P90 decision time, shown as
+  **90% Decided Within** with the sample count beside it. Compute P90 with the
+  nearest-rank method from timed approve/deny audit entries. Show
+  `Not enough data yet` until there are at least 10 timed decisions in the
+  selected range. Do not use average or median as the primary SLA metric.
+  Older audit entries without timing metadata are excluded from timing stats.
+  Denial-reason breakdowns also come from audit metadata recorded going forward.
 
 ## Import rules
 

@@ -109,6 +109,23 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
+### v1.5.4
+
+#### New Features
+- Added a Denial tag to queue cards. Tap it to view the most recent denial details.
+- Added Peer Review, allowing moderators to flag a submission for a second opinion. Moderators can exchange review comments that are visible only to the moderation team.
+- Added Block Notes support.
+- Added new statistics:
+  - Average approval time tracking
+  - Denials by reason
+
+#### Improvements
+- When a submission contains multiple photos, you can now swipe left or right while viewing an enlarged image to move between photos.
+- Removed Terms Accepted and Age Confirmed timestamps from queue cards to reduce clutter. This information is still retained internally for auditing and tracking purposes.
+
+
+---
+
 ### v1.5.3
 
 #### Critical Fix:

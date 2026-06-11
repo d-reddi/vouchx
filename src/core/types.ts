@@ -142,6 +142,11 @@ export type AuditLogEntry = {
   at: string;
   verificationId?: string;
   notes?: string;
+  // Decision-quality metadata, recorded on approve/deny entries. Older entries lack these.
+  // turnaroundMs: submitted -> reviewed duration. denyReason: configured reason id, or
+  // null for automated denials (e.g. shadowban); undefined on legacy/non-denial entries.
+  turnaroundMs?: number;
+  denyReason?: DenyReason | null;
 };
 
 export type RuntimeConfig = {
@@ -660,6 +665,16 @@ export type ModeratorStatsModeratorRow = {
   totalActions: number;
 };
 
+export type ModeratorStatsDecisionTiming = {
+  sampleCount: number;
+  percentile90Ms: number | null;
+};
+
+export type ModeratorStatsDenialReasonRow = {
+  reason: DenyReason | 'auto';
+  count: number;
+};
+
 export type ModeratorStatsPayload = {
   range: ModeratorStatsRange;
   generatedAt: string;
@@ -674,6 +689,8 @@ export type ModeratorStatsPayload = {
     topApprover: ModeratorStatsLeader | null;
     topDenier: ModeratorStatsLeader | null;
   };
+  decisionTiming: ModeratorStatsDecisionTiming;
+  denialReasons: ModeratorStatsDenialReasonRow[];
   moderators: ModeratorStatsModeratorRow[];
 };
 

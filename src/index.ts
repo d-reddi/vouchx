@@ -1017,11 +1017,11 @@ app.post('/api/mod/flag', async (req, res) => {
       toast: {
         text: flagged
           ? result.changed
-            ? `Flagged u/${result.username} for 2nd review.`
-            : `u/${result.username} is already flagged for 2nd review.`
+            ? `Sent u/${result.username} to peer review.`
+            : `u/${result.username} is already in peer review.`
           : result.changed
-            ? `Removed the 2nd review flag for u/${result.username}.`
-            : `u/${result.username} is not flagged.`,
+            ? `Cleared peer review for u/${result.username}.`
+            : `u/${result.username} is not in peer review.`,
         tone: result.changed ? 'success' : 'info',
       },
     });

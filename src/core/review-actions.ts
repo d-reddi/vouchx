@@ -112,6 +112,18 @@ export async function preflightReviewTargetAccount(
   return await validateVerificationUserState(context, record);
 }
 
+export function computeDecisionTurnaroundMs(
+  submittedAt: string,
+  reviewedAt: string | null | undefined
+): number | undefined {
+  const submittedMs = new Date(String(submittedAt || '')).getTime();
+  const reviewedMs = new Date(String(reviewedAt || '')).getTime();
+  if (!Number.isFinite(submittedMs) || !Number.isFinite(reviewedMs) || submittedMs <= 0 || reviewedMs <= 0) {
+    return undefined;
+  }
+  return Math.max(0, reviewedMs - submittedMs);
+}
+
 export function buildValidationRetryActionResult(reason: string): ActionResult {
   return {
     outcome: 'validation_retry',
@@ -415,6 +427,10 @@ export async function approveVerification(
         actor: moderator,
         action: 'approved',
         verificationId: validationScheduledRecord.id,
+        turnaroundMs: computeDecisionTurnaroundMs(
+          validationScheduledRecord.submittedAt,
+          validationScheduledRecord.reviewedAt
+        ),
         notes: [
           flair.status === 'success' ? 'Flair applied.' : `Flair failed: ${flair.reason ?? 'unknown error'}`,
           modmail.status === 'failed'
@@ -753,6 +769,9 @@ export async function finalizeDeniedVerification(
       actor,
       action: 'denied',
       verificationId: reviewedRecord.id,
+      turnaroundMs: computeDecisionTurnaroundMs(reviewedRecord.submittedAt, reviewedRecord.reviewedAt),
+      // null = automated denial (e.g. shadowban auto-deny); feeds the stats reason breakdown.
+      denyReason: reviewedRecord.denyReason ?? null,
       notes: `${auditReasonNote}${moderatorNotes ? ` | ${moderatorNotes}` : ''}${
         userBlocked ? ` | Auto-blocked after ${denialCount} denials` : ''
       }${

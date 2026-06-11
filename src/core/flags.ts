@@ -127,7 +127,7 @@ export async function setPendingFlagState(
       };
       changed = true;
     } else if (!shouldFlag && record.reviewFlag) {
-      // Unflagging discards the note thread: notes live only as long as the flag.
+      // Clearing peer review discards the note thread: notes live only as long as the flag.
       updatedRecord = { ...record, reviewFlag: null };
       changed = true;
     }
@@ -151,7 +151,7 @@ export async function addPendingFlagNote(
     const { subredditId, moderator, record } = await loadPendingRecordForFlagAction(context, verificationId);
 
     if (!record.reviewFlag) {
-      throw new Error('Flag this request for 2nd review before adding notes.');
+      throw new Error('Send this request to peer review before adding notes.');
     }
     const normalizedText = normalizeReviewFlagNoteText(noteText);
     if (!normalizedText) {

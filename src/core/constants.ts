@@ -97,7 +97,7 @@ export const MAX_PENDING_LAST_DENIAL_NOTES_LENGTH = 300;
 
 export const PENDING_LAST_DENIAL_HISTORY_SCAN_LIMIT = 25;
 
-// Bounds for 2nd-review flag notes stored on a pending verification record.
+// Bounds for peer-review notes stored on a pending verification record.
 export const MAX_REVIEW_FLAG_NOTE_LENGTH = 300;
 
 export const MAX_REVIEW_FLAG_NOTES = 20;

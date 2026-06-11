@@ -14,6 +14,8 @@ import {
   checkVerificationFlair,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
+  computeDecisionTimingSummary,
+  computeDecisionTurnaroundMs,
   computeUserGrade,
   detectContentCreator,
   extractModmailUserSignals,
@@ -49,6 +51,7 @@ import {
   normalizeUsernameForLookup,
   normalizeUsernameStrict,
   onModeratorPurgeUserData,
+  parseAuditEntry,
   parseRecord,
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
@@ -66,6 +69,7 @@ import {
   withRedisLock,
   withdrawCurrentUserPendingVerification,
   usernameLookupFields,
+  type DenyReason,
   type RuntimeConfig,
 } from './core.ts';
 import {
@@ -1415,6 +1419,8 @@ function seedAuditEntries(
     at: string;
     verificationId?: string;
     notes?: string;
+    turnaroundMs?: number;
+    denyReason?: DenyReason | null;
   }>
 ) {
   const auditZset = ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId));
@@ -1433,6 +1439,14 @@ function seedAuditEntries(
     );
     auditZset.set(fullEntry.id, new Date(fullEntry.at).getTime());
   }
+}
+
+function getStoredAuditEntries(reviewContext: ReturnType<typeof createReviewActionContext>) {
+  const auditPrefix = `${subredditPrefixKey(reviewContext.subredditId)}:audit:`;
+  return Array.from(reviewContext.redisStore.entries())
+    .filter(([key]) => key.startsWith(auditPrefix))
+    .map(([, payload]) => parseAuditEntry(payload))
+    .filter((entry): entry is NonNullable<ReturnType<typeof parseAuditEntry>> => entry !== null);
 }
 
 function createReviewActionContext(options?: {
@@ -2795,7 +2809,7 @@ test('loadModDashboard reports total pending count while loading the oldest capp
   assert.equal(dashboard.pending.some((record) => record.id === 'verification_174'), false);
 });
 
-test('loadModDashboard prioritizes flagged records by oldest flag time', async () => {
+test('loadModDashboard prioritizes peer-reviewed records by oldest request time', async () => {
   const modContext = createHubDashboardContext({
     userId: 't2_mod',
     currentUsername: 'mod_one',
@@ -3326,7 +3340,7 @@ test('parsePendingReviewFlag validates flag payloads and drops malformed notes',
   assert.equal(parsed?.notes[0]?.text.length, 300);
 });
 
-test('parseRecord preserves the 2nd-review flag on pending records', () => {
+test('parseRecord preserves peer-review state on pending records', () => {
   const reviewFlag = {
     flaggedBy: 'Mod_One',
     flaggedAt: '2026-03-11T12:00:00.000Z',
@@ -3341,7 +3355,79 @@ test('parseRecord preserves the 2nd-review flag on pending records', () => {
   assert.equal(withoutFlag.reviewFlag, null);
 });
 
-test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clears the thread', async () => {
+test('parseAuditEntry preserves decision metadata and ignores invalid values', () => {
+  const parsed = parseAuditEntry(JSON.stringify({
+    id: 'audit_decision',
+    subredditId: 'T5_Example',
+    subredditName: 'ExampleSub',
+    username: 'example_user',
+    action: 'denied',
+    actor: 'Mod_One',
+    at: '2026-03-11T12:00:00.000Z',
+    verificationId: 'verification_123',
+    notes: 'Reason 2',
+    turnaroundMs: 1234.9,
+    denyReason: 'reason_2',
+  }));
+  assert.ok(parsed);
+  assert.equal(parsed?.subredditId, 't5_example');
+  assert.equal(parsed?.turnaroundMs, 1234);
+  assert.equal(parsed?.denyReason, 'reason_2');
+
+  const automated = parseAuditEntry(JSON.stringify({
+    id: 'audit_auto',
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    username: 'example_user',
+    action: 'denied',
+    actor: 'VouchX (auto)',
+    at: '2026-03-11T12:00:00.000Z',
+    turnaroundMs: -1,
+    denyReason: null,
+  }));
+  assert.ok(automated);
+  assert.equal(automated?.turnaroundMs, undefined);
+  assert.equal(automated?.denyReason, null);
+
+  const invalidReason = parseAuditEntry(JSON.stringify({
+    id: 'audit_invalid_reason',
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    username: 'example_user',
+    action: 'denied',
+    actor: 'Mod_One',
+    at: '2026-03-11T12:00:00.000Z',
+    denyReason: 'reason_99',
+  }));
+  assert.ok(invalidReason);
+  assert.equal(invalidReason?.denyReason, undefined);
+});
+
+test('decision timing helpers ignore invalid samples and compute P90 by nearest rank', () => {
+  assert.equal(
+    computeDecisionTurnaroundMs('2026-03-11T12:00:00.000Z', '2026-03-11T14:30:00.000Z'),
+    2.5 * 60 * 60 * 1000
+  );
+  assert.equal(computeDecisionTurnaroundMs('', '2026-03-11T14:30:00.000Z'), undefined);
+  assert.equal(
+    computeDecisionTurnaroundMs('2026-03-11T14:30:00.000Z', '2026-03-11T12:00:00.000Z'),
+    0
+  );
+  assert.deepEqual(computeDecisionTimingSummary([4, Number.NaN, -1, 2, 8, 6]), {
+    sampleCount: 4,
+    percentile90Ms: 8,
+  });
+  assert.deepEqual(computeDecisionTimingSummary([10, 15, 20, 70, 56, 15, 13, 12, 98, 28]), {
+    sampleCount: 10,
+    percentile90Ms: 70,
+  });
+  assert.deepEqual(computeDecisionTimingSummary([]), {
+    sampleCount: 0,
+    percentile90Ms: null,
+  });
+});
+
+test('setPendingFlagState tracks peer-review requests, ignores repeats, threads notes, and clears the thread', async () => {
   const reviewContext = createReviewActionContext();
   const pendingIndex = ensureTestZSet(reviewContext.zsetStore, pendingIndexTestKey(reviewContext.subredditId));
   const originalPendingScore = pendingIndex.get(reviewContext.record.id);
@@ -3381,11 +3467,11 @@ test('setPendingFlagState flags, ignores repeats, threads notes, and unflag clea
 
   await assert.rejects(
     addPendingFlagNote(reviewContext.context as never, reviewContext.record.id, 'orphan note'),
-    /Flag this request/
+    /peer review/
   );
 });
 
-test('review flags do not lock status actions or unflagging to the flagging moderator', async () => {
+test('peer-review requests do not lock status actions or clearing to the requesting moderator', async () => {
   const freshFlag = {
     flaggedBy: 'Mod_One',
     flaggedAt: new Date().toISOString(),
@@ -3432,11 +3518,11 @@ test('review flags do not lock status actions or unflagging to the flagging mode
   assert.equal(otherModeratorContext.getParsedRecord()?.status, 'pending');
 });
 
-test('approveVerification and denyVerification clear the 2nd-review flag', async () => {
+test('approveVerification and denyVerification clear peer-review state', async () => {
   const reviewFlag = {
     flaggedBy: 'Mod_One',
     flaggedAt: '2026-03-11T12:00:00.000Z',
-    notes: [{ author: 'Mod_One', at: '2026-03-11T12:00:00.000Z', text: 'Needs a 2nd opinion' }],
+    notes: [{ author: 'Mod_One', at: '2026-03-11T12:00:00.000Z', text: 'Needs peer review' }],
   };
 
   const approveContext = createReviewActionContext({ recordOverrides: { reviewFlag } });
@@ -3448,6 +3534,36 @@ test('approveVerification and denyVerification clear the 2nd-review flag', async
   const denyResult = await denyVerification(denyContext.context as never, denyContext.record.id, 'reason_1');
   assert.equal(denyResult.applied, true);
   assert.equal(denyContext.getParsedRecord()?.reviewFlag, null);
+});
+
+test('approveVerification and denyVerification write decision-quality audit metadata', async () => {
+  const approveSubmittedAt = '2026-03-11T12:00:00.000Z';
+  const approveContext = createReviewActionContext({
+    recordOverrides: { submittedAt: approveSubmittedAt },
+  });
+
+  const approveResult = await approveVerification(approveContext.context as never, approveContext.record.id);
+  assert.equal(approveResult.outcome, 'completed');
+
+  const approvedAudit = getStoredAuditEntries(approveContext).find((entry) => entry.action === 'approved');
+  const approvedRecord = approveContext.getParsedRecord();
+  assert.ok(approvedAudit);
+  assert.equal(approvedAudit?.turnaroundMs, computeDecisionTurnaroundMs(approveSubmittedAt, approvedRecord?.reviewedAt));
+  assert.equal(approvedAudit?.denyReason, undefined);
+
+  const denySubmittedAt = '2026-03-11T12:00:00.000Z';
+  const denyContext = createReviewActionContext({
+    recordOverrides: { submittedAt: denySubmittedAt },
+  });
+
+  const denyResult = await denyVerification(denyContext.context as never, denyContext.record.id, 'reason_2', 'Photo mismatch');
+  assert.equal(denyResult.outcome, 'completed');
+
+  const deniedAudit = getStoredAuditEntries(denyContext).find((entry) => entry.action === 'denied');
+  const deniedRecord = denyContext.getParsedRecord();
+  assert.ok(deniedAudit);
+  assert.equal(deniedAudit?.turnaroundMs, computeDecisionTurnaroundMs(denySubmittedAt, deniedRecord?.reviewedAt));
+  assert.equal(deniedAudit?.denyReason, 'reason_2');
 });
 
 test('getViewerFlairSnapshot resolves flair through the username lookup after confirming the viewer identity', async () => {
@@ -4535,6 +4651,11 @@ test('getModeratorStats returns empty recent activity while preserving current v
         topApprover: null,
         topDenier: null,
       },
+      decisionTiming: {
+        sampleCount: 0,
+        percentile90Ms: null,
+      },
+      denialReasons: [],
       moderators: [],
     });
   });
@@ -4591,6 +4712,88 @@ test('getModeratorStats aggregates weekly and monthly moderator activity from th
       { moderator: 'mod_two', approvals: 0, denials: 2, reopens: 1, totalActions: 3 },
       { moderator: 'mod_one', approvals: 2, denials: 0, reopens: 0, totalActions: 2 },
       { moderator: 'mod_three', approvals: 1, denials: 0, reopens: 0, totalActions: 1 },
+    ]);
+  });
+});
+
+test('getModeratorStats summarizes decision timing and denial reason breakdown', async () => {
+  const reviewContext = createReviewActionContext();
+  const hourMs = 60 * 60 * 1000;
+
+  await withFixedNow('2026-03-26T12:00:00.000Z', async () => {
+    seedAuditEntries(reviewContext, [
+      {
+        id: 'audit_approved_fast',
+        action: 'approved',
+        actor: 'Mod_One',
+        at: '2026-03-25T12:00:00.000Z',
+        turnaroundMs: 1 * hourMs,
+      },
+      {
+        id: 'audit_denied_reason_2_a',
+        action: 'denied',
+        actor: 'Mod_Two',
+        at: '2026-03-24T12:00:00.000Z',
+        turnaroundMs: 2 * hourMs,
+        denyReason: 'reason_2',
+      },
+      {
+        id: 'audit_denied_reason_1',
+        action: 'denied',
+        actor: 'Mod_Two',
+        at: '2026-03-23T12:00:00.000Z',
+        turnaroundMs: 4 * hourMs,
+        denyReason: 'reason_1',
+      },
+      {
+        id: 'audit_denied_reason_2_b',
+        action: 'denied',
+        actor: 'Mod_Three',
+        at: '2026-03-22T12:00:00.000Z',
+        turnaroundMs: 8 * hourMs,
+        denyReason: 'reason_2',
+      },
+      {
+        id: 'audit_denied_auto',
+        action: 'denied',
+        actor: 'VouchX (auto)',
+        at: '2026-03-21T12:00:00.000Z',
+        denyReason: null,
+      },
+      {
+        id: 'audit_denied_legacy_reason',
+        action: 'denied',
+        actor: 'Mod_Four',
+        at: '2026-03-20T12:00:00.000Z',
+      },
+      {
+        id: 'audit_denied_invalid_timing',
+        action: 'denied',
+        actor: 'Mod_Five',
+        at: '2026-03-19T12:00:00.000Z',
+        turnaroundMs: -1,
+        denyReason: 'reason_3',
+      },
+      {
+        id: 'audit_reopened_ignored',
+        action: 'reopened',
+        actor: 'Mod_Six',
+        at: '2026-03-19T13:00:00.000Z',
+        turnaroundMs: 32 * hourMs,
+      },
+    ]);
+
+    const stats = await getModeratorStats(reviewContext.context as never, reviewContext.subredditId, 'weekly');
+
+    assert.deepEqual(stats.decisionTiming, {
+      sampleCount: 4,
+      percentile90Ms: 8 * hourMs,
+    });
+    assert.deepEqual(stats.denialReasons, [
+      { reason: 'reason_2', count: 2 },
+      { reason: 'auto', count: 1 },
+      { reason: 'reason_1', count: 1 },
+      { reason: 'reason_3', count: 1 },
     ]);
   });
 });
