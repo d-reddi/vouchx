@@ -14,7 +14,7 @@
   "devDependencies": {
     "@devvit/public-api": "0.13.0",
     "@types/node": "^22.10.5",
-    "devvit": "0.13.0",
+    "devvit": "0.13.4",
     "typescript": "5.8.3"
   },
   "engines": {
