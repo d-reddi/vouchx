@@ -12,7 +12,7 @@
     "test": "node --test --experimental-strip-types src/core.test.ts"
   },
   "devDependencies": {
-    "@devvit/public-api": "0.13.0",
+    "@devvit/public-api": "0.13.4",
     "@types/node": "^22.10.5",
     "devvit": "0.13.4",
     "typescript": "5.8.3"
@@ -21,8 +21,8 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@devvit/start": "0.13.0",
-    "@devvit/web": "0.13.0",
+    "@devvit/start": "0.13.4",
+    "@devvit/web": "0.13.4",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "vite": "^7.3.1"
