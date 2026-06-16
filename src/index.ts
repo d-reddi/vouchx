@@ -1011,10 +1011,10 @@ app.post('/api/mod/flag', async (req, res) => {
     const note = String(req.body?.note ?? '').trim();
     const appContext = currentContext();
     const result = await setPendingFlagState(appContext, verificationId, flagged, note);
-    await sendRefreshSignals(appContext);
-    res.json({
-      ...(await buildModPayload(appContext)),
-      toast: {
+    sendFastModRefreshResponse(
+      res,
+      appContext,
+      {
         text: flagged
           ? result.changed
             ? `Sent u/${result.username} to peer review.`
@@ -1024,7 +1024,13 @@ app.post('/api/mod/flag', async (req, res) => {
             : `u/${result.username} is not in peer review.`,
         tone: result.changed ? 'success' : 'info',
       },
-    });
+      {
+        mutation: {
+          type: 'updatePending',
+          item: result.item,
+        },
+      }
+    );
   } catch (error) {
     sendError(res, error);
   }

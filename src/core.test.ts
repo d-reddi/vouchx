@@ -276,6 +276,7 @@ function createSchedulerRegistrationContext(options?: {
   existingJobs?: Array<{ name: string; data?: Record<string, unknown> }>;
   initialLockValue?: string | null;
   initialMarkerValue?: string | null;
+  listJobsErrors?: unknown[];
   onRunJob?: (payload: Record<string, unknown>) => void | Promise<void>;
 }) {
   const runJobCalls: Array<Record<string, unknown>> = [];
@@ -297,6 +298,10 @@ function createSchedulerRegistrationContext(options?: {
       scheduler: {
         async listJobs(...args: unknown[]) {
           listJobsCalls.push(args);
+          const error = options?.listJobsErrors?.shift();
+          if (error) {
+            throw error;
+          }
           return existingJobs;
         },
         async runJob(payload: Record<string, unknown>) {
@@ -5941,6 +5946,25 @@ test('ensureUserValidationSchedule registers the user-validation scheduled job w
   assert.equal(schedulerContext.setCalls.length, 2);
   assert.equal(schedulerContext.getCalls.length, 2);
   assert.equal(schedulerContext.delCalls.length, 1);
+  assert.equal(schedulerContext.currentLockValue, null);
+  assert.equal(schedulerContext.markerValue, '1');
+});
+
+test('ensureUserValidationSchedule retries transient scheduler list failures before scheduling', async () => {
+  const schedulerContext = createSchedulerRegistrationContext({
+    listJobsErrors: [
+      new Error('2 UNKNOWN: redis ZRANGE: read tcp 100.64.26.22:52336->10.18.76.22:6379: i/o timeout'),
+    ],
+  });
+
+  await ensureUserValidationSchedule(
+    schedulerContext.context as never,
+    'T5_Example',
+    '/r/ExampleSub/'
+  );
+
+  assert.equal(schedulerContext.listJobsCalls.length, 2);
+  assert.equal(schedulerContext.runJobCalls.length, 1);
   assert.equal(schedulerContext.currentLockValue, null);
   assert.equal(schedulerContext.markerValue, '1');
 });

@@ -1349,6 +1349,27 @@ import brandVxUrl from './brand-vx.png';
       return;
     }
 
+    if (mutation.type === 'updatePending') {
+      const item = mutation.item && typeof mutation.item === 'object' ? mutation.item : null;
+      const verificationId = String(item && item.id || '').trim();
+      if (!verificationId || !Array.isArray(state.pending)) {
+        return;
+      }
+      const index = state.pending.findIndex((entry) => String(entry && entry.id || '') === verificationId);
+      if (index < 0) {
+        return;
+      }
+      const nextPending = state.pending.slice();
+      nextPending[index] = item;
+      state = {
+        ...state,
+        pending: nextPending,
+      };
+      lastStateUpdatedAt = Date.now();
+      renderAll();
+      return;
+    }
+
     if (mutation.type === 'removePending' || mutation.type === 'removePendingMany') {
       const verificationIds =
         mutation.type === 'removePendingMany'

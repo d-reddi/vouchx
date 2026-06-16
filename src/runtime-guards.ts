@@ -11,8 +11,7 @@ function shouldIgnoreDevvitLogStreamAuthRejection(reason: unknown): boolean {
   const isInvalidJwtLogStreamFailure =
     message.includes('unauthenticated') &&
     message.includes('invalid jwt token') &&
-    message.includes('token validation failed') &&
-    (message.includes('logstream') || message.includes('forwardingconsole'));
+    message.includes('token validation failed');
 
   return (
     isPluginAuthTimeout ||

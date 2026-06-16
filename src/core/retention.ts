@@ -77,6 +77,31 @@ import {
 import { parseNonNegativeInt } from './settings.ts';
 import { purgeUserVerificationData } from './purge.ts';
 
+const TRANSIENT_MAINTENANCE_RETRY_ATTEMPTS = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryTransientMaintenanceOperation<ValueType>(
+  operation: () => Promise<ValueType>
+): Promise<ValueType> {
+  for (let attempt = 0; attempt < TRANSIENT_MAINTENANCE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        attempt >= TRANSIENT_MAINTENANCE_RETRY_ATTEMPTS - 1 ||
+        !looksLikeTransientRedditTransportError(errorText(error))
+      ) {
+        throw error;
+      }
+      await sleep(150 * (attempt + 1));
+    }
+  }
+  return await operation();
+}
+
 export async function pruneHistoryOlderThanDays(
   context: RedisContext,
   subredditId: string,
@@ -88,7 +113,9 @@ export async function pruneHistoryOlderThanDays(
 
   const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
   const nowMs = Date.now();
-  const staleCandidates = await context.redis.zRange(historyDateIndexKey(subredditId), 0, cutoffMs, { by: 'score' });
+  const staleCandidates = await retryTransientMaintenanceOperation(() =>
+    context.redis.zRange(historyDateIndexKey(subredditId), 0, cutoffMs, { by: 'score' })
+  );
   if (staleCandidates.length === 0) {
     return 0;
   }
@@ -335,10 +362,12 @@ export async function backfillValidationTracking(
 ): Promise<void> {
   const cursorRaw = await context.redis.get(validationBackfillCursorKey(subredditId));
   const cursor = Math.max(0, Number.parseInt(cursorRaw ?? '0', 10) || 0);
-  const members = await context.redis.zRange(approvedIndexKey(subredditId), cursor, cursor + batchSize - 1, {
-    by: 'rank',
-    reverse: true,
-  });
+  const members = await retryTransientMaintenanceOperation(() =>
+    context.redis.zRange(approvedIndexKey(subredditId), cursor, cursor + batchSize - 1, {
+      by: 'rank',
+      reverse: true,
+    })
+  );
 
   if (members.length === 0) {
     await context.redis.del(validationBackfillCursorKey(subredditId));
@@ -410,49 +439,45 @@ export async function ensureUserValidationSchedule(
     }
     lockAcquired = true;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const jobs = await context.scheduler.listJobs();
-        const alreadyScheduled = jobs.some((job) => {
-          if (job.name !== USER_VALIDATION_JOB_NAME) {
-            return false;
-          }
-          const jobData = (job.data ?? {}) as Partial<AuditRetentionJobData>;
-          return sanitizeSubredditId(jobData.subredditId ?? '') === normalizedSubredditId;
-        });
-
-        if (!alreadyScheduled) {
-          await context.scheduler.runJob({
-            name: USER_VALIDATION_JOB_NAME,
-            cron: USER_VALIDATION_CRON,
-            data: {
-              subredditId: normalizedSubredditId,
-              subredditName: normalizedSubreddit,
-            },
-          });
-        }
-
-        try {
-          await context.redis.set(presenceKey, '1', {
-            expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS),
-          });
-        } catch {
-          // Best-effort marker only.
-        }
-        return;
-      } catch (error) {
-        if (attempt < 1 && looksLikeTransientRedditTransportError(errorText(error))) {
-          await new Promise((resolve) => setTimeout(resolve, 150));
-          continue;
-        }
-        throw error;
+    const jobs = await retryTransientMaintenanceOperation(() => context.scheduler.listJobs());
+    const alreadyScheduled = jobs.some((job) => {
+      if (job.name !== USER_VALIDATION_JOB_NAME) {
+        return false;
       }
+      const jobData = (job.data ?? {}) as Partial<AuditRetentionJobData>;
+      return sanitizeSubredditId(jobData.subredditId ?? '') === normalizedSubredditId;
+    });
+
+    if (!alreadyScheduled) {
+      await retryTransientMaintenanceOperation(() =>
+        context.scheduler.runJob({
+          name: USER_VALIDATION_JOB_NAME,
+          cron: USER_VALIDATION_CRON,
+          data: {
+            subredditId: normalizedSubredditId,
+            subredditName: normalizedSubreddit,
+          },
+        })
+      );
     }
+
+    try {
+      await context.redis.set(presenceKey, '1', {
+        expiration: new Date(Date.now() + USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS),
+      });
+    } catch {
+      // Best-effort marker only.
+    }
+    return;
   } catch (error) {
     console.log(`[user-validation] Failed to schedule validation for r/${normalizedSubreddit}: ${errorText(error)}`);
   } finally {
     if (lockAcquired) {
-      await releaseRedisLockIfOwned(context, lockKey, lockToken);
+      try {
+        await releaseRedisLockIfOwned(context, lockKey, lockToken);
+      } catch (error) {
+        console.log(`[user-validation] Failed to release schedule lock for r/${normalizedSubreddit}: ${errorText(error)}`);
+      }
     }
   }
 }
@@ -464,10 +489,12 @@ export async function reconcileApprovedUsersForRetention(
 ): Promise<RetentionReconcileSummary> {
   const lockKey = validationRunLockKey(subredditId);
   const lockToken = createRedisLockToken();
-  const lock = await context.redis.set(lockKey, lockToken, {
-    nx: true,
-    expiration: new Date(Date.now() + 5 * 60 * 1000),
-  });
+  const lock = await retryTransientMaintenanceOperation(() =>
+    context.redis.set(lockKey, lockToken, {
+      nx: true,
+      expiration: new Date(Date.now() + 5 * 60 * 1000),
+    })
+  );
   if (lock !== 'OK') {
     return {
       processed: 0,
@@ -488,14 +515,18 @@ export async function reconcileApprovedUsersForRetention(
     const staleIndexEntriesPurged = await sweepStaleRecordIndexEntries(context, subredditId);
     await backfillValidationTracking(context, subredditId, VALIDATION_BATCH_SIZE);
     const nowMs = Date.now();
-    const hardExpired = await context.redis.zRange(validationHardExpireIndexKey(subredditId), 0, nowMs, {
-      by: 'score',
-      limit: { offset: 0, count: VALIDATION_BATCH_SIZE },
-    });
-    const due = await context.redis.zRange(validationDueIndexKey(subredditId), 0, nowMs, {
-      by: 'score',
-      limit: { offset: 0, count: VALIDATION_BATCH_SIZE },
-    });
+    const hardExpired = await retryTransientMaintenanceOperation(() =>
+      context.redis.zRange(validationHardExpireIndexKey(subredditId), 0, nowMs, {
+        by: 'score',
+        limit: { offset: 0, count: VALIDATION_BATCH_SIZE },
+      })
+    );
+    const due = await retryTransientMaintenanceOperation(() =>
+      context.redis.zRange(validationDueIndexKey(subredditId), 0, nowMs, {
+        by: 'score',
+        limit: { offset: 0, count: VALIDATION_BATCH_SIZE },
+      })
+    );
     const candidateIds = Array.from(
       new Set([...hardExpired.map((entry) => entry.member), ...due.map((entry) => entry.member)])
     ).slice(0, VALIDATION_BATCH_SIZE);
@@ -600,10 +631,12 @@ export async function reconcileNonApprovedUsersForRetention(
   const cursorRaw = await context.redis.get(validationNonApprovedCursorKey(subredditId));
   const cursor = Math.max(0, Number.parseInt(cursorRaw ?? '0', 10) || 0);
   const count = NON_APPROVED_VALIDATION_BATCH_SIZE * NON_APPROVED_VALIDATION_SCAN_MULTIPLIER;
-  const members = await context.redis.zRange(historyDateIndexKey(subredditId), cursor, cursor + count - 1, {
-    by: 'rank',
-    reverse: true,
-  });
+  const members = await retryTransientMaintenanceOperation(() =>
+    context.redis.zRange(historyDateIndexKey(subredditId), cursor, cursor + count - 1, {
+      by: 'rank',
+      reverse: true,
+    })
+  );
 
   if (members.length === 0) {
     await context.redis.del(validationNonApprovedCursorKey(subredditId));
@@ -682,7 +715,7 @@ export async function reconcileNonApprovedUsersForRetention(
   }
 
   const nextCursor = cursor + members.length;
-  const totalRecords = await context.redis.zCard(historyDateIndexKey(subredditId));
+  const totalRecords = await retryTransientMaintenanceOperation(() => context.redis.zCard(historyDateIndexKey(subredditId)));
   if (nextCursor >= totalRecords) {
     await context.redis.del(validationNonApprovedCursorKey(subredditId));
   } else {
@@ -736,12 +769,16 @@ export async function purgeAuditLogOlderThanDays(
 
   const staleCandidates =
     retentionDays <= 0
-      ? await context.redis.zRange(auditDateIndexKey(normalizedSubredditId), 0, -1, { by: 'rank' })
-      : await context.redis.zRange(
-          auditDateIndexKey(normalizedSubredditId),
-          0,
-          Date.now() - retentionDays * 24 * 60 * 60 * 1000,
-          { by: 'score' }
+      ? await retryTransientMaintenanceOperation(() =>
+          context.redis.zRange(auditDateIndexKey(normalizedSubredditId), 0, -1, { by: 'rank' })
+        )
+      : await retryTransientMaintenanceOperation(() =>
+          context.redis.zRange(
+            auditDateIndexKey(normalizedSubredditId),
+            0,
+            Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+            { by: 'score' }
+          )
         );
   if (staleCandidates.length === 0) {
     return 0;
