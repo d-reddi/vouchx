@@ -28,7 +28,7 @@ const PRIVACY_POLICY_URL = 'https://www.reddit.com/r/vouchx/wiki/privacy-policy/
 const PHOTO_INSTRUCTIONS_LAUNCH_STATE_KEY = 'vouchx-photo-instructions-launch-v1';
 const PHOTO_INSTRUCTIONS_LAUNCH_STATE_TTL_MS = 5 * 60 * 1000;
 const PHOTO_INSTRUCTIONS_READ_STATE_PREFIX = 'vouchx-photo-instructions-read-v1:';
-const PHOTO_INSTRUCTIONS_READ_TTL_MS = 15 * 60 * 1000;
+const PHOTO_INSTRUCTIONS_READ_TTL_MS = 5 * 60 * 1000;
 const SUBMIT_ACKNOWLEDGEMENTS = [
   {
     key: 'is18Confirmed',
