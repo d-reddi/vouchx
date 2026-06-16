@@ -296,6 +296,7 @@ import brandVxUrl from './brand-vx.png';
   const wizardDemoQueue = document.getElementById('wizard-demo-queue');
   const wizardDemoBulkbar = document.getElementById('wizard-demo-bulkbar');
   const wizardDemoDenyPanel = document.getElementById('wizard-demo-deny-panel');
+  const wizardDemoPeerReviewPanel = document.getElementById('wizard-demo-peer-review-panel');
   const wizardDemoCheckboxes = Array.from(document.querySelectorAll('.wizard-demo-checkbox'));
   const wizardBackBtn = document.getElementById('wizard-back-btn');
   const wizardNextBtn = document.getElementById('wizard-next-btn');
@@ -5404,7 +5405,11 @@ import brandVxUrl from './brand-vx.png';
 
   function getWizardStorageKey() {
     const subredditId = (queryParams.get('subredditId') || 'unknown').trim().toLowerCase();
-    return `vx-wizard-v1:${subredditId}`;
+    // Scope per-moderator so a shared browser doesn't let one mod's completion suppress
+    // another's wizard. Redis (needsOnboarding) remains the cross-device source of truth;
+    // this key is only a per-device convenience (mid-tour step + re-flash suppression).
+    const viewer = String((state && state.viewerUsername) || 'anon').trim().toLowerCase().replace(/^u\//, '');
+    return `vx-wizard-v1:${subredditId}:${viewer || 'anon'}`;
   }
 
   function readWizardStorage() {
@@ -5503,7 +5508,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'queue',
       type: 'banner',
       title: 'Queue',
-      body: 'This is where new verification submissions appear. When a member submits their photos, they show up here as cards. You can approve or deny each one, view their Reddit stats, and send modmail.',
+      body: 'This is where new verification submissions appear. When a member submits their photos, they show up here as cards. You can approve or deny each one, view their Reddit stats, or flag it for peer review.',
       tab: 'pending',
       isTourStep: true,
       navigateLabel: 'Queue',
@@ -5538,6 +5543,17 @@ import brandVxUrl from './brand-vx.png';
       isDemoStep: true,
       demoDenyOpen: true,
       spotlightElementId: 'wizard-demo-deny-panel',
+    },
+    // Demo: peer review — request a 2nd opinion + shared notes
+    {
+      id: 'demo-peer-review',
+      type: 'banner',
+      title: 'Ask for peer review',
+      body: 'Not sure about a request? Tap Peer Review to flag it for the team. It jumps to the top of the queue and any moderator can add notes here to compare findings. The flag and its notes clear automatically once the request is approved, denied, or peer review is cancelled.',
+      tab: 'pending',
+      isDemoStep: true,
+      demoPeerReviewOpen: true,
+      spotlightElementId: 'wizard-demo-peer-review-panel',
     },
     // Demo: bulk review — checkmarks select, bar acts on all
     {
@@ -5575,7 +5591,7 @@ import brandVxUrl from './brand-vx.png';
       id: 'stats',
       type: 'banner',
       title: 'Stats',
-      body: 'A high-level view of your verification volume. See weekly and monthly breakdowns of approvals, denials, and pending submissions.',
+      body: 'A high-level view of your team. See weekly and monthly approvals and denials, decision-time stats, a denial-reason breakdown, and per-moderator activity.',
       tab: 'stats',
       isTourStep: true,
       navigateLabel: 'Stats',
@@ -5922,6 +5938,8 @@ import brandVxUrl from './brand-vx.png';
     wizardDemoQueue.classList.remove('hidden');
     const denyOpen = Boolean(stepDef && stepDef.demoDenyOpen);
     if (wizardDemoDenyPanel) wizardDemoDenyPanel.classList.toggle('hidden', !denyOpen);
+    const peerReviewOpen = Boolean(stepDef && stepDef.demoPeerReviewOpen);
+    if (wizardDemoPeerReviewPanel) wizardDemoPeerReviewPanel.classList.toggle('hidden', !peerReviewOpen);
     const showBulk = Boolean(stepDef && stepDef.isDemoBulk);
     if (wizardDemoBulkbar) wizardDemoBulkbar.classList.toggle('hidden', !showBulk);
     for (const checkbox of wizardDemoCheckboxes) {
@@ -5932,6 +5950,7 @@ import brandVxUrl from './brand-vx.png';
   function hideWizardDemo() {
     if (wizardDemoQueue) wizardDemoQueue.classList.add('hidden');
     if (wizardDemoDenyPanel) wizardDemoDenyPanel.classList.add('hidden');
+    if (wizardDemoPeerReviewPanel) wizardDemoPeerReviewPanel.classList.add('hidden');
     if (wizardDemoBulkbar) wizardDemoBulkbar.classList.add('hidden');
     for (const checkbox of wizardDemoCheckboxes) {
       checkbox.checked = false;

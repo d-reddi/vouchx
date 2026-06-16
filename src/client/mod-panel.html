@@ -182,6 +182,7 @@
                   <div class="row wizard-demo-actions">
                     <button id="wizard-demo-approve" class="btn btn-success" type="button" tabindex="-1">Approve</button>
                     <button id="wizard-demo-deny" class="btn btn-danger" type="button" tabindex="-1">Deny</button>
+                    <button id="wizard-demo-peer-review" class="btn btn-secondary pending-flag-btn" type="button" tabindex="-1">Peer Review</button>
                   </div>
                   <div id="wizard-demo-deny-panel" class="pending-deny wizard-demo-deny hidden">
                     <select id="wizard-demo-deny-reason" class="field-select" tabindex="-1" aria-label="Example denial reason">
@@ -195,6 +196,19 @@
                     <div class="row pending-deny-actions">
                       <button class="btn btn-secondary" type="button" tabindex="-1">Cancel</button>
                       <button id="wizard-demo-deny-confirm" class="btn btn-danger" type="button" tabindex="-1">Confirm denial</button>
+                    </div>
+                  </div>
+                  <div id="wizard-demo-peer-review-panel" class="pending-flag-notes wizard-demo-peer-review hidden">
+                    <p class="pending-flag-notes-title">Peer review notes (1)</p>
+                    <div class="pending-flag-note-list">
+                      <div class="pending-flag-note">
+                        <p class="pending-flag-note-meta muted small">u/example_mod • just now</p>
+                        <p class="pending-flag-note-text">Lighting makes the sign hard to read — second opinion?</p>
+                      </div>
+                    </div>
+                    <textarea class="field-textarea pending-flag-note-input" rows="2" tabindex="-1" aria-label="Example peer review note" placeholder="Internal note for other moderators. Removed when the request is reviewed or peer review is cleared."></textarea>
+                    <div class="row pending-flag-note-actions">
+                      <button class="btn btn-secondary" type="button" tabindex="-1">Add note</button>
                     </div>
                   </div>
                 </article>

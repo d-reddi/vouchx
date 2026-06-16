@@ -30,6 +30,8 @@ Workflow demos:
 
 ## Quick Setup
 
+Follow the onboarding wizard that runs through the steps below:
+
 1. Install VouchX in your subreddit  
 2. Run **Create Verification Hub (VouchX)** from the mod menu  
 3. Open the hub post → click **Mod Panel**  
@@ -109,7 +111,7 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.4
+### v1.5.5
 
 #### New Features
 - Added a Denial tag to queue cards. Tap it to view the most recent denial details.
@@ -122,6 +124,8 @@ Full changelog:
 #### Improvements
 - When a submission contains multiple photos, you can now swipe left or right while viewing an enlarged image to move between photos.
 - Removed Terms Accepted and Age Confirmed timestamps from queue cards to reduce clutter. This information is still retained internally for auditing and tracking purposes.
+- Improved Android photo instructions behavior.
+- Fixed wizard completion behavior.
 
 
 ---
