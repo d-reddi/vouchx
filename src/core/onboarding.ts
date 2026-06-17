@@ -1,5 +1,13 @@
 import type { Devvit } from '@devvit/public-api';
-import { moderatorOnboardingCompletedKey } from './keys.ts';
+import type { FeatureEducationPackState } from './types.ts';
+import {
+  FEATURE_EDUCATION_COMPLETION_TTL_DAYS,
+  MILLIS_PER_DAY,
+} from './constants.ts';
+import {
+  moderatorFeatureEducationCompletedKey,
+  moderatorOnboardingCompletedKey,
+} from './keys.ts';
 import { errorText, sanitizeSubredditId } from './normalize.ts';
 
 /**
@@ -10,6 +18,92 @@ import { errorText, sanitizeSubredditId } from './normalize.ts';
  * ever sees it once, regardless of device (localStorage is per-device and can't
  * answer "who has / hasn't gone through it").
  */
+
+const CURRENT_FEATURE_EDUCATION_PACKS: FeatureEducationPackState[] = [
+  {
+    id: 'peer-review-denial-badges',
+    introducedIn: '1.5.4',
+    retainUntilAtLeast: '1.8.0',
+    title: 'Peer Review and denial badges',
+    summary: 'See how Peer Review keeps second-opinion requests visible and how denial badges surface repeat attempts.',
+    stepIds: ['demo-peer-review', 'demo-denial-badges'],
+  },
+];
+
+function normalizeFeaturePackId(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function cloneFeaturePack(pack: FeatureEducationPackState): FeatureEducationPackState {
+  return {
+    ...pack,
+    stepIds: [...pack.stepIds],
+  };
+}
+
+function featureEducationCompletionExpiration(): Date {
+  return new Date(Date.now() + FEATURE_EDUCATION_COMPLETION_TTL_DAYS * MILLIS_PER_DAY);
+}
+
+export function getCurrentFeatureEducationPacks(): FeatureEducationPackState[] {
+  return CURRENT_FEATURE_EDUCATION_PACKS.map(cloneFeaturePack);
+}
+
+function getKnownFeatureEducationPacks(packIds: readonly string[]): FeatureEducationPackState[] {
+  const requestedIds = new Set(packIds.map(normalizeFeaturePackId).filter(Boolean));
+  if (requestedIds.size === 0) {
+    return [];
+  }
+  return CURRENT_FEATURE_EDUCATION_PACKS.filter((pack) => requestedIds.has(pack.id));
+}
+
+export async function getPendingModeratorFeatureEducationPacks(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  moderator: string
+): Promise<FeatureEducationPackState[]> {
+  try {
+    const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+    const normalizedModerator = moderator.trim();
+    if (!subredditId || !normalizedModerator) {
+      return [];
+    }
+    const completionValues = await Promise.all(
+      CURRENT_FEATURE_EDUCATION_PACKS.map((pack) =>
+        context.redis.get(moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id))
+      )
+    );
+    return CURRENT_FEATURE_EDUCATION_PACKS.filter((_, index) => !completionValues[index]).map(cloneFeaturePack);
+  } catch (error) {
+    console.log(`Feature education lookup failed: ${errorText(error)}`);
+    // Match onboarding's fail-open posture: Redis trouble should not trap mods
+    // in repeating education flows.
+    return [];
+  }
+}
+
+export async function markModeratorFeatureEducationCompleted(
+  context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
+  moderator: string,
+  packIds: readonly string[]
+): Promise<void> {
+  const subredditId = sanitizeSubredditId(typeof context.subredditId === 'string' ? context.subredditId : '');
+  const normalizedModerator = moderator.trim();
+  const packs = getKnownFeatureEducationPacks(packIds);
+  if (!subredditId || !normalizedModerator || packs.length === 0) {
+    throw new Error('Missing feature education completion details.');
+  }
+  const completedAt = new Date().toISOString();
+  const expiration = featureEducationCompletionExpiration();
+  await Promise.all(
+    packs.map((pack) =>
+      context.redis.set(
+        moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
+        completedAt,
+        { expiration }
+      )
+    )
+  );
+}
 
 export async function hasCompletedModeratorOnboarding(
   context: Pick<Devvit.Context, 'redis'> & { subredditId?: string | null },
@@ -40,8 +134,16 @@ export async function markModeratorOnboardingCompleted(
   if (!subredditId || !normalizedModerator) {
     throw new Error('Missing onboarding moderator identity.');
   }
-  await context.redis.set(
-    moderatorOnboardingCompletedKey(subredditId, normalizedModerator),
-    new Date().toISOString()
-  );
+  const completedAt = new Date().toISOString();
+  const featureExpiration = featureEducationCompletionExpiration();
+  await Promise.all([
+    context.redis.set(moderatorOnboardingCompletedKey(subredditId, normalizedModerator), completedAt),
+    ...CURRENT_FEATURE_EDUCATION_PACKS.map((pack) =>
+      context.redis.set(
+        moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
+        completedAt,
+        { expiration: featureExpiration }
+      )
+    ),
+  ]);
 }

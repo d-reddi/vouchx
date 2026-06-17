@@ -24,6 +24,7 @@ import {
   parsePendingReviewFlag,
   denyVerification,
   dismissModeratorUpdateNotice,
+  getPendingModeratorFeatureEducationPacks,
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getHubModeratorUiState,
@@ -33,6 +34,8 @@ import {
   getViewerFlairSnapshot,
   isViewerAwaitingFlairPropagation,
   loadApprovalFlairOptionsForSettings,
+  markModeratorFeatureEducationCompleted,
+  markModeratorOnboardingCompleted,
   loadHubDashboard,
   loadModDashboard,
   looksLikeInternalModmailArchiveError,
@@ -208,6 +211,7 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
     },
     requiresInitialSetup: false,
     needsOnboarding: false,
+    newFeaturePacks: [],
     config: buildRuntimeConfig(),
     viewerSnapshot: {
       accountAgeDays: 365,
@@ -5677,6 +5681,72 @@ test('dismissModeratorUpdateNotice stores a per-moderator per-version dismissal 
   assert.equal(updateContext.setCalls.length, 1);
   assert.match(updateContext.setCalls[0][0], /subreddit:t5_example:moderator:update-dismissed:mod_one:0\.0\.3$/);
   assert.ok(expirationOptions?.expiration instanceof Date);
+});
+
+test('getPendingModeratorFeatureEducationPacks surfaces new packs for already-onboarded moderators', async () => {
+  const featureContext = createUpdateNoticeContext({
+    initialDismissals: {
+      'subreddit:t5_example:moderator:onboarded:mod_one': '2026-03-15T00:00:00.000Z',
+    },
+  });
+
+  const packs = await getPendingModeratorFeatureEducationPacks(featureContext.context as never, 'Mod_One');
+
+  assert.deepEqual(
+    packs.map((pack) => ({ id: pack.id, stepIds: pack.stepIds })),
+    [
+      {
+        id: 'peer-review-denial-badges',
+        stepIds: ['demo-peer-review', 'demo-denial-badges'],
+      },
+    ]
+  );
+});
+
+test('markModeratorFeatureEducationCompleted suppresses only the completed feature pack', async () => {
+  const featureContext = createUpdateNoticeContext();
+
+  await withFixedNow('2026-03-15T00:00:00.000Z', async () => {
+    await markModeratorFeatureEducationCompleted(featureContext.context as never, 'Mod_One', [
+      'peer-review-denial-badges',
+    ]);
+  });
+  const packs = await getPendingModeratorFeatureEducationPacks(featureContext.context as never, 'Mod_One');
+  const expirationOptions = featureContext.setCalls[0][2] as { expiration?: Date } | undefined;
+
+  assert.deepEqual(packs, []);
+  assert.equal(featureContext.setCalls.length, 1);
+  assert.match(
+    featureContext.setCalls[0][0],
+    /subreddit:t5_example:moderator:feature-education:mod_one:peer-review-denial-badges$/
+  );
+  assert.equal(expirationOptions?.expiration?.toISOString(), '2027-09-06T00:00:00.000Z');
+});
+
+test('markModeratorOnboardingCompleted also completes current feature education packs', async () => {
+  const featureContext = createUpdateNoticeContext();
+
+  await withFixedNow('2026-03-15T00:00:00.000Z', async () => {
+    await markModeratorOnboardingCompleted(featureContext.context as never, 'Mod_One');
+  });
+  const packs = await getPendingModeratorFeatureEducationPacks(featureContext.context as never, 'Mod_One');
+  const featureCompletionCall = featureContext.setCalls.find((call) =>
+    /subreddit:t5_example:moderator:feature-education:mod_one:peer-review-denial-badges$/.test(call[0])
+  );
+  const featureExpirationOptions = featureCompletionCall?.[2] as { expiration?: Date } | undefined;
+
+  assert.deepEqual(packs, []);
+  assert.ok(
+    featureContext.setCalls.some((call) =>
+      /subreddit:t5_example:moderator:onboarded:mod_one$/.test(call[0])
+    )
+  );
+  assert.ok(
+    featureContext.setCalls.some((call) =>
+      /subreddit:t5_example:moderator:feature-education:mod_one:peer-review-denial-badges$/.test(call[0])
+    )
+  );
+  assert.equal(featureExpirationOptions?.expiration?.toISOString(), '2027-09-06T00:00:00.000Z');
 });
 
 test('toPublicHubConfig omits moderator-only template content', () => {

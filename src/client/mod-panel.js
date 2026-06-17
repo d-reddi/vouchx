@@ -521,13 +521,12 @@ import brandVxUrl from './brand-vx.png';
   } catch (_e) {
     // localStorage unavailable
   }
-  // Manual toggle: false in production (wizard shows based on real state). The Devvit mod
-  // panel webview can't take URL params, so flip this to `true` here in code to force the
-  // wizard on for testing.
+  // Manual toggle: false in production
   const wizardDebugMode = false;
-  // Force a specific mode while debugging ('setup' | 'onboarding' | null). Keep null in production.
+  // Force a specific mode while debugging ('setup' | 'onboarding' | 'features' | null). Keep null in production.
   const wizardForceMode = null;
-  let wizardMode = null; // 'setup' | 'onboarding' | null — locked once the wizard starts
+  let wizardMode = null; // 'setup' | 'onboarding' | 'features' | null — locked once the wizard starts
+  let wizardFeaturePacks = [];
   let wizardActiveSteps = []; // master steps filtered for the current mode + permissions
   let wizardStep = -1;
   let wizardPhase = 'navigate'; // 'navigate' | 'learn' — tour steps start in navigate
@@ -5411,19 +5410,59 @@ import brandVxUrl from './brand-vx.png';
 
   // === Setup Wizard ===
 
-  function getWizardStorageKey() {
+  function getPendingFeaturePacks() {
+    const packs = state && Array.isArray(state.newFeaturePacks) ? state.newFeaturePacks : [];
+    const pendingPacks = packs
+      .map((pack) => ({
+        id: String(pack && pack.id ? pack.id : '').trim().toLowerCase(),
+        title: String(pack && pack.title ? pack.title : '').trim(),
+        summary: String(pack && pack.summary ? pack.summary : '').trim(),
+        stepIds: Array.isArray(pack && pack.stepIds)
+          ? pack.stepIds.map((stepId) => String(stepId || '').trim()).filter(Boolean)
+        : [],
+      }))
+      .filter((pack) => pack.id && pack.stepIds.length > 0);
+    if (pendingPacks.length > 0 || !wizardDebugMode || wizardForceMode !== 'features') {
+      return pendingPacks;
+    }
+    return getDebugFeaturePacks();
+  }
+
+  function getDebugFeaturePacks() {
+    const stepIds = WIZARD_STEPS.filter((step) => step.debugFeatureStep).map((step) => step.id);
+    return stepIds.length > 0
+      ? [
+          {
+            id: 'debug-current-features',
+            title: 'Current feature tour',
+            summary: 'Debug preview of the current new-feature wizard steps.',
+            stepIds,
+          },
+        ]
+      : [];
+  }
+
+  function getWizardRunStorageId(mode, featurePacks = []) {
+    if (mode === 'features') {
+      const ids = featurePacks.map((pack) => pack.id).filter(Boolean).sort();
+      return `features:${ids.join('+') || 'none'}`;
+    }
+    return mode || 'unknown';
+  }
+
+  function getWizardStorageKey(mode, featurePacks = []) {
     const subredditId = (queryParams.get('subredditId') || 'unknown').trim().toLowerCase();
     // Scope per-moderator so a shared browser doesn't let one mod's completion suppress
     // another's wizard. Redis (needsOnboarding) remains the cross-device source of truth;
     // this key is only a per-device convenience (mid-tour step + re-flash suppression).
     const viewer = String((state && state.viewerUsername) || 'anon').trim().toLowerCase().replace(/^u\//, '');
-    return `vx-wizard-v1:${subredditId}:${viewer || 'anon'}`;
+    return `vx-wizard-v2:${subredditId}:${viewer || 'anon'}:${getWizardRunStorageId(mode, featurePacks)}`;
   }
 
-  function readWizardStorage() {
+  function readWizardStorage(mode, featurePacks = []) {
     if (wizardDebugMode) return null; // Always start fresh in debug mode
     try {
-      const raw = window.localStorage.getItem(getWizardStorageKey());
+      const raw = window.localStorage.getItem(getWizardStorageKey(mode, featurePacks));
       return raw ? JSON.parse(raw) : null;
     } catch (_e) {
       return null;
@@ -5433,27 +5472,34 @@ import brandVxUrl from './brand-vx.png';
   function writeWizardStorage(step, done) {
     if (wizardDebugMode) return; // Don't persist in debug mode
     try {
-      window.localStorage.setItem(getWizardStorageKey(), JSON.stringify({ step: Number(step), done: Boolean(done) }));
+      window.localStorage.setItem(
+        getWizardStorageKey(wizardMode, wizardFeaturePacks),
+        JSON.stringify({ step: Number(step), done: Boolean(done) })
+      );
     } catch (_e) {}
   }
 
   // 'setup' = first-time configuration (requires settings access); 'onboarding' = one-time
-  // panel tour for reviewers after setup is complete. Debug mode forces whichever fits.
+  // panel tour for reviewers after setup is complete; 'features' = short tours for
+  // versioned feature packs added after a moderator's original onboarding.
   function resolveWizardMode() {
     if (!state) return null;
     if (wizardDebugMode && wizardForceMode) return wizardForceMode; // TEMP testing override
     if (state.requiresInitialSetup && state.canAccessSettingsTab) return 'setup';
     if (wizardDebugMode) return 'onboarding';
     if (state.needsOnboarding) return 'onboarding';
+    if (getPendingFeaturePacks().length > 0) return 'features';
     return null;
   }
 
   function shouldShowWizard() {
     if (!state) return false;
     if (wizardForcedRun) return true; // Manual replay bypasses the one-time onboarding gate.
-    if (resolveWizardMode() === null) return false;
+    const mode = resolveWizardMode();
+    if (mode === null) return false;
     if (wizardDebugMode) return true; // Always show a wizard when debugging
-    const stored = readWizardStorage();
+    const featurePacks = mode === 'features' ? getPendingFeaturePacks() : [];
+    const stored = readWizardStorage(mode, featurePacks);
     if (stored && stored.done) return false;
     return true;
   }
@@ -5464,11 +5510,52 @@ import brandVxUrl from './brand-vx.png';
   // tab requires config access" install setting is off, otherwise config-permission only.
   function buildWizardActiveSteps(mode) {
     const canSettings = Boolean(state && state.canAccessSettingsTab);
+    if (mode === 'features') {
+      return buildFeatureWizardActiveSteps(getPendingFeaturePacks(), canSettings);
+    }
     return WIZARD_STEPS.filter((step) => {
       if (mode === 'onboarding' && step.setupOnly) return false;
       if (step.requiresConfigAccess && !canSettings) return false;
       return true;
     });
+  }
+
+  function buildFeatureWizardActiveSteps(featurePacks, canSettings) {
+    const packs = Array.isArray(featurePacks) ? featurePacks : [];
+    const stepIds = new Set(packs.flatMap((pack) => pack.stepIds || []));
+    const featureSteps = WIZARD_STEPS.filter((step) => {
+      if (!stepIds.has(step.id)) return false;
+      if (step.requiresConfigAccess && !canSettings) return false;
+      return true;
+    });
+    if (featureSteps.length === 0) {
+      return [];
+    }
+    const title = packs.length === 1 && packs[0].title ? packs[0].title : 'New VouchX features';
+    const summary =
+      packs.length === 1 && packs[0].summary
+        ? packs[0].summary
+        : 'A few moderator tools changed since your last walkthrough. Here is the quick version.';
+    return [
+      {
+        id: 'feature-welcome',
+        type: 'modal',
+        kicker: 'New in VouchX',
+        title,
+        body: summary,
+        featurePacks: packs,
+        primaryBtn: 'Show Me',
+      },
+      ...featureSteps,
+      {
+        id: 'feature-complete',
+        type: 'modal',
+        kicker: 'New features',
+        title: "You're up to date",
+        body: 'That covers the latest moderator-facing changes. You can replay the full walkthrough from the footer anytime.',
+        primaryBtn: 'Got it',
+      },
+    ];
   }
 
   function resolveWizardStepCopy(stepDef) {
@@ -5553,16 +5640,16 @@ import brandVxUrl from './brand-vx.png';
       demoDenyOpen: true,
       spotlightElementId: 'wizard-demo-deny-panel',
     },
-    // Demo: peer review — request a 2nd opinion + shared notes
+    // Demo: previous-denial badges keep repeat-attempt context behind a compact control
     {
-      id: 'demo-peer-review',
+      id: 'demo-denial-badges',
       type: 'banner',
-      title: 'Ask for peer review',
-      body: 'Not sure about a request? Tap Peer Review to flag it for the team. It jumps to the top of the queue and any moderator can add notes here to compare findings. The flag and its notes clear automatically once the request is approved, denied, or peer review is cancelled.',
+      title: 'Previous-denial badges',
+      body: 'When a member has been denied before, the Queue shows a Denied before or Denied xN badge. Tap it on a real request to open the latest denial details without crowding the card.',
       tab: 'pending',
       isDemoStep: true,
-      demoPeerReviewOpen: true,
-      spotlightElementId: 'wizard-demo-peer-review-panel',
+      debugFeatureStep: true,
+      spotlightElementId: 'wizard-demo-denied-before',
     },
     // Demo: bulk review — checkmarks select, bar docks at the bottom. Handled without the
     // dimming spotlight (see the isDemoBulk branch in renderWizard) so the pulsing card
@@ -5575,6 +5662,18 @@ import brandVxUrl from './brand-vx.png';
       tab: 'pending',
       isDemoStep: true,
       isDemoBulk: true,
+    },
+    // Demo: peer review — request a 2nd opinion + shared notes
+    {
+      id: 'demo-peer-review',
+      type: 'banner',
+      title: 'Ask for peer review',
+      body: 'Not sure about a request? Tap Peer Review to flag it for the team. It jumps to the top of the queue and any moderator can add notes here to compare findings. The flag and its notes clear automatically once the request is approved, denied, or peer review is cancelled.',
+      tab: 'pending',
+      isDemoStep: true,
+      demoPeerReviewOpen: true,
+      debugFeatureStep: true,
+      spotlightElementId: 'wizard-demo-peer-review-panel',
     },
     // History
     {
@@ -5994,7 +6093,7 @@ import brandVxUrl from './brand-vx.png';
     const stepNumber = wizardBannerNumberFor(wizardStep);
     const stepTotal = wizardBannerTotalCount();
     const copy = resolveWizardStepCopy(stepDef);
-    const progressLabel = wizardMode === 'onboarding' ? 'Tour' : 'Setup';
+    const progressLabel = wizardMode === 'features' ? 'New features' : wizardMode === 'onboarding' ? 'Tour' : 'Setup';
 
     if (wizardMinimized) {
       wizardBannerInner.classList.add('hidden');
@@ -6060,7 +6159,24 @@ import brandVxUrl from './brand-vx.png';
     if (wizardModalHint) wizardModalHint.classList.toggle('hidden', !stepDef.hasHintReminder);
     if (wizardModalExtras) {
       wizardModalExtras.innerHTML = '';
-      if (stepDef.hasGuideLink) {
+      const featurePacks = Array.isArray(stepDef.featurePacks) ? stepDef.featurePacks : [];
+      if (featurePacks.length > 1) {
+        wizardModalExtras.classList.remove('hidden');
+        const list = document.createElement('ul');
+        list.className = 'wizard-feature-list';
+        for (const pack of featurePacks) {
+          const title = String(pack && pack.title ? pack.title : '').trim();
+          if (!title) continue;
+          const item = document.createElement('li');
+          item.textContent = title;
+          list.appendChild(item);
+        }
+        if (list.childElementCount > 0) {
+          wizardModalExtras.appendChild(list);
+        } else {
+          wizardModalExtras.classList.add('hidden');
+        }
+      } else if (stepDef.hasGuideLink) {
         wizardModalExtras.classList.remove('hidden');
         const guideUrl = normalizeExternalUrl(MODERATOR_GUIDE_URL);
         if (guideUrl) {
@@ -6117,18 +6233,29 @@ import brandVxUrl from './brand-vx.png';
     hideWizardDemo();
   }
 
-  function markOnboardingCompletedOnServer() {
+  function markWizardCompletedOnServer(completedMode, completedFeaturePacks) {
     if (wizardDebugMode) return; // don't pollute real state while debugging
+    if (completedMode === 'features') {
+      const packIds = (completedFeaturePacks || []).map((pack) => pack.id).filter(Boolean);
+      if (packIds.length > 0) {
+        void requestJson('/api/mod/feature-education/complete', { packIds }).catch(() => {});
+      }
+      return;
+    }
     // Fire-and-forget: records that this moderator has been through the walkthrough so it
-    // never shows again (setup completion counts as onboarding too).
+    // never shows again (setup completion counts as onboarding too). The server also marks
+    // current feature education packs complete so brand-new mods do not get a second tour.
     void requestJson('/api/mod/onboarding/complete', {}).catch(() => {});
   }
 
   function completeWizard() {
+    const completedMode = wizardMode;
+    const completedFeaturePacks = wizardFeaturePacks.slice();
     writeWizardStorage(wizardStep, true);
-    markOnboardingCompletedOnServer();
+    markWizardCompletedOnServer(completedMode, completedFeaturePacks);
     wizardStep = -1;
     wizardMode = null;
+    wizardFeaturePacks = [];
     wizardActiveSteps = [];
     wizardLastRenderedStep = -1;
     wizardForcedRun = false; // End any manual replay so the gate applies again.
@@ -6155,8 +6282,13 @@ import brandVxUrl from './brand-vx.png';
       }
       // Lock the mode + active step list for this run.
       wizardMode = resolveWizardMode();
+      wizardFeaturePacks = wizardMode === 'features' ? getPendingFeaturePacks() : [];
       wizardActiveSteps = buildWizardActiveSteps(wizardMode);
-      const stored = readWizardStorage();
+      if (wizardActiveSteps.length === 0) {
+        hideAllWizardUi();
+        return;
+      }
+      const stored = readWizardStorage(wizardMode, wizardFeaturePacks);
       const storedStep = stored && typeof stored.step === 'number' ? stored.step : 0;
       wizardStep = Math.min(Math.max(0, storedStep), wizardActiveSteps.length - 1);
       writeWizardStorage(wizardStep, false);

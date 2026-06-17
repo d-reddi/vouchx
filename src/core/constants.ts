@@ -33,6 +33,11 @@ export const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
 
 export const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
 
+// Keep feature-education completion records longer than we keep old feature
+// packs active in code, so a retired pack naturally ages out of Redis after
+// slow-updating communities have had time to catch up.
+export const FEATURE_EDUCATION_COMPLETION_TTL_DAYS = 540;
+
 export const APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER = 4;
 
 export const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
