@@ -127,7 +127,6 @@ Full changelog:
 - Improved Android photo instructions behavior.
 - Fixed wizard completion behavior and added support for new features in wizard.
 
-
 ---
 
 ### v1.5.3
