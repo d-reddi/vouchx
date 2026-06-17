@@ -282,6 +282,7 @@ import brandVxUrl from './brand-vx.png';
   const textareaLinkCancelBtn = document.getElementById('textarea-link-cancel-btn');
   const textareaLinkInsertBtn = document.getElementById('textarea-link-insert-btn');
   const bugReportLink = document.getElementById('bug-report-link');
+  const replayWizardLink = document.getElementById('replay-wizard-link');
   const wizardOverlay = document.getElementById('wizard-overlay');
   const wizardSpotlightRing = document.getElementById('wizard-spotlight-ring');
   const wizardBanner = document.getElementById('wizard-banner');
@@ -531,6 +532,9 @@ import brandVxUrl from './brand-vx.png';
   let wizardStep = -1;
   let wizardPhase = 'navigate'; // 'navigate' | 'learn' — tour steps start in navigate
   let wizardMinimized = false;
+  // Set while the footer "Replay walkthrough" run is in progress so the wizard's own
+  // shouldShowWizard()/needsOnboarding gates don't tear it down for an already-onboarded mod.
+  let wizardForcedRun = false;
   let wizardLastRenderedStep = -1;
   let wizardSpotlightTargetEl = null;
   let wizardHighlightedEls = [];
@@ -1789,7 +1793,11 @@ import brandVxUrl from './brand-vx.png';
     const appPageUrl = buildInstallSettingsUrl();
     const canUpdateNow = Boolean(state && state.canOpenInstallSettings === true && appPageUrl);
     const sessionDismissed = Boolean(notice && isCriticalUpdateNoticeDismissedForSession(notice));
-    const isVisible = Boolean(notice && !sessionDismissed);
+    // While the wizard is actively on screen (a step showing, or about to start), suppress
+    // update notices entirely — even critical ones — so the walkthrough isn't interrupted.
+    // Minimized is a carve-out: the mod has set the guide aside, so notices surface normally.
+    const wizardActive = !wizardMinimized && (wizardStep >= 0 || shouldShowWizard());
+    const isVisible = Boolean(notice && !sessionDismissed && !wizardActive);
     const isCriticalCopy = Boolean(notice && notice.critical && canUpdateNow);
     const title = notice && notice.title ? notice.title : '';
     const copy = notice
@@ -5442,6 +5450,7 @@ import brandVxUrl from './brand-vx.png';
 
   function shouldShowWizard() {
     if (!state) return false;
+    if (wizardForcedRun) return true; // Manual replay bypasses the one-time onboarding gate.
     if (resolveWizardMode() === null) return false;
     if (wizardDebugMode) return true; // Always show a wizard when debugging
     const stored = readWizardStorage();
@@ -5555,7 +5564,9 @@ import brandVxUrl from './brand-vx.png';
       demoPeerReviewOpen: true,
       spotlightElementId: 'wizard-demo-peer-review-panel',
     },
-    // Demo: bulk review — checkmarks select, bar acts on all
+    // Demo: bulk review — checkmarks select, bar docks at the bottom. Handled without the
+    // dimming spotlight (see the isDemoBulk branch in renderWizard) so the pulsing card
+    // checkboxes and the bottom bar are both visible at once.
     {
       id: 'demo-bulk',
       type: 'banner',
@@ -5564,7 +5575,6 @@ import brandVxUrl from './brand-vx.png';
       tab: 'pending',
       isDemoStep: true,
       isDemoBulk: true,
-      spotlightElementId: 'wizard-demo-bulkbar',
     },
     // History
     {
@@ -5972,6 +5982,8 @@ import brandVxUrl from './brand-vx.png';
     const shown = !wizardBanner.classList.contains('hidden');
     // Reserve space at the bottom so content can scroll clear of the fixed bottom bar.
     document.body.style.paddingBottom = shown ? `${wizardBanner.offsetHeight + 24}px` : '';
+    // Publish the banner height so the demo bulk bar can dock just above it.
+    document.documentElement.style.setProperty('--wizard-banner-height', shown ? `${wizardBanner.offsetHeight}px` : '0px');
   }
 
   function renderWizardBanner(stepDef) {
@@ -6119,10 +6131,16 @@ import brandVxUrl from './brand-vx.png';
     wizardMode = null;
     wizardActiveSteps = [];
     wizardLastRenderedStep = -1;
+    wizardForcedRun = false; // End any manual replay so the gate applies again.
     hideAllWizardUi();
     // The final steps leave the mod on the Settings/Templates tab — drop them back on the
     // Queue so they land where day-to-day review happens.
     setTab('pending');
+    // Wizard suppressed update notices while it ran; re-render now so any pending
+    // (including critical) notice surfaces immediately instead of waiting for a refresh.
+    renderUpdateNotice();
+    // Offer the replay entry point again now that the run is over.
+    renderFooterMeta();
   }
 
   function renderWizard() {
@@ -6155,6 +6173,10 @@ import brandVxUrl from './brand-vx.png';
     const stepChanged = wizardStep !== wizardLastRenderedStep;
     wizardLastRenderedStep = wizardStep;
 
+    // The bulk demo raises the inert example above a hole-less blocking overlay; keep the
+    // body flag in sync every render so it clears on modal/minimized/other steps.
+    document.body.classList.toggle('wizard-demo-bulk-active', !wizardMinimized && Boolean(stepDef.isDemoBulk));
+
     if (stepDef.type === 'modal') {
       hideWizardBanner();
       hideWizardSpotlight();
@@ -6183,6 +6205,32 @@ import brandVxUrl from './brand-vx.png';
       renderWizardDemo(stepDef);
     } else {
       hideWizardDemo();
+    }
+
+    // Bulk demo: cover the screen with the dim overlay but punch NO hole, so every click
+    // lands on the overlay (blocked) except the banner's Next button, which sits above it.
+    // The example queue + bottom bar are raised above the dim and made inert (see
+    // .wizard-demo-bulk-active in CSS): they stay bright and the checkboxes pulse, but they
+    // can't be actioned — and with scroll frozen the mod can't reach the real queue cards
+    // below and approve/deny one by mistake.
+    if (stepDef.isDemoBulk) {
+      hideWizardInlineDetail();
+      // Clear any prior step's spotlight target/ring/hole + scroll lock first.
+      hideWizardSpotlight();
+      applyWizardFieldHighlights(['wizard-demo-select', 'wizard-demo-select-2']);
+      if (wizardOverlay) {
+        clearWizardOverlayHole();
+        wizardOverlay.classList.remove('hidden');
+      }
+      // Bring the example into view, then freeze scrolling once it settles.
+      if (wizardDemoQueue) {
+        wizardDemoQueue.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+      window.setTimeout(() => {
+        const current = wizardActiveSteps[wizardStep];
+        if (current && current.isDemoBulk) lockWizardScroll();
+      }, 120);
+      return;
     }
 
     // Config step: highlight both fields in place (no dimming) with details shown inline
@@ -6796,12 +6844,39 @@ import brandVxUrl from './brand-vx.png';
   }
 
   function renderFooterMeta() {
-    if (!bugReportLink) {
+    if (bugReportLink) {
+      const bugReportUrl = normalizeExternalUrl(BUG_REPORT_URL);
+      bugReportLink.classList.toggle('hidden', !bugReportUrl);
+      bugReportLink.setAttribute('href', bugReportUrl || '#');
+    }
+    if (replayWizardLink) {
+      // Available once the panel has loaded; hidden while a wizard run is active (a step
+      // showing or minimized mid-tour — both are resumable, so no need to offer a replay).
+      const wizardRunActive = wizardStep >= 0;
+      replayWizardLink.classList.toggle('hidden', !state || wizardRunActive);
+    }
+  }
+
+  // Re-run the onboarding walkthrough on demand, bypassing the one-time needsOnboarding gate.
+  // Setup stays config-driven, so the manual replay always runs the informational tour.
+  function startWizardReplay() {
+    if (!state) {
       return;
     }
-    const bugReportUrl = normalizeExternalUrl(BUG_REPORT_URL);
-    bugReportLink.classList.toggle('hidden', !bugReportUrl);
-    bugReportLink.setAttribute('href', bugReportUrl || '#');
+    wizardMode = 'onboarding';
+    wizardActiveSteps = buildWizardActiveSteps('onboarding');
+    if (wizardActiveSteps.length === 0) {
+      return;
+    }
+    wizardForcedRun = true;
+    wizardStep = 0;
+    wizardPhase = 'navigate';
+    wizardMinimized = false;
+    wizardLastRenderedStep = -1;
+    writeWizardStorage(0, false);
+    renderWizard();
+    renderUpdateNotice();
+    renderFooterMeta();
   }
 
   function createPhotoWrap(url, alt, gallery, galleryIndex) {
@@ -7796,6 +7871,10 @@ import brandVxUrl from './brand-vx.png';
 
   bindExternalNavigationLink(bugReportLink, () => BUG_REPORT_URL, 'Bug report URL is not configured.');
 
+  if (replayWizardLink) {
+    replayWizardLink.addEventListener('click', startWizardReplay);
+  }
+
   document.querySelectorAll('.textarea-helper-toolbar').forEach((toolbar) => {
     bindTextareaHelperToolbar(toolbar);
   });
@@ -8551,6 +8630,8 @@ import brandVxUrl from './brand-vx.png';
       hideWizardSpotlight();
       const stepDef = wizardActiveSteps[wizardStep];
       if (stepDef) renderWizardBanner(stepDef);
+      // Minimizing is the carve-out where suppressed update notices may surface.
+      renderUpdateNotice();
     });
   }
 
@@ -8559,6 +8640,8 @@ import brandVxUrl from './brand-vx.png';
       wizardMinimized = false;
       // Full re-render restores the spotlight + scroll lock for the current step.
       renderWizard();
+      // Back on screen — re-suppress any update notice.
+      renderUpdateNotice();
     });
   }
 
