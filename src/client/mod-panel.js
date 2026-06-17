@@ -5410,7 +5410,23 @@ import brandVxUrl from './brand-vx.png';
 
   // === Setup Wizard ===
 
+  // A pack only counts as pending if at least one of its steps can actually render for this
+  // viewer. Without this guard a pack whose steps are all gated out (e.g. requiresConfigAccess
+  // for a review-only mod) would keep resolveWizardMode() on 'features' and shouldShowWizard()
+  // true forever: the wizard could never build steps to show, yet update notices would stay
+  // suppressed via the wizardActive gate in renderUpdateNotice(). The intended suppression
+  // while a real, renderable wizard is on screen is unaffected.
+  function packHasRenderableSteps(pack, canSettings) {
+    const stepIds = new Set(Array.isArray(pack && pack.stepIds) ? pack.stepIds : []);
+    return WIZARD_STEPS.some((step) => {
+      if (!stepIds.has(step.id)) return false;
+      if (step.requiresConfigAccess && !canSettings) return false;
+      return true;
+    });
+  }
+
   function getPendingFeaturePacks() {
+    const canSettings = Boolean(state && state.canAccessSettingsTab);
     const packs = state && Array.isArray(state.newFeaturePacks) ? state.newFeaturePacks : [];
     const pendingPacks = packs
       .map((pack) => ({
@@ -5419,13 +5435,13 @@ import brandVxUrl from './brand-vx.png';
         summary: String(pack && pack.summary ? pack.summary : '').trim(),
         stepIds: Array.isArray(pack && pack.stepIds)
           ? pack.stepIds.map((stepId) => String(stepId || '').trim()).filter(Boolean)
-        : [],
+          : [],
       }))
-      .filter((pack) => pack.id && pack.stepIds.length > 0);
+      .filter((pack) => pack.id && pack.stepIds.length > 0 && packHasRenderableSteps(pack, canSettings));
     if (pendingPacks.length > 0 || !wizardDebugMode || wizardForceMode !== 'features') {
       return pendingPacks;
     }
-    return getDebugFeaturePacks();
+    return getDebugFeaturePacks().filter((pack) => packHasRenderableSteps(pack, canSettings));
   }
 
   function getDebugFeaturePacks() {
@@ -5522,12 +5538,25 @@ import brandVxUrl from './brand-vx.png';
 
   function buildFeatureWizardActiveSteps(featurePacks, canSettings) {
     const packs = Array.isArray(featurePacks) ? featurePacks : [];
-    const stepIds = new Set(packs.flatMap((pack) => pack.stepIds || []));
-    const featureSteps = WIZARD_STEPS.filter((step) => {
-      if (!stepIds.has(step.id)) return false;
-      if (step.requiresConfigAccess && !canSettings) return false;
-      return true;
-    });
+    // Follow each pack's declared stepIds order (deduped across packs) rather than the order
+    // steps happen to sit in WIZARD_STEPS, so the tour matches the pack's narrative/copy.
+    const stepById = new Map(WIZARD_STEPS.map((step) => [step.id, step]));
+    const orderedStepIds = [];
+    const seenStepIds = new Set();
+    for (const pack of packs) {
+      for (const stepId of pack.stepIds || []) {
+        if (seenStepIds.has(stepId)) continue;
+        seenStepIds.add(stepId);
+        orderedStepIds.push(stepId);
+      }
+    }
+    const featureSteps = orderedStepIds
+      .map((stepId) => stepById.get(stepId))
+      .filter((step) => {
+        if (!step) return false;
+        if (step.requiresConfigAccess && !canSettings) return false;
+        return true;
+      });
     if (featureSteps.length === 0) {
       return [];
     }
