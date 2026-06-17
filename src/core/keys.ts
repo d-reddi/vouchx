@@ -177,6 +177,12 @@ export function moderatorOnboardingCompletedKey(subredditId: string, moderator: 
   return `${subredditScopePrefix(subredditId)}:moderator:onboarded:${normalizeUsername(moderator)}`;
 }
 
+export function moderatorFeatureEducationCompletedKey(subredditId: string, moderator: string, packId: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator:feature-education:${normalizeUsername(
+    moderator
+  )}:${packId.trim().toLowerCase()}`;
+}
+
 export function userPendingKeyById(subredditId: string, userId: string): string {
   return `${subredditScopePrefix(subredditId)}:user-id:${normalizeUserId(userId)}:pending`;
 }

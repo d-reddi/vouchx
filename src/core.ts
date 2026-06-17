@@ -145,6 +145,7 @@ export type {
   DeleteDataConfirmValues,
   DeleteDataResult,
   DenyReason,
+  FeatureEducationPackState,
   FlairTemplateValidationState,
   HubModeratorUiState,
   HubStatePayload,
@@ -166,6 +167,9 @@ export {
   dismissModeratorUpdateNotice,
 } from './core/update-notice.ts';
 export {
+  getCurrentFeatureEducationPacks,
+  getPendingModeratorFeatureEducationPacks,
   hasCompletedModeratorOnboarding,
+  markModeratorFeatureEducationCompleted,
   markModeratorOnboardingCompleted,
 } from './core/onboarding.ts';

@@ -17,6 +17,7 @@ import {
   dismissModeratorUpdateNotice,
   denyVerification,
   ensureUserValidationSchedule,
+  markModeratorFeatureEducationCompleted,
   markModeratorOnboardingCompleted,
   errorText,
   getModeratorAccessSnapshot,
@@ -1262,6 +1263,22 @@ app.post('/api/mod/onboarding/complete', async (_req, res) => {
     const appContext = currentContext();
     const { moderator } = await requireReviewAccess(appContext);
     await markModeratorOnboardingCompleted(appContext, moderator);
+    res.json(await buildModPayload(appContext));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/mod/feature-education/complete', async (req, res) => {
+  try {
+    const rawPackIds: unknown[] = Array.isArray(req.body?.packIds) ? req.body.packIds : [];
+    const packIds = rawPackIds.map((item) => String(item ?? '').trim()).filter(Boolean);
+    if (packIds.length === 0) {
+      throw httpError(400, 'Missing feature education pack.');
+    }
+    const appContext = currentContext();
+    const { moderator } = await requireReviewAccess(appContext);
+    await markModeratorFeatureEducationCompleted(appContext, moderator, packIds);
     res.json(await buildModPayload(appContext));
   } catch (error) {
     sendError(res, error);

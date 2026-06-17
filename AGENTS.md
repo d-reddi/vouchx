@@ -31,7 +31,7 @@ structure — do not re-merge the modules back into one file.**
 | `flair.ts` | Approval flair config, template validation, viewer flair snapshots, verification flair checks |
 | `search.ts` | Pending/approved/history/audit search, moderator stats |
 | `dashboard.ts` | Hub/mod dashboard loaders, state payload builders (`toHubState` / `toModPanelState`) |
-| `onboarding.ts` | Per-moderator onboarding completion tracking for the mod panel walkthrough |
+| `onboarding.ts` | Per-moderator onboarding completion tracking and versioned feature-education packs for the mod panel wizard |
 | `settings.ts` | Runtime config, settings save handlers, validators, configurable deny reasons |
 | `theme.ts` | Theme presets + color derivation |
 | `retention.ts` | Validation scheduling, retention reconcile, history prune, audit purge (scheduled jobs) |
@@ -42,13 +42,23 @@ The client UI lives in `src/client/` (`hub-app.js`, `mod-panel.js`,
 `mod-panel.css`, etc.) and is a separate bundle — it talks to the server only
 over the HTTP routes defined in `src/index.ts`, never by importing `src/core`.
 
-The mod panel setup/onboarding wizard lives in `src/client/mod-panel.html`,
+The mod panel setup/onboarding/feature wizard lives in `src/client/mod-panel.html`,
 `src/client/mod-panel.js`, and `src/client/mod-panel.css`. Server state for the
 wizard flows through `DashboardData` / `ModPanelStatePayload`
-(`requiresInitialSetup`, `needsOnboarding`) and `/api/mod/onboarding/complete`;
-per-moderator completion storage belongs in `src/core/onboarding.ts`. Keep
-wizard debug controls production-safe: `wizardDebugMode` is a manual boolean
-debug switch, and forced mode should stay `null` in production.
+(`requiresInitialSetup`, `needsOnboarding`, `newFeaturePacks`) and
+`/api/mod/onboarding/complete` / `/api/mod/feature-education/complete`;
+per-moderator onboarding and feature-education completion storage belongs in
+`src/core/onboarding.ts`. Wizard mode priority is **setup > onboarding >
+features**: setup suppresses onboarding/features, and onboarding suppresses
+feature packs. Completing setup/onboarding also marks current feature packs
+complete so new moderators do not see back-to-back tours. Feature-education
+completion keys are per subreddit/moderator/pack and expire after the long TTL
+in `FEATURE_EDUCATION_COMPLETION_TTL_DAYS`; the normal onboarding completion
+key stays durable. Keep feature packs in `CURRENT_FEATURE_EDUCATION_PACKS` long
+enough for slow-updating communities to catch up, and remove old packs only
+after their `retainUntilAtLeast` version has passed. Keep wizard debug controls
+production-safe: `wizardDebugMode` is a manual boolean debug switch, and forced
+mode should stay `null` in production.
 
 ## Current product behavior
 

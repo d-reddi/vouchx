@@ -252,6 +252,7 @@ export type DashboardData = {
   flairTemplateValidation: FlairTemplateValidationState;
   requiresInitialSetup: boolean;
   needsOnboarding: boolean;
+  newFeaturePacks: FeatureEducationPackState[];
   config: RuntimeConfig;
   viewerSnapshot: UserSnapshot;
   viewerShouldDisplayVerified: boolean;
@@ -274,6 +275,15 @@ export type DashboardData = {
   storage: StorageUsage;
   approvedHasMore: boolean;
   auditHasMore: boolean;
+};
+
+export type FeatureEducationPackState = {
+  id: string;
+  introducedIn: string;
+  retainUntilAtLeast: string;
+  title: string;
+  summary: string;
+  stepIds: string[];
 };
 
 export type FlairVerificationCheck = {
@@ -730,6 +740,7 @@ export type ModPanelStatePayload = {
   needsOnboarding: boolean;
   flairTemplateValidation: FlairTemplateValidationState;
   pendingCount: number;
+  newFeaturePacks: FeatureEducationPackState[];
   pending: PendingPanelItem[];
   approved: ApprovedSearchPanelItem[];
   approvedHasMore: boolean;
