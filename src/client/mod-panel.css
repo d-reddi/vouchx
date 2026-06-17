@@ -3257,6 +3257,13 @@ button.pending-age-denied-before:focus-visible {
   width: 100%;
 }
 
+.history-shortcut-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  font-weight: var(--font-weight-medium);
+}
+
 .history-filter-panel {
   border-bottom: 1px solid color-mix(in srgb, var(--panel-divider) 72%, transparent);
   color: var(--text);

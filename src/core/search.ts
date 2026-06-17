@@ -147,10 +147,48 @@ export function toApprovedSearchPanelItem(record: VerificationRecord): ApprovedS
   };
 }
 
+type HistoryStatusFilter = 'all' | 'approved' | 'denied' | 'reopened';
+
+function normalizeHistoryStatusFilter(value: unknown): HistoryStatusFilter {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'approved' || normalized === 'denied' || normalized === 'reopened' ? normalized : 'all';
+}
+
+function isReopenedHistoryItem(item: HistorySearchPanelItem): boolean {
+  return Boolean(item.parentVerificationId?.trim()) || (item.status === 'denied' && item.reopenedState !== 'none');
+}
+
+function shouldConsiderRecordForHistoryStatusFilter(record: VerificationRecord, statusFilter: HistoryStatusFilter): boolean {
+  if (statusFilter === 'all') {
+    return true;
+  }
+  if (statusFilter === 'approved') {
+    return record.status === 'approved';
+  }
+  if (statusFilter === 'denied') {
+    return record.status === 'denied';
+  }
+  return record.status === 'denied' || Boolean(record.parentVerificationId?.trim());
+}
+
+function matchesHistoryStatusFilter(item: HistorySearchPanelItem, statusFilter: HistoryStatusFilter): boolean {
+  if (statusFilter === 'all') {
+    return true;
+  }
+  if (statusFilter === 'approved') {
+    return item.status === 'approved';
+  }
+  if (statusFilter === 'denied') {
+    return item.status === 'denied' && !isReopenedHistoryItem(item);
+  }
+  return isReopenedHistoryItem(item);
+}
+
 export async function searchHistoryRecords(
   context: Devvit.Context,
   subredditId: string,
   query: {
+    status?: string;
     username?: string;
     fromDate?: string;
     toDate?: string;
@@ -160,6 +198,7 @@ export async function searchHistoryRecords(
 ): Promise<HistorySearchResponsePayload> {
   const limit = Math.max(1, Math.min(50, Math.floor(query.limit ?? 25)));
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
+  const statusFilter = normalizeHistoryStatusFilter(query.status);
   const usernameFilter = normalizeUsernamePrefixFilter(query.username, normalizeUsernameForLookup);
   const fromMs = parseSearchBoundaryMs(query.fromDate, false);
   const toMs = parseSearchBoundaryMs(query.toDate, true);
@@ -170,7 +209,7 @@ export async function searchHistoryRecords(
   }
 
   const baseKey = historyDateIndexKey(subredditId);
-  const candidateCount = limit * (usernameFilter ? 8 : 3);
+  const candidateCount = limit * (usernameFilter || statusFilter !== 'all' ? 8 : 3);
 
   const candidates = await context.redis.zRange(baseKey, minScore, maxScore, {
     by: 'score',
@@ -206,6 +245,9 @@ export async function searchHistoryRecords(
     if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
       continue;
     }
+    if (!shouldConsiderRecordForHistoryStatusFilter(parsed, statusFilter)) {
+      continue;
+    }
     items.push({
       id: parsed.id,
       username: parsed.username,
@@ -220,7 +262,7 @@ export async function searchHistoryRecords(
       reopenedState: 'none',
       ...(parsed.status === 'approved' ? toSearchPhotoLinkFields(parsed) : {}),
     });
-    if (items.length >= limit) {
+    if ((statusFilter === 'all' || statusFilter === 'approved') && items.length >= limit) {
       break;
     }
   }
@@ -286,8 +328,12 @@ export async function searchHistoryRecords(
     }
   }
 
+  const filteredItems = statusFilter === 'all'
+    ? items
+    : items.filter((item) => matchesHistoryStatusFilter(item, statusFilter)).slice(0, limit);
+
   return {
-    items,
+    items: filteredItems,
     offset: offset + scannedCount,
     hasMore: scannedCount < candidates.length || candidates.length >= candidateCount,
     requestId: 0,
