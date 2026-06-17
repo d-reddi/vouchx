@@ -3802,6 +3802,99 @@ test('searchHistoryRecords treats short username prefixes as unfiltered baseline
   });
 });
 
+test('searchHistoryRecords filters approved denied and reopened records', async () => {
+  const reviewContext = createReviewActionContext();
+  const subredditId = reviewContext.subredditId;
+  const records = [
+    buildRecord({
+      id: 'history_approved',
+      username: 'approved_user',
+      subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'approved',
+      submittedAt: '2026-03-24T12:00:00.000Z',
+      ageAcknowledgedAt: '2026-03-24T12:00:00.000Z',
+      reviewedAt: '2026-03-25T12:00:00.000Z',
+      moderator: 'Mod_One',
+    }),
+    buildRecord({
+      id: 'history_denied',
+      username: 'denied_user',
+      subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'denied',
+      submittedAt: '2026-03-24T13:00:00.000Z',
+      ageAcknowledgedAt: '2026-03-24T13:00:00.000Z',
+      reviewedAt: '2026-03-25T13:00:00.000Z',
+      moderator: 'Mod_One',
+      denyReason: 'reason_1',
+    }),
+    buildRecord({
+      id: 'history_reopened_parent',
+      username: 'reopened_user',
+      subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'denied',
+      submittedAt: '2026-03-24T14:00:00.000Z',
+      ageAcknowledgedAt: '2026-03-24T14:00:00.000Z',
+      reviewedAt: '2026-03-25T14:00:00.000Z',
+      moderator: 'Mod_One',
+      denyReason: 'reason_2',
+    }),
+    buildRecord({
+      id: 'history_reopened_child',
+      username: 'reopened_user',
+      subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'pending',
+      submittedAt: '2026-03-26T12:00:00.000Z',
+      ageAcknowledgedAt: '2026-03-26T12:00:00.000Z',
+      parentVerificationId: 'history_reopened_parent',
+    }),
+  ];
+
+  for (const record of records) {
+    reviewContext.redisStore.set(verificationRecordTestKey(subredditId, record.id), JSON.stringify(record));
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(subredditId)).set(
+      record.id,
+      new Date(String(record.reviewedAt || record.submittedAt)).getTime()
+    );
+  }
+  reviewContext.redisStore.set(
+    reopenedChildByDeniedTestKey(subredditId, 'history_reopened_parent'),
+    'history_reopened_child'
+  );
+  reviewContext.redisStore.set(reopenedStateByDeniedTestKey(subredditId, 'history_reopened_parent'), 'open');
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const approved = await searchHistoryRecords(reviewContext.context as never, subredditId, {
+      status: 'approved',
+      fromDate: '2026-03-20T00:00:00.000Z',
+      offset: 0,
+      limit: 25,
+    });
+    const denied = await searchHistoryRecords(reviewContext.context as never, subredditId, {
+      status: 'denied',
+      fromDate: '2026-03-20T00:00:00.000Z',
+      offset: 0,
+      limit: 25,
+    });
+    const reopened = await searchHistoryRecords(reviewContext.context as never, subredditId, {
+      status: 'reopened',
+      fromDate: '2026-03-20T00:00:00.000Z',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.deepEqual(approved.items.map((item) => item.id), ['history_approved']);
+    assert.deepEqual(denied.items.map((item) => item.id), ['history_denied']);
+    assert.deepEqual(
+      reopened.items.map((item) => item.id).sort(),
+      ['history_reopened_child', 'history_reopened_parent']
+    );
+  });
+});
+
 test('searchApprovedRecords treats short username prefixes as unfiltered baseline queries', async () => {
   const reviewContext = createReviewActionContext({
     recordOverrides: {

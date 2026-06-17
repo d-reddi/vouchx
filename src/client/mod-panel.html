@@ -253,12 +253,13 @@
         <section id="tab-history" class="tab-panel hidden">
           <div class="content-card history-workspace">
             <div class="subtabs segmented-control history-nav">
-              <button id="history-view-approved" class="btn btn-secondary history-view-btn" data-history-view="approved">Approved</button>
+              <button id="history-view-approved" class="btn btn-secondary history-view-btn history-shortcut-btn" data-history-view="approved">Verified members</button>
               <button id="history-view-records" class="btn btn-primary history-view-btn" data-history-view="records">Records</button>
               <button id="history-view-audit" class="btn btn-secondary history-view-btn" data-history-view="audit">Audit</button>
             </div>
 
             <div id="history-panel-approved" class="history-view-panel hidden">
+              <p class="history-shortcut-label">Shortcut: Records filtered to Approved</p>
               <details id="approved-filter-panel" class="history-filter-panel">
                 <summary class="history-filter-summary">
                   <span class="history-filter-title">Filters</span>
@@ -300,6 +301,15 @@
                 </summary>
                 <div class="history-filter-body">
                   <div class="field-grid history-field-grid history-field-grid-records">
+                    <div class="field-stack">
+                      <label class="field-label" for="history-status-filter">Status</label>
+                      <select id="history-status-filter" class="field-select">
+                        <option value="all">All records</option>
+                        <option value="approved">Approved</option>
+                        <option value="denied">Denied</option>
+                        <option value="reopened">Reopened</option>
+                      </select>
+                    </div>
                     <div class="field-stack">
                       <label class="field-label" for="history-search-user">Username prefix</label>
                       <input id="history-search-user" class="field-input" type="text" placeholder="username (optional)" />

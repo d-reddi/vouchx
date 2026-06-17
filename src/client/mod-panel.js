@@ -83,6 +83,7 @@ import brandVxUrl from './brand-vx.png';
   const historyPanelRecords = document.getElementById('history-panel-records');
   const historyPanelApproved = document.getElementById('history-panel-approved');
   const historyPanelAudit = document.getElementById('history-panel-audit');
+  const historyStatusFilterSelect = document.getElementById('history-status-filter');
   const historySearchUserInput = document.getElementById('history-search-user');
   const historySearchHint = document.getElementById('history-search-hint');
   const historySearchFromInput = document.getElementById('history-search-from');
@@ -518,6 +519,12 @@ import brandVxUrl from './brand-vx.png';
   const statsCacheStale = {
     weekly: false,
     monthly: false,
+  };
+  const HISTORY_STATUS_FILTER_LABELS = {
+    all: 'All records',
+    approved: 'Approved',
+    denied: 'Denied',
+    reopened: 'Reopened',
   };
   const hiddenCriticalUpdateNoticeKeys = new Set();
   const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
@@ -3270,6 +3277,9 @@ import brandVxUrl from './brand-vx.png';
 
   function getRecordsFilterActiveCount() {
     let count = 0;
+    if (historyStatusFilterSelect && historyStatusFilterSelect.value !== 'all') {
+      count += 1;
+    }
     if (historySearchUserInput && historySearchUserInput.value.trim()) {
       count += 1;
     }
@@ -5247,9 +5257,18 @@ import brandVxUrl from './brand-vx.png';
     const isMinLengthHintVisible = Boolean(historySearchHint && !historySearchHint.classList.contains('hidden'));
     if (!Array.isArray(historySearchItems) || historySearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        renderEmptyState(historySearchResults, 'No history results', 'Search records by username prefix or date range.', {
-          icon: 'history',
-        });
+        const statusFilter = historyStatusFilterSelect ? String(historyStatusFilterSelect.value || 'all') : 'all';
+        const statusLabel = HISTORY_STATUS_FILTER_LABELS[statusFilter] || HISTORY_STATUS_FILTER_LABELS.all;
+        renderEmptyState(
+          historySearchResults,
+          'No history results',
+          statusFilter === 'all'
+            ? 'Search records by username prefix or date range.'
+            : `No ${statusLabel.toLowerCase()} records match these filters.`,
+          {
+            icon: 'history',
+          }
+        );
       }
     } else {
       for (const item of historySearchItems) {
@@ -7597,6 +7616,7 @@ import brandVxUrl from './brand-vx.png';
   function buildHistorySearchMessage(offset, requestId) {
     return {
       type: 'searchHistory',
+      status: historyStatusFilterSelect ? historyStatusFilterSelect.value : 'all',
       username: historySearchUserInput ? historySearchUserInput.value.trim() : '',
       fromDate: historySearchFromInput ? serializeDateInputBoundary(historySearchFromInput.value, false) : '',
       toDate: historySearchToInput ? serializeDateInputBoundary(historySearchToInput.value, true) : '',
@@ -7665,6 +7685,7 @@ import brandVxUrl from './brand-vx.png';
 
   function currentHistorySearchSignature() {
     return JSON.stringify({
+      status: historyStatusFilterSelect ? historyStatusFilterSelect.value : 'all',
       username: effectivePrefixSearchValue(historySearchUserInput ? historySearchUserInput.value : ''),
       fromDate: historySearchFromInput ? serializeDateInputBoundary(historySearchFromInput.value, false) : '',
       toDate: historySearchToInput ? serializeDateInputBoundary(historySearchToInput.value, true) : '',
@@ -8232,6 +8253,7 @@ import brandVxUrl from './brand-vx.png';
       historySearchItems = [];
       historySearchOffset = 0;
       historySearchHasMore = false;
+      if (historyStatusFilterSelect) historyStatusFilterSelect.value = 'all';
       if (historySearchUserInput) historySearchUserInput.value = '';
       applyDefaultDateRange(historySearchFromInput, historySearchToInput, HISTORY_DEFAULT_DAYS);
       setHistorySearchHintVisible(false);
@@ -8313,6 +8335,14 @@ import brandVxUrl from './brand-vx.png';
           runHistoryRecordsSearchWithInputGuard(true);
         }
       }, 300);
+    });
+  }
+  if (historyStatusFilterSelect) {
+    historyStatusFilterSelect.addEventListener('change', () => {
+      updateHistoryFilterSummaries();
+      if (activeHistoryView === 'records') {
+        runHistoryRecordsSearchWithInputGuard(true);
+      }
     });
   }
   if (historySearchFromInput) {

@@ -1303,6 +1303,7 @@ app.post('/api/mod/search/history', async (req, res) => {
     await requireReviewAccess(appContext);
     res.json(
       await searchHistoryRecords(appContext, sanitizeSubredditId(appContext.subredditId), {
+        status: String(req.body?.status ?? '').trim(),
         username: String(req.body?.username ?? '').trim(),
         fromDate: String(req.body?.fromDate ?? '').trim(),
         toDate: String(req.body?.toDate ?? '').trim(),
