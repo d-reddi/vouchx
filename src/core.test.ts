@@ -5116,6 +5116,51 @@ test('denyVerification keeps valid denials working and exposes the denied userna
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
 });
 
+test('approval and denial templates render caps and today placeholders like photo instructions', async () => {
+  await withFixedNow('2026-06-18T12:00:00.000Z', async () => {
+    const sharedTemplateConfig = {
+      modmail_subject: '{{caps:username}} | {{today}}',
+      approve_header: 'Approved for {{caps:subreddit}} on {{today}}',
+      approve_body:
+        '- Your **exact** Reddit username, {{caps:username}}, (with u/), in CAPITAL LETTERS.\n' +
+        '- Today’s date, spelling out the month (e.g., "{{caps:today}}").\n' +
+        '- Sub Name: "r/{{subreddit}}".',
+      deny_header: 'Denied for {{caps:subreddit}} on {{today}}',
+      deny_reason_1_template:
+        '- Your **exact** Reddit username, {{caps:username}}, (with u/), in CAPITAL LETTERS.\n' +
+        '- Today’s date, spelling out the month (e.g., "{{caps:today}}").\n' +
+        '- Sub Name: "r/{{subreddit}}".',
+    };
+    const expectedBodyLines = [
+      '- Your **exact** Reddit username, EXAMPLE_USER, (with u/), in CAPITAL LETTERS.',
+      '- Today’s date, spelling out the month (e.g., "JUNE 18, 2026").',
+      '- Sub Name: "r/examplesub".',
+    ].join('\n');
+
+    const approvalContext = createReviewActionContext({
+      initialHashes: { [subredditConfigTestKey('t5_example')]: sharedTemplateConfig },
+    });
+    await approveVerification(approvalContext.context as never, approvalContext.record.id);
+
+    assert.equal(approvalContext.createConversationCalls[0]?.subject, 'EXAMPLE_USER | June 18, 2026');
+    assert.equal(
+      approvalContext.createConversationCalls[0]?.body,
+      `---\n\n**Approved for EXAMPLESUB on June 18, 2026**\n\n${expectedBodyLines}`
+    );
+
+    const denialContext = createReviewActionContext({
+      initialHashes: { [subredditConfigTestKey('t5_example')]: sharedTemplateConfig },
+    });
+    await denyVerification(denialContext.context as never, denialContext.record.id, 'reason_1', '');
+
+    assert.equal(denialContext.createConversationCalls[0]?.subject, 'EXAMPLE_USER | June 18, 2026');
+    assert.equal(
+      denialContext.createConversationCalls[0]?.body,
+      `---\n\n**Denied for EXAMPLESUB on June 18, 2026**\n\n${expectedBodyLines}`
+    );
+  });
+});
+
 test('denyVerification can manually block during denial without re-validating the user', async () => {
   const reviewContext = createReviewActionContext();
 

@@ -795,9 +795,11 @@
                         <summary class="team-stats-help-button" aria-label="Explain modmail subject placeholders">?</summary>
                         <div class="team-stats-help-tooltip" role="note">
                           <p>Used for pending, approval, denial, and revocation modmail.</p>
-                          <p><strong>Common placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                          <p><strong>Common placeholders:</strong> <code>{{username}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{today}}</code></p>
                           <p><strong>Also available:</strong> <code>{{mod}}</code> for approval, denial, and revocation; <code>{{denial_notes}}</code> for denial; <code>{{reason}}</code> for revocation.</p>
+                          <p><strong>Caps helper:</strong> selected placeholders become <code>{{caps:name}}</code> and render their value in uppercase.</p>
                           <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
+                          <p><code>{{today}}</code> uses the date when the message is generated, for example <code>May 23, 2026</code>.</p>
                         </div>
                       </details>
                     </div>
@@ -840,7 +842,7 @@
                       <summary class="team-stats-help-button" aria-label="Explain approval header placeholders">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
                         <p>Rendered in bold with a separator at the top of the modmail message.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code></p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{today}}</code></p>
                         <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
                       </div>
                     </details>
@@ -909,7 +911,7 @@
                       <summary class="team-stats-help-button" aria-label="Explain denial header placeholders">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
                         <p>Rendered in bold with a separator at the top of the modmail message.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{denial_notes}}</code></p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{today}}</code>, <code>{{denial_notes}}</code></p>
                         <p>Use <code>{{denial_notes}}</code> only if you want moderator-entered notes inserted exactly here.</p>
                       </div>
                     </details>
@@ -1008,7 +1010,7 @@
                       <summary class="team-stats-help-button" aria-label="Explain revoked verification header placeholders">?</summary>
                       <div class="team-stats-help-tooltip" role="note">
                         <p>Rendered in bold with a separator at the top of the modmail message.</p>
-                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{reason}}</code></p>
+                        <p><strong>Placeholders:</strong> <code>{{username}}</code>, <code>{{mod}}</code>, <code>{{subreddit}}</code>, <code>{{date submitted}}</code>, <code>{{days}}</code>, <code>{{today}}</code>, <code>{{reason}}</code></p>
                         <p><code>{{days}}</code> already includes the unit, for example <code>3 days</code>.</p>
                       </div>
                     </details>

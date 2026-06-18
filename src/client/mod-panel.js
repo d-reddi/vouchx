@@ -329,6 +329,7 @@ import brandVxUrl from './brand-vx.png';
     'italic',
     'link',
     'quote',
+    'caps',
     'heading-1',
     'heading-2',
     'heading-3',
@@ -336,13 +337,20 @@ import brandVxUrl from './brand-vx.png';
     'numbered-list',
   ];
   const PHOTO_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{days}}', '{{today}}'];
-  const PENDING_TEXTAREA_PLACEHOLDERS = ['{{username}}', '{{subreddit}}', '{{date submitted}}', '{{days}}'];
+  const PENDING_TEXTAREA_PLACEHOLDERS = [
+    '{{username}}',
+    '{{subreddit}}',
+    '{{date submitted}}',
+    '{{days}}',
+    '{{today}}',
+  ];
   const APPROVAL_TEXTAREA_PLACEHOLDERS = [
     '{{username}}',
     '{{mod}}',
     '{{subreddit}}',
     '{{date submitted}}',
     '{{days}}',
+    '{{today}}',
   ];
   const DENIAL_TEXTAREA_PLACEHOLDERS = [...APPROVAL_TEXTAREA_PLACEHOLDERS, '{{denial_notes}}'];
   const REMOVAL_TEXTAREA_PLACEHOLDERS = [...APPROVAL_TEXTAREA_PLACEHOLDERS, '{{reason}}'];

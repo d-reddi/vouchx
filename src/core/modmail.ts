@@ -68,6 +68,7 @@ export async function sendShadowbanAutoDenyModmail(
     reason: '',
     denial_notes: '',
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+    today: formatTemplateToday(),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const body = [
@@ -113,6 +114,7 @@ export async function sendApprovalModmail(
     date_submitted: formatTimestamp(record.submittedAt),
     reason: '',
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+    today: formatTemplateToday(),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const body = prependModmailHeader(fillTemplate(config.approveBody, values), config.approveHeader, values);
@@ -225,6 +227,7 @@ export async function sendModeratorRemovalModmail(
     date_submitted: formatTimestamp(record.submittedAt),
     reason: removalReason,
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+    today: formatTemplateToday(),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const body = prependModmailHeader(fillTemplate(config.removeBody, values), config.removeHeader, values);
@@ -262,6 +265,7 @@ export async function sendDenialModmail(
     reason: formattedModeratorNotes,
     denial_notes: formattedModeratorNotes,
     days: formatPendingTurnaroundDays(config.pendingTurnaroundDays),
+    today: formatTemplateToday(),
   };
   const subject = buildModmailSubject(config.modmailSubject, values);
   const renderedHeader = renderDenialTemplateText(config.denyHeader, values, moderatorNotes);
@@ -301,6 +305,7 @@ export async function sendPendingSubmissionModmail(
     date_submitted: formatTimestamp(record.submittedAt),
     reason: '',
     days: formatPendingTurnaroundDays(resolvedConfig.pendingTurnaroundDays),
+    today: formatTemplateToday(),
   };
   const subject = buildModmailSubject(resolvedConfig.modmailSubject, values);
   const acknowledgementAt = formatTimestamp(record.ageAcknowledgedAt || record.submittedAt);
@@ -884,7 +889,7 @@ export function formatDenialNotesForModmail(notes: string): string {
 export function templateIncludesDenialNotesPlaceholder(template: string): boolean {
   const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
   for (const match of template.matchAll(placeholderPattern)) {
-    const key = normalizePlaceholderKey(match[1] ?? '');
+    const { key } = parseTemplatePlaceholder(match[1] ?? '');
     if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
       return true;
     }
@@ -899,7 +904,7 @@ export function normalizeDenialNotesTemplateBlocks(template: string): string {
       const trimmed = line.trim();
       const placeholderOnlyMatch = trimmed.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
       if (placeholderOnlyMatch) {
-        const key = normalizePlaceholderKey(placeholderOnlyMatch[1] ?? '');
+        const { key } = parseTemplatePlaceholder(placeholderOnlyMatch[1] ?? '');
         if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
           return DENIAL_NOTES_BLOCK_MARKER;
         }
@@ -907,7 +912,7 @@ export function normalizeDenialNotesTemplateBlocks(template: string): string {
 
       const prefixedPlaceholderMatch = trimmed.match(/^(moderator\s+notes?|reason)\s*:\s*\{\{\s*([^{}]+?)\s*\}\}$/i);
       if (prefixedPlaceholderMatch) {
-        const key = normalizePlaceholderKey(prefixedPlaceholderMatch[2] ?? '');
+        const { key } = parseTemplatePlaceholder(prefixedPlaceholderMatch[2] ?? '');
         if (key === DENIAL_NOTES_PLACEHOLDER_KEY || key === LEGACY_DENIAL_NOTES_PLACEHOLDER_KEY) {
           return DENIAL_NOTES_BLOCK_MARKER;
         }
@@ -961,8 +966,27 @@ export function fillTemplate(template: string, values: Record<string, string>): 
     normalizedMap.set(normalizePlaceholderKey(rawKey), value);
   }
   return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, rawKey: string) => {
-    return normalizedMap.get(normalizePlaceholderKey(rawKey)) ?? '';
+    const { key, uppercase } = parseTemplatePlaceholder(rawKey);
+    const replacement = normalizedMap.get(key) ?? '';
+    return uppercase ? replacement.toLocaleUpperCase() : replacement;
   });
+}
+
+function formatTemplateToday(): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(Date.now()));
+}
+
+function parseTemplatePlaceholder(rawKey: string): { key: string; uppercase: boolean } {
+  const normalizedRawKey = rawKey.trim();
+  const capsMatch = normalizedRawKey.match(/^caps\s*:\s*(.+)$/i);
+  return {
+    key: normalizePlaceholderKey(capsMatch?.[1] ?? normalizedRawKey),
+    uppercase: Boolean(capsMatch),
+  };
 }
 
 export function normalizePlaceholderKey(rawKey: string): string {
