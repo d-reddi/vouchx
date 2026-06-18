@@ -1450,6 +1450,23 @@ function seedAuditEntries(
   }
 }
 
+type AuditSeedEntry = Parameters<typeof seedAuditEntries>[1][number];
+
+function buildAuditSearchSeries(
+  count: number,
+  customize: (index: number) => Partial<AuditSeedEntry> = () => ({})
+): AuditSeedEntry[] {
+  const baseMs = new Date('2026-03-01T00:00:00.000Z').getTime();
+  return Array.from({ length: count }, (_, index) => ({
+    id: `audit_series_${String(index).padStart(5, '0')}`,
+    username: `other_user_${index}`,
+    action: 'approved' as const,
+    actor: 'Mod_Other',
+    at: new Date(baseMs + index * 1_000).toISOString(),
+    ...customize(index),
+  }));
+}
+
 function getStoredAuditEntries(reviewContext: ReturnType<typeof createReviewActionContext>) {
   const auditPrefix = `${subredditPrefixKey(reviewContext.subredditId)}:audit:`;
   return Array.from(reviewContext.redisStore.entries())
@@ -3934,6 +3951,233 @@ test('searchAuditEntries treats short username and actor prefixes as unfiltered 
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0]?.id, 'audit_short_prefix');
   });
+});
+
+test('searchAuditEntries scans beyond the first 100 candidates for a username match', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(
+    reviewContext,
+    buildAuditSearchSeries(301, (index) =>
+      index === 300 ? { username: 'audit_fixture_user_3912', action: 'denied' } : {}
+    )
+  );
+
+  const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'audit_fixture_user_3912',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ['audit_series_00300']);
+  assert.equal(result.hasMore, false);
+});
+
+test('searchAuditEntries scans beyond the first 100 candidates for moderator and action matches', async () => {
+  const actorContext = createReviewActionContext();
+  seedAuditEntries(
+    actorContext,
+    buildAuditSearchSeries(301, (index) => (index === 300 ? { actor: 'Deep_Search_Mod' } : {}))
+  );
+  const actorResult = await searchAuditEntries(actorContext.context as never, actorContext.subredditId, {
+    actor: 'Deep_Search_Mod',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  const actionContext = createReviewActionContext();
+  seedAuditEntries(
+    actionContext,
+    buildAuditSearchSeries(301, (index) => (index === 300 ? { action: 'unblocked' } : {}))
+  );
+  const actionResult = await searchAuditEntries(actionContext.context as never, actionContext.subredditId, {
+    action: 'unblocked',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(actorResult.items.map((item) => item.id), ['audit_series_00300']);
+  assert.deepEqual(actionResult.items.map((item) => item.id), ['audit_series_00300']);
+});
+
+test('searchAuditEntries preserves date boundaries while deep-scanning', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(reviewContext, [
+    {
+      id: 'audit_before_range',
+      username: 'Boundary_User',
+      action: 'denied',
+      actor: 'Mod_One',
+      at: '2026-03-04T23:59:59.999Z',
+    },
+    {
+      id: 'audit_in_range',
+      username: 'Boundary_User',
+      action: 'denied',
+      actor: 'Mod_One',
+      at: '2026-03-05T12:00:00.000Z',
+    },
+    {
+      id: 'audit_after_range',
+      username: 'Boundary_User',
+      action: 'denied',
+      actor: 'Mod_One',
+      at: '2026-03-06T00:00:00.000Z',
+    },
+  ]);
+
+  const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'Boundary_User',
+    fromDate: '2026-03-05T00:00:00.000Z',
+    toDate: '2026-03-05T23:59:59.999Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ['audit_in_range']);
+  assert.equal(result.hasMore, false);
+});
+
+test('searchAuditEntries paginates filtered matches without gaps or duplicates', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(
+    reviewContext,
+    buildAuditSearchSeries(40, () => ({ username: 'Repeated_Target', action: 'denied' }))
+  );
+
+  const first = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'Repeated_Target',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+  const second = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'Repeated_Target',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: first.offset,
+    limit: 25,
+  });
+  const combinedIds = [...first.items, ...second.items].map((item) => item.id);
+
+  assert.equal(first.items.length, 25);
+  assert.equal(first.offset, 25);
+  assert.equal(first.hasMore, true);
+  assert.equal(second.items.length, 15);
+  assert.equal(second.hasMore, false);
+  assert.equal(new Set(combinedIds).size, 40);
+});
+
+test('searchAuditEntries stops at the scan cap and resumes from the returned offset', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(
+    reviewContext,
+    buildAuditSearchSeries(5_001, (index) => (index === 5_000 ? { username: 'Beyond_Scan_Cap' } : {}))
+  );
+
+  await withFixedNow('2026-03-28T12:00:00.000Z', async () => {
+    const first = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'Beyond_Scan_Cap',
+      fromDate: '2026-03-01T00:00:00.000Z',
+      toDate: '2026-03-02T00:00:00.000Z',
+      offset: 0,
+      limit: 25,
+    });
+    const second = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'Beyond_Scan_Cap',
+      fromDate: '2026-03-01T00:00:00.000Z',
+      toDate: '2026-03-02T00:00:00.000Z',
+      offset: first.offset,
+      limit: 25,
+    });
+
+    assert.equal(first.items.length, 0);
+    assert.equal(first.offset, 5_000);
+    assert.equal(first.hasMore, true);
+    assert.deepEqual(second.items.map((item) => item.id), ['audit_series_05000']);
+    assert.equal(second.hasMore, false);
+  });
+});
+
+test('searchAuditEntries stops after the filtered-search time budget', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(reviewContext, buildAuditSearchSeries(300));
+  const originalDateNow = Date.now;
+  let dateNowCalls = 0;
+  Date.now = () => new Date('2026-03-28T12:00:00.000Z').getTime() + (dateNowCalls++ === 0 ? 0 : 4_001);
+
+  try {
+    const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+      username: 'Missing_Target',
+      fromDate: '2026-03-01T00:00:00.000Z',
+      toDate: '2026-03-02T00:00:00.000Z',
+      offset: 0,
+      limit: 25,
+    });
+
+    assert.equal(result.items.length, 0);
+    assert.equal(result.offset, 250);
+    assert.equal(result.hasMore, true);
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
+test('searchAuditEntries cleans stale candidates without skipping deeper matches', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(
+    reviewContext,
+    buildAuditSearchSeries(301, (index) => (index === 300 ? { username: 'After_Stale_Entries' } : {}))
+  );
+  reviewContext.redisStore.delete(auditEntryTestKey(reviewContext.subredditId, 'audit_series_00050'));
+  reviewContext.redisStore.set(
+    auditEntryTestKey(reviewContext.subredditId, 'audit_series_00100'),
+    'malformed audit payload'
+  );
+
+  const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'After_Stale_Entries',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ['audit_series_00300']);
+  assert.equal(
+    ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).has(
+      'audit_series_00050'
+    ),
+    false
+  );
+  assert.equal(
+    ensureTestZSet(reviewContext.zsetStore, auditDateIndexTestKey(reviewContext.subredditId)).has(
+      'audit_series_00100'
+    ),
+    false
+  );
+});
+
+test('searchAuditEntries keeps unfiltered searches on one normal page', async () => {
+  const reviewContext = createReviewActionContext();
+  seedAuditEntries(reviewContext, buildAuditSearchSeries(300));
+
+  const result = await searchAuditEntries(reviewContext.context as never, reviewContext.subredditId, {
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.equal(result.items.length, 25);
+  assert.equal(result.offset, 25);
+  assert.equal(result.hasMore, true);
 });
 
 test('searchAuditEntries attaches photo URLs to approved audit entries by verification id', async () => {

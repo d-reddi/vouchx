@@ -5387,9 +5387,14 @@ import brandVxUrl from './brand-vx.png';
     const isMinLengthHintVisible = Boolean(auditSearchHint && !auditSearchHint.classList.contains('hidden'));
     if (!Array.isArray(auditSearchItems) || auditSearchItems.length === 0) {
       if (!isMinLengthHintVisible) {
-        renderEmptyState(auditSearchResults, 'No audit entries found', 'Try a different moderator, action, or date range.', {
-          icon: 'history',
-        });
+        renderEmptyState(
+          auditSearchResults,
+          auditSearchHasMore ? 'No matches yet' : 'No audit entries found',
+          auditSearchHasMore
+            ? 'More audit entries remain in this date range. Select Load more to continue searching.'
+            : 'Try a different moderator, action, or date range.',
+          { icon: 'history' }
+        );
       }
     } else {
       for (const item of auditSearchItems) {

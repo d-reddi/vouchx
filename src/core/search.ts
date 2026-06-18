@@ -16,7 +16,14 @@ import type {
   SearchPhotoLinkFields,
   VerificationRecord,
 } from './types.ts';
-import { APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER, MAX_PENDING_TO_LOAD, MILLIS_PER_DAY } from './constants.ts';
+import {
+  APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER,
+  AUDIT_FILTER_SCAN_BATCH_SIZE,
+  AUDIT_FILTER_SCAN_MAX_ENTRIES,
+  AUDIT_FILTER_SCAN_TIME_BUDGET_MS,
+  MAX_PENDING_TO_LOAD,
+  MILLIS_PER_DAY,
+} from './constants.ts';
 import { normalizeUsernamePrefixFilter } from './flair.ts';
 import {
   approvedIndexKey,
@@ -497,6 +504,25 @@ export async function loadAuditWindowCandidates(
   return loadedCandidates;
 }
 
+function auditCandidateMatchesFilters(
+  candidate: AuditWindowCandidate,
+  usernameFilter: string,
+  actorFilter: string,
+  actionFilter: ReturnType<typeof asAuditAction>
+): boolean {
+  const entry = candidate.entry;
+  if (!entry) {
+    return false;
+  }
+  if (usernameFilter && !normalizeUsernameForLookup(entry.username).startsWith(usernameFilter)) {
+    return false;
+  }
+  if (actorFilter && !normalizeUsernameForLookup(entry.actor).startsWith(actorFilter)) {
+    return false;
+  }
+  return !actionFilter || entry.action === actionFilter;
+}
+
 export async function searchAuditEntries(
   context: Devvit.Context,
   subredditId: string,
@@ -523,50 +549,77 @@ export async function searchAuditEntries(
     return { items: [], offset, hasMore: false, requestId: 0 };
   }
 
-  const candidates = await loadAuditWindowCandidates(context, subredditId, {
-    minScore,
-    maxScore,
-    offset,
-    count: limit * 4,
-  });
-  if (candidates.length === 0) {
-    return { items: [], offset, hasMore: false, requestId: 0 };
-  }
-
   const items: AuditSearchPanelItem[] = [];
   const approvedAuditItemsByVerificationId = new Map<string, AuditSearchPanelItem[]>();
-  let scannedCount = 0;
-  for (const candidate of candidates) {
-    scannedCount += 1;
-    const parsed = candidate.entry;
-    if (!parsed) {
-      continue;
+  const hasEntryFilters = Boolean(usernameFilter || actorFilter || actionFilter);
+  const batchSize = hasEntryFilters ? AUDIT_FILTER_SCAN_BATCH_SIZE : limit * 4;
+  const maxEntriesToScan = hasEntryFilters ? AUDIT_FILTER_SCAN_MAX_ENTRIES : batchSize;
+  const scanStartedAt = Date.now();
+  let scanOffset = offset;
+  let inspectedCount = 0;
+  let hasMore = false;
+
+  while (inspectedCount < maxEntriesToScan) {
+    const requestedCount = Math.min(batchSize, maxEntriesToScan - inspectedCount);
+    const loadedCandidates = await loadAuditWindowCandidates(context, subredditId, {
+      minScore,
+      maxScore,
+      offset: scanOffset,
+      count: hasEntryFilters ? requestedCount + 1 : requestedCount,
+    });
+    if (loadedCandidates.length === 0) {
+      hasMore = false;
+      break;
     }
-    if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
-      continue;
+    const candidates = hasEntryFilters ? loadedCandidates.slice(0, requestedCount) : loadedCandidates;
+    const hasMoreCandidates = hasEntryFilters && loadedCandidates.length > requestedCount;
+
+    let consumedCount = 0;
+    let consumedLiveCount = 0;
+    for (const candidate of candidates) {
+      consumedCount += 1;
+      inspectedCount += 1;
+      if (candidate.entry) {
+        consumedLiveCount += 1;
+      }
+      if (!auditCandidateMatchesFilters(candidate, usernameFilter, actorFilter, actionFilter)) {
+        continue;
+      }
+
+      const parsed = candidate.entry!;
+      const item: AuditSearchPanelItem = {
+        id: parsed.id,
+        username: parsed.username,
+        actor: parsed.actor,
+        action: parsed.action,
+        line: formatAuditEntry(parsed),
+        at: parsed.at,
+      };
+      items.push(item);
+      const verificationId = parsed.action === 'approved' ? (parsed.verificationId ?? '').trim() : '';
+      if (verificationId) {
+        const verificationItems = approvedAuditItemsByVerificationId.get(verificationId) ?? [];
+        verificationItems.push(item);
+        approvedAuditItemsByVerificationId.set(verificationId, verificationItems);
+      }
+      if (items.length >= limit) {
+        break;
+      }
     }
-    if (actorFilter && !normalizeUsernameForLookup(parsed.actor).startsWith(actorFilter)) {
-      continue;
+
+    // The loader removes missing or malformed entries from the index. Excluding
+    // those entries from the cursor keeps the next batch aligned after cleanup.
+    scanOffset += consumedLiveCount;
+    hasMore = consumedCount < candidates.length || (hasEntryFilters ? hasMoreCandidates : candidates.length >= requestedCount);
+
+    if (items.length >= limit || !hasEntryFilters || !hasMoreCandidates) {
+      break;
     }
-    if (actionFilter && parsed.action !== actionFilter) {
-      continue;
-    }
-    const item: AuditSearchPanelItem = {
-      id: parsed.id,
-      username: parsed.username,
-      actor: parsed.actor,
-      action: parsed.action,
-      line: formatAuditEntry(parsed),
-      at: parsed.at,
-    };
-    items.push(item);
-    const verificationId = parsed.action === 'approved' ? (parsed.verificationId ?? '').trim() : '';
-    if (verificationId) {
-      const verificationItems = approvedAuditItemsByVerificationId.get(verificationId) ?? [];
-      verificationItems.push(item);
-      approvedAuditItemsByVerificationId.set(verificationId, verificationItems);
-    }
-    if (items.length >= limit) {
+    if (
+      inspectedCount >= maxEntriesToScan ||
+      Date.now() - scanStartedAt >= AUDIT_FILTER_SCAN_TIME_BUDGET_MS
+    ) {
+      hasMore = true;
       break;
     }
   }
@@ -599,8 +652,8 @@ export async function searchAuditEntries(
 
   return {
     items,
-    offset: offset + scannedCount,
-    hasMore: scannedCount < candidates.length || candidates.length >= limit * 4,
+    offset: scanOffset,
+    hasMore,
     requestId: 0,
   };
 }
