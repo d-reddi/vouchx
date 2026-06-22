@@ -233,6 +233,23 @@ function createShell(root, inline) {
         </div>
       </div>
 
+      <div data-el="photo-instructions-review-modal" class="hub-modal hub-confirmation-modal hidden">
+        <div class="hub-modal-card" role="dialog" aria-modal="true" aria-labelledby="photo-instructions-review-title">
+          <h2 id="photo-instructions-review-title">Review photo instructions?</h2>
+          <p class="meta">
+            Make sure your photos follow the community’s verification requirements before submitting.
+          </p>
+          <label class="warning-check hub-photo-instructions-review-check">
+            <input data-el="photo-instructions-review-acknowledgement" type="checkbox" />
+            <span>I have reviewed the instructions and my submission follows them.</span>
+          </label>
+          <div class="row">
+            <button data-el="photo-instructions-review-view" class="btn-secondary" type="button">View Instructions</button>
+            <button data-el="photo-instructions-review-continue" class="btn-primary" type="button" disabled>Continue to Submit</button>
+          </div>
+        </div>
+      </div>
+
       <div data-el="photo-instructions-modal" class="hub-modal hidden">
         <div class="hub-modal-card hub-photo-card">
           <ol data-el="photo-instructions-flow" class="hub-flow" aria-label="Verification steps">
@@ -323,6 +340,12 @@ function createShell(root, inline) {
     submitWarningLinks: root.querySelector('[data-el="submit-warning-links"]'),
     submitWarningCancel: root.querySelector('[data-el="submit-warning-cancel"]'),
     submitWarningContinue: root.querySelector('[data-el="submit-warning-continue"]'),
+    photoInstructionsReviewModal: root.querySelector('[data-el="photo-instructions-review-modal"]'),
+    photoInstructionsReviewAcknowledgement: root.querySelector(
+      '[data-el="photo-instructions-review-acknowledgement"]'
+    ),
+    photoInstructionsReviewView: root.querySelector('[data-el="photo-instructions-review-view"]'),
+    photoInstructionsReviewContinue: root.querySelector('[data-el="photo-instructions-review-continue"]'),
     photoInstructionsModal: root.querySelector('[data-el="photo-instructions-modal"]'),
     photoInstructionsFlow: root.querySelector('[data-el="photo-instructions-flow"]'),
     photoInstructionsEyebrow: root.querySelector('[data-el="photo-instructions-eyebrow"]'),
@@ -902,6 +925,7 @@ export function mountHub(options = {}) {
   let flairPropagationRefreshKey = '';
   let developerPanelDraft = null;
   let photoInstructionsOnlyHandled = false;
+  let photoInstructionsReviewPromptOpen = false;
   const howToUseUrl = normalizeExternalUrl(HOW_TO_USE_APP_URL);
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
   const legalLinks = [
@@ -1337,6 +1361,10 @@ export function mountHub(options = {}) {
           window.location.replace(buildInternalNavigationUrl('./photo-instructions.html'));
           return;
         }
+        const continueToSubmission = await requestRecentPhotoInstructionsReview();
+        if (!continueToSubmission) {
+          return;
+        }
       } else {
         const continueToSubmission = await requestPhotoInstructionsReview({ requireContinue: true });
         if (!continueToSubmission) {
@@ -1427,6 +1455,66 @@ export function mountHub(options = {}) {
         refs.submitWarningContinue.disabled = true;
         refs.submitWarningContinue.title = 'Verification submissions are disabled in r/vouchx. This subreddit is for demonstration purposes only.';
       }
+    });
+  }
+
+  function requestRecentPhotoInstructionsReview() {
+    return new Promise((resolve) => {
+      if (
+        photoInstructionsReviewPromptOpen ||
+        !refs.photoInstructionsReviewModal ||
+        !refs.photoInstructionsReviewAcknowledgement ||
+        !refs.photoInstructionsReviewView ||
+        !refs.photoInstructionsReviewContinue
+      ) {
+        resolve(false);
+        return;
+      }
+
+      photoInstructionsReviewPromptOpen = true;
+      refs.photoInstructionsReviewAcknowledgement.checked = false;
+      refs.photoInstructionsReviewContinue.disabled = true;
+
+      const close = (continueToSubmission) => {
+        refs.photoInstructionsReviewModal.classList.add('hidden');
+        refs.photoInstructionsReviewAcknowledgement.removeEventListener('change', onAcknowledgementChange);
+        refs.photoInstructionsReviewView.removeEventListener('click', onViewInstructions);
+        refs.photoInstructionsReviewContinue.removeEventListener('click', onContinueToSubmit);
+        refs.photoInstructionsReviewModal.removeEventListener('click', onBackdrop);
+        refs.photoInstructionsReviewAcknowledgement.checked = false;
+        refs.photoInstructionsReviewContinue.disabled = true;
+        photoInstructionsReviewPromptOpen = false;
+        resolve(continueToSubmission);
+      };
+
+      const onAcknowledgementChange = () => {
+        refs.photoInstructionsReviewContinue.disabled = !refs.photoInstructionsReviewAcknowledgement.checked;
+      };
+
+      const onViewInstructions = (event) => {
+        markPhotoInstructionsRead();
+        close(false);
+        openPhotoInstructionsModal(event);
+      };
+
+      const onContinueToSubmit = () => {
+        if (!refs.photoInstructionsReviewAcknowledgement.checked) {
+          return;
+        }
+        close(true);
+      };
+
+      const onBackdrop = (event) => {
+        if (event.target === refs.photoInstructionsReviewModal) {
+          close(false);
+        }
+      };
+
+      refs.photoInstructionsReviewAcknowledgement.addEventListener('change', onAcknowledgementChange);
+      refs.photoInstructionsReviewView.addEventListener('click', onViewInstructions);
+      refs.photoInstructionsReviewContinue.addEventListener('click', onContinueToSubmit);
+      refs.photoInstructionsReviewModal.addEventListener('click', onBackdrop);
+      refs.photoInstructionsReviewModal.classList.remove('hidden');
     });
   }
 
