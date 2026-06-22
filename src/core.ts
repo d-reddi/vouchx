@@ -19,9 +19,13 @@ export {
   MAX_BATCH_REVIEW_ITEMS,
   MAX_DENY_REASON_LABEL_LENGTH,
   MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH,
+  MOD_MENU_FORM_TARGET_TTL_MS,
   USER_VALIDATION_CRON,
   USER_VALIDATION_JOB_NAME,
 } from './core/constants.ts';
+export {
+  moderatorRemoveHubPostTargetKey,
+} from './core/keys.ts';
 export {
   buildSubmitVerificationForm,
   deleteVerificationDataFormDefinition,

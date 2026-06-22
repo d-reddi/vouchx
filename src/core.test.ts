@@ -36,6 +36,7 @@ import {
   loadApprovalFlairOptionsForSettings,
   markModeratorFeatureEducationCompleted,
   markModeratorOnboardingCompleted,
+  moderatorRemoveHubPostTargetKey,
   loadHubDashboard,
   loadModDashboard,
   looksLikeInternalModmailArchiveError,
@@ -1886,6 +1887,13 @@ test('normalizeUsername keeps malformed legacy values stable for lookup keys', (
   assert.equal(normalizeUsername('   '), '');
   assert.equal(normalizeUsername('r/example'), 'r/example');
   assert.equal(normalizeUsername('https://www.reddit.com/message/compose'), 'https://www.reddit.com/message/compose');
+});
+
+test('moderatorRemoveHubPostTargetKey scopes hidden menu targets by subreddit and moderator', () => {
+  assert.equal(
+    moderatorRemoveHubPostTargetKey('t5_Example', 'u/Mod_One'),
+    'subreddit:t5_example:moderator-ui:remove-hub-post:mod_one'
+  );
 });
 
 test('normalizeUsernameStrict canonicalizes supported user identifiers', () => {

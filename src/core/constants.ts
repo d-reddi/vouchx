@@ -33,6 +33,9 @@ export const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
 
 export const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
 
+// Devvit requires moderator menu-form workflows to finish within 10 minutes.
+export const MOD_MENU_FORM_TARGET_TTL_MS = 10 * 60 * 1000;
+
 // Keep feature-education completion records longer than we keep old feature
 // packs active in code, so a retired pack naturally ages out of Redis after
 // slow-updating communities have had time to catch up.
@@ -65,7 +68,7 @@ export const FLAIR_TEMPLATE_CACHE_REFRESH_INTERVAL_MS = MILLIS_PER_DAY;
 
 export const VIEWER_FLAIR_RECONCILE_INTERVAL_MS = MILLIS_PER_DAY;
 
-export const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 3;
+export const DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS = 30;
 
 export const INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS = 'mod_menu_audit_purge_days';
 

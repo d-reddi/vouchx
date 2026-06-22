@@ -19,6 +19,8 @@ import {
   ensureUserValidationSchedule,
   markModeratorFeatureEducationCompleted,
   markModeratorOnboardingCompleted,
+  moderatorRemoveHubPostTargetKey,
+  MOD_MENU_FORM_TARGET_TTL_MS,
   errorText,
   getModeratorAccessSnapshot,
   getModeratorMembershipError,
@@ -121,7 +123,6 @@ type CreateVerificationHubValues = {
 
 type RemoveVerificationPostValues = {
   confirmationText?: string;
-  targetId?: string;
 };
 
 const createVerificationHubForm: Form = {
@@ -217,19 +218,11 @@ function normalizePostThingId(value: unknown): `t3_${string}` | '' {
   return /^t3_[a-z0-9]+$/i.test(normalized) ? (normalized as `t3_${string}`) : '';
 }
 
-function buildRemoveVerificationHubPostForm(targetId: string): Form {
+function buildRemoveVerificationHubPostForm(): Form {
   return {
     title: 'Remove verification hub post',
-    description: `Removes this app-created verification post from the subreddit: ${targetId}`,
+    description: 'Permanently removes this app-created verification hub post from the community.',
     fields: [
-      {
-        type: 'string',
-        name: 'targetId',
-        label: 'Post ID to remove',
-        helpText: 'Filled from the post menu target. Leave unchanged.',
-        required: true,
-        defaultValue: targetId,
-      },
       {
         type: 'string',
         name: 'confirmationText',
@@ -240,6 +233,16 @@ function buildRemoveVerificationHubPostForm(targetId: string): Form {
     acceptLabel: 'Remove this post',
     cancelLabel: 'Cancel',
   };
+}
+
+async function clearRemoveHubPostTarget(appContext: Context, targetKey: string): Promise<void> {
+  try {
+    await appContext.redis.del(targetKey);
+  } catch (error) {
+    // The target is short-lived. Cleanup failure must not turn a successful Reddit
+    // removal into a false failure response for the moderator.
+    console.log(`Verification hub post target cleanup failed: ${errorText(error)}`);
+  }
 }
 
 function looksLikeRawRedditHtmlErrorMessage(message: string): boolean {
@@ -603,14 +606,27 @@ app.post('/internal/menu/purge-audit-log', (_req, res) => {
   res.json(showForm('purgeAuditLog', purgeAuditLogForm));
 });
 
-app.post('/internal/menu/remove-verification-hub-post', (req, res) => {
-  const menuRequest = (req.body ?? {}) as Partial<MenuItemRequest>;
-  const targetId = normalizePostThingId(menuRequest.targetId);
-  if (!targetId) {
-    res.json(toast('Open this action from the verification hub post you want to remove.'));
-    return;
+app.post('/internal/menu/remove-verification-hub-post', async (req, res) => {
+  try {
+    const menuRequest = (req.body ?? {}) as Partial<MenuItemRequest>;
+    const targetId = normalizePostThingId(menuRequest.targetId);
+    const appContext = currentContext();
+    const subredditId = sanitizeSubredditId(appContext.subredditId);
+    if (!targetId || !subredditId) {
+      res.json(toast('Open this action from the verification hub post you want to remove.'));
+      return;
+    }
+    const { moderator } = await requireModerator(appContext);
+    await appContext.redis.set(
+      moderatorRemoveHubPostTargetKey(subredditId, moderator),
+      targetId,
+      { expiration: new Date(Date.now() + MOD_MENU_FORM_TARGET_TTL_MS) }
+    );
+    res.json(showForm('removeVerificationHubPost', buildRemoveVerificationHubPostForm()));
+  } catch (error) {
+    console.log(`Verification hub post removal form failed: ${errorText(error)}`);
+    res.json(toast('Unable to open the removal confirmation. Please retry.'));
   }
-  res.json(showForm('removeVerificationHubPost', buildRemoveVerificationHubPostForm(targetId)));
 });
 
 app.post('/internal/form/create-verification-hub-submit', async (req, res) => {
@@ -653,41 +669,39 @@ app.post('/internal/form/purge-audit-log-submit', async (req, res) => {
 });
 
 app.post('/internal/form/remove-verification-hub-post-submit', async (req, res) => {
-  const values = (req.body ?? {}) as RemoveVerificationPostValues & MenuItemRequest;
+  const values = (req.body ?? {}) as RemoveVerificationPostValues;
   if (String(values.confirmationText ?? '').trim().toLowerCase() !== 'remove') {
     res.json(toast('Removal cancelled. Type "remove" to confirm.'));
     return;
   }
 
-  const submittedPostId = normalizePostThingId(values.targetId);
-  const contextPostId = normalizePostThingId(context.postId);
-  if (submittedPostId && contextPostId && submittedPostId !== contextPostId) {
-    res.json(toast('Post context changed. Reopen the post menu and try again.'));
-    return;
-  }
-
-  const postId = submittedPostId || contextPostId;
-  if (!postId) {
-    res.json(toast('No verification hub post target was available for removal.'));
-    return;
-  }
-
   try {
     const appContext = currentContext();
-    await requireModerator(appContext);
-    const post = await appContext.reddit.getPostById(postId);
+    const { moderator } = await requireModerator(appContext);
     const currentSubredditId = sanitizeSubredditId(appContext.subredditId);
+    const targetKey = currentSubredditId
+      ? moderatorRemoveHubPostTargetKey(currentSubredditId, moderator)
+      : '';
+    const postId = targetKey ? normalizePostThingId(await appContext.redis.get(targetKey)) : '';
+    if (!postId) {
+      res.json(toast('The removal confirmation expired. Reopen it from the verification hub post.'));
+      return;
+    }
+    const post = await appContext.reddit.getPostById(postId);
     if (currentSubredditId && sanitizeSubredditId(post.subredditId) !== currentSubredditId) {
       throw new Error('That post does not belong to this subreddit.');
     }
     if (post.removed) {
-      res.json(toast(`Verification hub post ${postId} was already removed.`, 'success'));
+      await clearRemoveHubPostTarget(appContext, targetKey);
+      res.json(toast('The verification hub post was already removed.', 'success'));
       return;
     }
     await appContext.reddit.remove(postId, false);
-    res.json(toast(`Removed verification hub post ${postId}.`, 'success'));
+    await clearRemoveHubPostTarget(appContext, targetKey);
+    res.json(toast('Removed the verification hub post.', 'success'));
   } catch (error) {
-    res.json(toast(`Failed to remove post: ${errorText(error)}`));
+    console.log(`Verification hub post removal failed: ${errorText(error)}`);
+    res.json(toast('Failed to remove the verification hub post. Please retry.'));
   }
 });
 

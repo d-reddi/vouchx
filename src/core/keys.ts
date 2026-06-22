@@ -162,6 +162,10 @@ export function moderatorUiUnavailableBackoffKey(subredditId: string, userId: st
   return `${subredditScopePrefix(subredditId)}:moderator-ui:unavailable:${normalizeUserId(userId) || 'unknown'}`;
 }
 
+export function moderatorRemoveHubPostTargetKey(subredditId: string, moderator: string): string {
+  return `${subredditScopePrefix(subredditId)}:moderator-ui:remove-hub-post:${normalizeUsername(moderator) || 'unknown'}`;
+}
+
 export function recentViewerFlairRemovalSuppressionKey(subredditId: string, username: string): string {
   return `${subredditScopePrefix(subredditId)}:viewer-flair-removal-suppress:${normalizeUsername(username) || 'unknown'}`;
 }
