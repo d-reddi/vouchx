@@ -113,23 +113,24 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.7
+### v1.5.8
 
 #### New Features
-- Added a Denial tag to queue cards. Tap it to view the most recent denial details.
-- Added Peer Review, allowing moderators to flag a submission for a second opinion. Moderators can exchange review comments that are visible only to the moderation team.
-- Added Block Notes support.
-- Added new statistics:
-  - Average approval time tracking
-  - Denials by reason
+- Added **Denied Before** and **Denied ×N** badges to queue cards. Select a badge to view details from previous denials.
+- Added **Peer Review**, allowing moderators to request a second opinion and exchange moderator-only review comments.
+- Added support for **Block Notes**.
+- Added new moderator statistics:
+  - **90% Decided Within** decision-time tracking
+  - Denial breakdowns by reason
 
 #### Improvements
-- When a submission contains multiple photos, you can now swipe left or right while viewing an enlarged image to move between photos.
-- Removed Terms Accepted and Age Confirmed timestamps from queue cards to reduce clutter. This information is still retained internally for auditing and tracking purposes.
-- Improved Android photo instructions behavior.
-- Fixed wizard completion behavior, added exit button to prevent loops and added support for new features in wizard.
-- Search behavior for audit records improved for subs with larger history
-- Renamed Approved Records to "Verified Users"
+- Submissions with multiple photos can now be browsed by swiping left or right in the enlarged image viewer.
+- Removed **Terms Accepted** and **Age Confirmed** timestamps from queue cards to reduce clutter. This information remains stored for audit and tracking purposes.
+- Improved the Android photo-instructions flow, including a confirmation prompt when instructions were reviewed recently.
+- Improved wizard completion behavior, added an exit option to prevent navigation loops, and added support for introducing newly released features.
+- Improved audit-record search performance for communities with larger histories.
+- Renamed **Approved Records** to **Verified Users**.
+- Fixed photo-instruction scrolling on iOS 27.
 
 ---
 
