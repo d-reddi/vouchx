@@ -2,6 +2,7 @@ import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 import brandVxUrl from './brand-vx.png';
+import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-state.js';
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
@@ -310,6 +311,7 @@ import brandVxUrl from './brand-vx.png';
   const wizardModalBody = document.getElementById('wizard-modal-body');
   const wizardModalHint = document.getElementById('wizard-modal-hint');
   const wizardModalExtras = document.getElementById('wizard-modal-extras');
+  const wizardModalExitBtn = document.getElementById('wizard-modal-exit-btn');
   const wizardModalBtn = document.getElementById('wizard-modal-btn');
   const externalNavigationLinks = Array.from(document.querySelectorAll('[data-open-external-url]'));
 
@@ -530,12 +532,6 @@ import brandVxUrl from './brand-vx.png';
   const APPROVAL_FLAIR_MANUAL_VALUE = '__manual__';
   const queryParams = new URLSearchParams(window.location.search);
   const themeSubredditScope = (queryParams.get('subredditId') || 'default').trim().toLowerCase() || 'default';
-  try {
-    // Consume the hub-side setup-mode flag; wizard handles its own state.
-    window.localStorage.removeItem('vx_setup_mode');
-  } catch (_e) {
-    // localStorage unavailable
-  }
   // Manual toggle: false in production
   const wizardDebugMode = false;
   // Force a specific mode while debugging ('setup' | 'onboarding' | 'features' | null). Keep null in production.
@@ -549,10 +545,12 @@ import brandVxUrl from './brand-vx.png';
   // Set while the footer "Replay walkthrough" run is in progress so the wizard's own
   // shouldShowWizard()/needsOnboarding gates don't tear it down for an already-onboarded mod.
   let wizardForcedRun = false;
+  let wizardCompleting = false;
   let wizardLastRenderedStep = -1;
   let wizardSpotlightTargetEl = null;
   let wizardHighlightedEls = [];
   let wizardScrollLocked = false;
+  const wizardDismissedRunIds = new Set();
   const THEME_SNAPSHOT_KEY = `nsfw-verify-theme-snapshot-v1:${themeSubredditScope}`;
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MAX_BATCH_REVIEW_ITEMS = 25;
@@ -1137,15 +1135,6 @@ import brandVxUrl from './brand-vx.png';
       button.addEventListener('click', () => {
         const sub = String(button.dataset.templateSubtab || 'pending');
         setTemplateSubtab(sub);
-        // Advance the wizard from navigate phase when the mod taps the target template tab.
-        if (wizardStep >= 0 && wizardPhase === 'navigate') {
-          const stepDef = wizardActiveSteps[wizardStep];
-          if (stepDef && stepDef.isTourStep && stepDef.isTemplateSubtab && sub === stepDef.templateSubtab) {
-            wizardPhase = 'learn';
-            hideWizardSpotlight();
-            renderWizardBanner(stepDef);
-          }
-        }
       });
     });
   }
@@ -2215,7 +2204,6 @@ import brandVxUrl from './brand-vx.png';
       setBusy(true);
       try {
         const requestBody = {
-          type: 'saveFlair',
           flairTemplateId,
           flairCssClass: flairCssClassInput ? flairCssClassInput.value : '',
           additionalApprovalFlairs,
@@ -2746,11 +2734,6 @@ import brandVxUrl from './brand-vx.png';
 
       if (message.type === 'unblockUser') {
         applyMutationApiState(await requestJson('/api/mod/unblock', { username: message.username }));
-        return;
-      }
-
-      if (message.type === 'saveFlair') {
-        applyMutationApiState(await requestJson('/api/mod/settings/flair', message));
         return;
       }
 
@@ -5543,10 +5526,15 @@ import brandVxUrl from './brand-vx.png';
   function shouldShowWizard() {
     if (!state) return false;
     if (wizardForcedRun) return true; // Manual replay bypasses the one-time onboarding gate.
+    // Once a real run starts, its mode remains authoritative until completion or an
+    // explicit reset. Fresh server state can change as setup is saved, but must not leave
+    // an invisible run holding wizardStep >= 0.
+    if (isWizardRunActive(wizardStep, wizardMode)) return true;
     const mode = resolveWizardMode();
     if (mode === null) return false;
     if (wizardDebugMode) return true; // Always show a wizard when debugging
     const featurePacks = mode === 'features' ? getPendingFeaturePacks() : [];
+    if (wizardDismissedRunIds.has(getWizardStorageKey(mode, featurePacks))) return false;
     const stored = readWizardStorage(mode, featurePacks);
     if (stored && stored.done) return false;
     return true;
@@ -5559,7 +5547,10 @@ import brandVxUrl from './brand-vx.png';
   function buildWizardActiveSteps(mode) {
     const canSettings = Boolean(state && state.canAccessSettingsTab);
     if (mode === 'features') {
-      return buildFeatureWizardActiveSteps(getPendingFeaturePacks(), canSettings);
+      const featurePacks = wizardMode === 'features' && wizardFeaturePacks.length > 0
+        ? wizardFeaturePacks
+        : getPendingFeaturePacks();
+      return buildFeatureWizardActiveSteps(featurePacks, canSettings);
     }
     return WIZARD_STEPS.filter((step) => {
       if (mode === 'onboarding' && step.setupOnly) return false;
@@ -5617,6 +5608,41 @@ import brandVxUrl from './brand-vx.png';
         primaryBtn: 'Got it',
       },
     ];
+  }
+
+  function reconcileActiveWizardSteps() {
+    if (wizardStep < 0 || !wizardMode) {
+      return true;
+    }
+    if (wizardMode === 'setup' && !(state && state.canAccessSettingsTab)) {
+      dismissWizardForSession('The setup guide closed because your settings access changed.');
+      return false;
+    }
+    const currentStep = wizardActiveSteps[wizardStep] || null;
+    const nextSteps = buildWizardActiveSteps(wizardMode);
+    if (nextSteps.length === 0) {
+      dismissWizardForSession('The guide closed because its available steps changed.');
+      return false;
+    }
+    const unchanged =
+      nextSteps.length === wizardActiveSteps.length &&
+      nextSteps.every((step, index) => step.id === wizardActiveSteps[index]?.id);
+    if (unchanged) {
+      return true;
+    }
+    wizardActiveSteps = nextSteps;
+    wizardStep = resolveReconciledWizardStepIndex(
+      currentStep?.id,
+      wizardStep,
+      nextSteps.map((step) => step.id)
+    );
+    const resolvedStep = wizardActiveSteps[wizardStep];
+    if (!currentStep || resolvedStep?.id !== currentStep.id) {
+      wizardPhase = resolvedStep && resolvedStep.isTourStep ? 'navigate' : 'learn';
+      wizardLastRenderedStep = -1;
+    }
+    writeWizardStorage(wizardStep, false);
+    return true;
   }
 
   function resolveWizardStepCopy(stepDef) {
@@ -5875,11 +5901,6 @@ import brandVxUrl from './brand-vx.png';
   function getWizardSpotlightTarget(stepDef) {
     if (!stepDef) return null;
     if (stepDef.isTourStep && wizardPhase === 'navigate') {
-      if (stepDef.isTemplateSubtab && stepDef.templateSubtab) {
-        return (
-          document.querySelector(`.template-subtab-btn[data-template-subtab="${stepDef.templateSubtab}"]`) || null
-        );
-      }
       if (stepDef.isSettingsSubTab && stepDef.settingsTab) {
         return settingsTabButtons.find((btn) => btn.dataset.settingsTab === stepDef.settingsTab) || null;
       }
@@ -5889,6 +5910,18 @@ import brandVxUrl from './brand-vx.png';
       return document.getElementById(stepDef.spotlightElementId);
     }
     return null;
+  }
+
+  function isWizardTargetActionable(targetEl) {
+    if (!targetEl || !targetEl.isConnected || targetEl.hidden || targetEl.disabled) {
+      return false;
+    }
+    const style = window.getComputedStyle(targetEl);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') {
+      return false;
+    }
+    const rect = targetEl.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   }
 
   function lockWizardScroll() {
@@ -5940,11 +5973,7 @@ import brandVxUrl from './brand-vx.png';
 
   function showWizardSpotlight(targetEl) {
     if (!wizardSpotlightRing || !wizardOverlay || !targetEl) return;
-    if (wizardSpotlightTargetEl && wizardSpotlightTargetEl !== targetEl) {
-      wizardSpotlightTargetEl.classList.remove('wizard-spotlight-target');
-    }
     wizardSpotlightTargetEl = targetEl;
-    targetEl.classList.add('wizard-spotlight-target');
     wizardOverlay.classList.remove('hidden');
     // Unlock so the programmatic scroll can run, jump the target into view, then re-lock
     // so the highlight stays put until the mod acts. Use instant scroll: a smooth scroll
@@ -5973,7 +6002,6 @@ import brandVxUrl from './brand-vx.png';
     if (wizardOverlay) wizardOverlay.classList.add('hidden');
     clearWizardOverlayHole();
     if (wizardSpotlightTargetEl) {
-      wizardSpotlightTargetEl.classList.remove('wizard-spotlight-target');
       wizardSpotlightTargetEl = null;
     }
   }
@@ -6172,17 +6200,23 @@ import brandVxUrl from './brand-vx.png';
     const inNavigatePhase = stepDef.isTourStep && wizardPhase === 'navigate';
 
     if (inNavigatePhase) {
-      // Navigate phase: tell user exactly what to tap; hide Next so they must tap the target
+      const navigationTarget = getWizardSpotlightTarget(stepDef);
+      const canUseNavigationTarget = isWizardTargetActionable(navigationTarget);
       if (wizardBannerTitle) wizardBannerTitle.textContent = copy.title;
       if (wizardBannerBody) {
         let loc;
-        if (stepDef.isTemplateSubtab) loc = 'the template tabs';
-        else if (stepDef.isSettingsSubTab) loc = 'the settings menu below';
+        if (stepDef.isSettingsSubTab) loc = 'the settings menu below';
         else loc = 'the navigation above';
-        wizardBannerBody.textContent = `Tap "${stepDef.navigateLabel}" in ${loc} to continue.`;
+        wizardBannerBody.textContent = canUseNavigationTarget
+          ? `Tap "${stepDef.navigateLabel}" in ${loc} to continue.`
+          : `Continue to the ${stepDef.navigateLabel} overview.`;
       }
       if (wizardBackBtn) wizardBackBtn.classList.toggle('hidden', stepNumber <= 1);
-      if (wizardNextBtn) wizardNextBtn.classList.add('hidden');
+      if (wizardNextBtn) {
+        wizardNextBtn.textContent = 'Continue →';
+        wizardNextBtn.classList.toggle('hidden', canUseNavigationTarget);
+        wizardNextBtn.disabled = false;
+      }
       if (wizardBannerExtra) {
         wizardBannerExtra.classList.add('hidden');
         wizardBannerExtra.innerHTML = '';
@@ -6217,6 +6251,10 @@ import brandVxUrl from './brand-vx.png';
     if (wizardModalTitle) wizardModalTitle.textContent = copy.title;
     if (wizardModalBody) wizardModalBody.textContent = copy.body;
     if (wizardModalBtn) wizardModalBtn.textContent = copy.primaryBtn || 'Continue';
+    if (wizardModalExitBtn) {
+      const canExitFromOpeningModal = wizardStep === 0 && wizardMode !== 'setup';
+      wizardModalExitBtn.classList.toggle('hidden', !canExitFromOpeningModal);
+    }
     if (wizardModalHint) wizardModalHint.classList.toggle('hidden', !stepDef.hasHintReminder);
     if (wizardModalExtras) {
       wizardModalExtras.innerHTML = '';
@@ -6270,6 +6308,14 @@ import brandVxUrl from './brand-vx.png';
 
   function advanceWizard() {
     if (wizardStep < 0 || wizardStep >= wizardActiveSteps.length - 1) return;
+    const currentStep = wizardActiveSteps[wizardStep];
+    if (currentStep && currentStep.isTourStep && wizardPhase === 'navigate') {
+      wizardPhase = 'learn';
+      navigateForWizardStep(currentStep);
+      writeWizardStorage(wizardStep, false);
+      renderWizard();
+      return;
+    }
     wizardStep += 1;
     const nextStep = wizardActiveSteps[wizardStep];
     wizardPhase = nextStep && nextStep.isTourStep ? 'navigate' : 'learn';
@@ -6292,43 +6338,77 @@ import brandVxUrl from './brand-vx.png';
     hideWizardInlineDetail();
     clearWizardFieldHighlights();
     hideWizardDemo();
+    document.body.classList.remove('wizard-demo-bulk-active');
+    document.documentElement.style.setProperty('--wizard-banner-height', '0px');
   }
 
-  function markWizardCompletedOnServer(completedMode, completedFeaturePacks) {
-    if (wizardDebugMode) return; // don't pollute real state while debugging
-    if (completedMode === 'features') {
-      const packIds = (completedFeaturePacks || []).map((pack) => pack.id).filter(Boolean);
-      if (packIds.length > 0) {
-        void requestJson('/api/mod/feature-education/complete', { packIds }).catch(() => {});
-      }
-      return;
-    }
-    // Fire-and-forget: records that this moderator has been through the walkthrough so it
-    // never shows again (setup completion counts as onboarding too). The server also marks
-    // current feature education packs complete so brand-new mods do not get a second tour.
-    void requestJson('/api/mod/onboarding/complete', {}).catch(() => {});
-  }
-
-  function completeWizard() {
-    const completedMode = wizardMode;
-    const completedFeaturePacks = wizardFeaturePacks.slice();
-    writeWizardStorage(wizardStep, true);
-    markWizardCompletedOnServer(completedMode, completedFeaturePacks);
+  function resetWizardRun() {
     wizardStep = -1;
     wizardMode = null;
     wizardFeaturePacks = [];
     wizardActiveSteps = [];
     wizardLastRenderedStep = -1;
-    wizardForcedRun = false; // End any manual replay so the gate applies again.
+    wizardForcedRun = false;
+    wizardMinimized = false;
     hideAllWizardUi();
-    // The final steps leave the mod on the Settings/Templates tab — drop them back on the
-    // Queue so they land where day-to-day review happens.
+  }
+
+  function dismissWizardForSession(message = '') {
+    if (wizardMode) {
+      wizardDismissedRunIds.add(getWizardStorageKey(wizardMode, wizardFeaturePacks));
+    }
+    resetWizardRun();
     setTab('pending');
-    // Wizard suppressed update notices while it ran; re-render now so any pending
-    // (including critical) notice surfaces immediately instead of waiting for a refresh.
     renderUpdateNotice();
-    // Offer the replay entry point again now that the run is over.
     renderFooterMeta();
+    if (message) {
+      showToast(message, 'info');
+    }
+  }
+
+  async function markWizardCompletedOnServer(completedMode, completedFeaturePacks) {
+    if (wizardDebugMode) return null; // don't pollute real state while debugging
+    if (completedMode === 'features') {
+      const packIds = (completedFeaturePacks || []).map((pack) => pack.id).filter(Boolean);
+      if (packIds.length > 0) {
+        return requestJson('/api/mod/feature-education/complete', { packIds });
+      }
+      return null;
+    }
+    return requestJson('/api/mod/onboarding/complete', {});
+  }
+
+  async function completeWizard() {
+    if (wizardCompleting || wizardStep < 0 || !wizardMode) {
+      return;
+    }
+    const completedMode = wizardMode;
+    const completedFeaturePacks = wizardFeaturePacks.slice();
+    wizardCompleting = true;
+    if (wizardModalBtn) {
+      wizardModalBtn.disabled = true;
+      wizardModalBtn.textContent = 'Saving…';
+    }
+    if (wizardModalExitBtn) wizardModalExitBtn.disabled = true;
+    try {
+      const payload = await markWizardCompletedOnServer(completedMode, completedFeaturePacks);
+      writeWizardStorage(wizardStep, true);
+      resetWizardRun();
+      if (payload) {
+        applyApiState(payload);
+      }
+      // Final steps can leave the mod in Settings. Return to the daily review queue.
+      setTab('pending');
+      renderUpdateNotice();
+      renderFooterMeta();
+    } catch (error) {
+      showToast(`Couldn't save guide completion: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      renderWizard();
+    } finally {
+      wizardCompleting = false;
+      if (wizardModalBtn) wizardModalBtn.disabled = false;
+      if (wizardModalExitBtn) wizardModalExitBtn.disabled = false;
+    }
   }
 
   function renderWizard() {
@@ -6346,7 +6426,7 @@ import brandVxUrl from './brand-vx.png';
       wizardFeaturePacks = wizardMode === 'features' ? getPendingFeaturePacks() : [];
       wizardActiveSteps = buildWizardActiveSteps(wizardMode);
       if (wizardActiveSteps.length === 0) {
-        hideAllWizardUi();
+        dismissWizardForSession('The guide has no available steps for your current access.');
         return;
       }
       const stored = readWizardStorage(wizardMode, wizardFeaturePacks);
@@ -6354,13 +6434,16 @@ import brandVxUrl from './brand-vx.png';
       wizardStep = Math.min(Math.max(0, storedStep), wizardActiveSteps.length - 1);
       writeWizardStorage(wizardStep, false);
     }
+    if (!reconcileActiveWizardSteps()) {
+      return;
+    }
     if (!shouldShowWizard()) {
-      hideAllWizardUi();
+      dismissWizardForSession();
       return;
     }
     const stepDef = wizardActiveSteps[wizardStep];
     if (!stepDef) {
-      hideAllWizardUi();
+      dismissWizardForSession('The guide closed because its current step is unavailable.');
       return;
     }
     const stepChanged = wizardStep !== wizardLastRenderedStep;
@@ -6453,7 +6536,7 @@ import brandVxUrl from './brand-vx.png';
     const inNavigatePhase = stepDef.isTourStep && wizardPhase === 'navigate';
     if (inNavigatePhase) {
       const target = getWizardSpotlightTarget(stepDef);
-      if (target) {
+      if (isWizardTargetActionable(target)) {
         showWizardSpotlight(target);
       } else {
         hideWizardSpotlight();
@@ -6466,7 +6549,7 @@ import brandVxUrl from './brand-vx.png';
       navigateForWizardStep(stepDef);
     }
     const target = getWizardSpotlightTarget(stepDef);
-    if (target) {
+    if (isWizardTargetActionable(target)) {
       showWizardSpotlight(target);
     } else {
       hideWizardSpotlight();
@@ -8852,9 +8935,17 @@ import brandVxUrl from './brand-vx.png';
   if (wizardModalBtn) {
     wizardModalBtn.addEventListener('click', () => {
       if (wizardStep === wizardActiveSteps.length - 1) {
-        completeWizard();
+        void completeWizard();
       } else {
         advanceWizard();
+      }
+    });
+  }
+
+  if (wizardModalExitBtn) {
+    wizardModalExitBtn.addEventListener('click', () => {
+      if (!wizardCompleting) {
+        dismissWizardForSession('Guide closed for this session. You can replay it from the footer.');
       }
     });
   }

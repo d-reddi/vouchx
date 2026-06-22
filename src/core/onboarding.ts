@@ -45,6 +45,38 @@ function featureEducationCompletionExpiration(): Date {
   return new Date(Date.now() + FEATURE_EDUCATION_COMPLETION_TTL_DAYS * MILLIS_PER_DAY);
 }
 
+type CompletionWrite = {
+  key: string;
+  value: string;
+  expiration?: Date;
+};
+
+async function writeCompletionStateAtomically(
+  context: Pick<Devvit.Context, 'redis'>,
+  writes: readonly CompletionWrite[]
+): Promise<void> {
+  if (writes.length === 0) {
+    return;
+  }
+  const keys = writes.map((write) => write.key);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const transaction = await context.redis.watch(...keys);
+    await transaction.multi();
+    for (const write of writes) {
+      await transaction.set(
+        write.key,
+        write.value,
+        write.expiration ? { expiration: write.expiration } : undefined
+      );
+    }
+    const results = await transaction.exec();
+    if (Array.isArray(results)) {
+      return;
+    }
+  }
+  throw new Error('Completion state changed while it was being saved. Please retry.');
+}
+
 export function getCurrentFeatureEducationPacks(): FeatureEducationPackState[] {
   return CURRENT_FEATURE_EDUCATION_PACKS.map(cloneFeaturePack);
 }
@@ -94,14 +126,13 @@ export async function markModeratorFeatureEducationCompleted(
   }
   const completedAt = new Date().toISOString();
   const expiration = featureEducationCompletionExpiration();
-  await Promise.all(
-    packs.map((pack) =>
-      context.redis.set(
-        moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
-        completedAt,
-        { expiration }
-      )
-    )
+  await writeCompletionStateAtomically(
+    context,
+    packs.map((pack) => ({
+      key: moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
+      value: completedAt,
+      expiration,
+    }))
   );
 }
 
@@ -136,14 +167,15 @@ export async function markModeratorOnboardingCompleted(
   }
   const completedAt = new Date().toISOString();
   const featureExpiration = featureEducationCompletionExpiration();
-  await Promise.all([
-    context.redis.set(moderatorOnboardingCompletedKey(subredditId, normalizedModerator), completedAt),
-    ...CURRENT_FEATURE_EDUCATION_PACKS.map((pack) =>
-      context.redis.set(
-        moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
-        completedAt,
-        { expiration: featureExpiration }
-      )
-    ),
+  await writeCompletionStateAtomically(context, [
+    {
+      key: moderatorOnboardingCompletedKey(subredditId, normalizedModerator),
+      value: completedAt,
+    },
+    ...CURRENT_FEATURE_EDUCATION_PACKS.map((pack) => ({
+      key: moderatorFeatureEducationCompletedKey(subredditId, normalizedModerator, pack.id),
+      value: completedAt,
+      expiration: featureExpiration,
+    })),
   ]);
 }

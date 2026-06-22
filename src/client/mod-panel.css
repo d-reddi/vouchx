@@ -1298,10 +1298,6 @@ body.wizard-scroll-locked {
   }
 }
 
-.wizard-spotlight-target {
-  /* Kept for potential future use; z-index lifting no longer needed */
-}
-
 /* === End Setup Wizard === */
 
 .update-notice-notes {

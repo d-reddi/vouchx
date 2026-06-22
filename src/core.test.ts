@@ -404,11 +404,51 @@ function createUpdateNoticeContext(options?: {
   subredditId?: string;
   settingsValues?: Record<string, string | boolean | undefined>;
   initialDismissals?: Record<string, string>;
+  transactionExecFailures?: number;
 }) {
   const settingsValues = options?.settingsValues ?? {};
   const redisStore = new Map<string, string>(Object.entries(options?.initialDismissals ?? {}));
   const getCalls: string[] = [];
   const setCalls: Array<[string, string, unknown?]> = [];
+  const watchCalls: string[][] = [];
+  let transactionExecFailures = options?.transactionExecFailures ?? 0;
+  let transactionExecCalls = 0;
+
+  const redis = {
+    async get(key: string) {
+      getCalls.push(key);
+      return redisStore.get(key) ?? null;
+    },
+    async set(key: string, value: string, setOptions?: unknown) {
+      setCalls.push([key, value, setOptions]);
+      redisStore.set(key, value);
+      return 'OK';
+    },
+    async watch(...keys: string[]) {
+      watchCalls.push(keys);
+      const queuedWrites: Array<[string, string, unknown?]> = [];
+      const transaction = {
+        async multi() {},
+        async set(key: string, value: string, setOptions?: unknown) {
+          queuedWrites.push([key, value, setOptions]);
+          return transaction;
+        },
+        async exec() {
+          transactionExecCalls += 1;
+          if (transactionExecFailures > 0) {
+            transactionExecFailures -= 1;
+            return null;
+          }
+          for (const [key, value, setOptions] of queuedWrites) {
+            setCalls.push([key, value, setOptions]);
+            redisStore.set(key, value);
+          }
+          return queuedWrites.map(() => 'OK');
+        },
+      };
+      return transaction;
+    },
+  };
 
   return {
     context: {
@@ -419,21 +459,15 @@ function createUpdateNoticeContext(options?: {
           return settingsValues[key] ?? settingsValues[key.replace(/^play_/, '')];
         },
       },
-      redis: {
-        async get(key: string) {
-          getCalls.push(key);
-          return redisStore.get(key) ?? null;
-        },
-        async set(key: string, value: string, options?: unknown) {
-          setCalls.push([key, value, options]);
-          redisStore.set(key, value);
-          return 'OK';
-        },
-      },
+      redis,
     },
     getCalls,
     setCalls,
+    watchCalls,
     redisStore,
+    get transactionExecCalls() {
+      return transactionExecCalls;
+    },
   };
 }
 
@@ -6086,7 +6120,7 @@ test('getPendingModeratorFeatureEducationPacks surfaces new packs for already-on
 });
 
 test('markModeratorFeatureEducationCompleted suppresses only the completed feature pack', async () => {
-  const featureContext = createUpdateNoticeContext();
+  const featureContext = createUpdateNoticeContext({ transactionExecFailures: 1 });
 
   await withFixedNow('2026-03-15T00:00:00.000Z', async () => {
     await markModeratorFeatureEducationCompleted(featureContext.context as never, 'Mod_One', [
@@ -6098,6 +6132,8 @@ test('markModeratorFeatureEducationCompleted suppresses only the completed featu
 
   assert.deepEqual(packs, []);
   assert.equal(featureContext.setCalls.length, 1);
+  assert.equal(featureContext.watchCalls.length, 2);
+  assert.equal(featureContext.transactionExecCalls, 2);
   assert.match(
     featureContext.setCalls[0][0],
     /subreddit:t5_example:moderator:feature-education:mod_one:peer-review-denial-badges$/
@@ -6129,6 +6165,20 @@ test('markModeratorOnboardingCompleted also completes current feature education 
     )
   );
   assert.equal(featureExpirationOptions?.expiration?.toISOString(), '2027-09-06T00:00:00.000Z');
+});
+
+test('markModeratorOnboardingCompleted leaves no partial state when its transaction cannot commit', async () => {
+  const featureContext = createUpdateNoticeContext({ transactionExecFailures: 3 });
+
+  await assert.rejects(
+    markModeratorOnboardingCompleted(featureContext.context as never, 'Mod_One'),
+    /Completion state changed/
+  );
+
+  assert.equal(featureContext.watchCalls.length, 3);
+  assert.equal(featureContext.transactionExecCalls, 3);
+  assert.equal(featureContext.setCalls.length, 0);
+  assert.equal(featureContext.redisStore.size, 0);
 });
 
 test('toPublicHubConfig omits moderator-only template content', () => {

@@ -2101,11 +2101,6 @@ export function mountHub(options = {}) {
     if (state.requiresInitialSetup && state.canReview) {
       refs.actionRow.appendChild(
         makeButton('Complete Setup', 'btn-secondary', async (event) => {
-          try {
-            window.localStorage.setItem('vx_setup_mode', '1');
-          } catch (_e) {
-            // localStorage unavailable
-          }
           if (inline) {
             try {
               if (event instanceof MouseEvent) {
