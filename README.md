@@ -30,8 +30,9 @@ Workflow demos:
 
 ## Quick Setup
 
-Follow the onboarding wizard that runs through the steps below:
+Onboarding wizard automatically runs through setup.  
 
+Manual Steps:
 1. Install VouchX in your subreddit  
 2. Run **Create Verification Hub (VouchX)** from the mod menu  
 3. Open the hub post → click **Mod Panel**  
@@ -66,7 +67,8 @@ Follow the onboarding wizard that runs through the steps below:
 Track moderator activity and verification volume.
 
 - **Currently Verified** = users approved right now  
-- **Approvals / Denials** = actions during the selected time range  
+- **Approvals / Denials** = actions during the selected time range 
+- **Decision Time & Reason usage** = how long it takes to action verifications
 
 *Note: Counts may change due to removals, expirations, or cleanup.*
 
@@ -111,7 +113,7 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.6
+### v1.5.7
 
 #### New Features
 - Added a Denial tag to queue cards. Tap it to view the most recent denial details.
@@ -141,26 +143,4 @@ Full changelog:
 - Fixes an issue where the auto flair repair could silently skip approved users verified before VouchX v1.3.0
 - TTL for newly approved records extended to 180 days to better support members who browse infrequently. Records for previously approved users are unaffected.
 - New Setup and Moderator onboarding wizard. 
-
----
-
-### v1.5.1
-
-#### UI Changes
-
-- Updated the Verification Hub with a more modern, easier-to-understand interface, including larger text, clearer timelines, and improved mobile spacing.
-- Mod Panel UI overhaul: Queue cards now show multiple photos on mobile, card details are simplified, and actions are easier to scan.
-- Denial flow improved: denial reason and moderator notes are shown after pressing Deny the first time, reducing clutter on queue cards.
-- Settings experience streamlined with cleaner navigation, lighter section structure, unified theme styling, and improved template editing.
-- Photo instructions are now optimized for mobile review, with improved language picker behavior and better use of available space.
-- Added optional verification requirement setting for communicating sub-level posting / commenting restrictions.
-- Updated VouchX branding with the new VX logo treatment for the hub, loading state, and app/profile icon.
-- Improved the hub loading experience with a branded loading state for inline Reddit views.
-
-#### Technical Changes
-
-- Updated VouchX to Devvit 0.13.0 and the current Devvit Web app structure.
-- Improved handling of transient Reddit/Devvit transport errors, including GOAWAY, cancelled calls, and retry-exhausted responses.
-- Improved moderator permission lookup resilience with retry behavior before falling back to cached permissions.
-- Updated queue lock TTL behavior.
 
