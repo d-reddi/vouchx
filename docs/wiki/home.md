@@ -34,7 +34,6 @@ Use this wiki in this order:
 - The install settings link is only shown to moderators with install/config access. Communities can also restrict the Settings tab to config-level moderators.
 - Queue review cards are hidden until a valid approval flair is saved in `Settings -> General`.
 - Denial reasons come from install settings. If a denial label is blank, that reason is hidden from the review and template UI.
-- VouchX runs as a Devvit Web app using Reddit API access, Devvit media uploads, realtime updates, and Redis-backed app storage.
 
 ## Related pages
 

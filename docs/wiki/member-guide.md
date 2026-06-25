@@ -27,7 +27,7 @@ The number of required photos is set by the subreddit moderators and can be 1, 2
 | `Pending review` | A moderator has not reviewed your request yet. | Wait for review or use `Withdraw Pending Verification` to cancel it. |
 | `Pending re-review` | A moderator reopened a denied case and moved it back into the queue. | Wait for review or use `Withdraw Pending Verification` to cancel it. |
 | `Verified` | Your account is verified through the configured VouchX flair check. | No action is required. You can use `Remove Verification` if you want to remove it. |
-| `Verified (Manual)` | Your account is being treated as verified through a subreddit-configured flair CSS fallback instead of a direct template-ID match. | No action is required. You can use `Remove Verification` if you want to remove it. |
+| `Verified (Manual)` | Your account is being treated as maually verified. | No action is required. You can use `Remove Verification` if you want to remove it. |
 | `Blocked` | You cannot submit new verification requests in this subreddit. This affects verification submissions only, not posting in the subreddit. | Only a moderator can remove the block. |
 
 ## While a request is pending
@@ -39,14 +39,13 @@ The number of required photos is set by the subreddit moderators and can be 1, 2
 ## If the request is denied
 
 - The latest submission shows the denial reason label chosen by the moderators.
-- Members can submit again unless they have been blocked due to the subreddit denial threshold, a manual moderator block, or an app-level global block.
+- You submit again unless they have been blocked due to the subreddit denial threshold, a manual moderator block, or an app-level global block.
 - In some cases moderators can reopen the denied case for re-review instead of requiring a new upload.
 - If Reddit reports the account as shadowbanned and the subreddit has automatic shadowban denial enabled, VouchX may deny the request automatically and send appeal guidance.
 
 ## If the request is approved
 
 - The configured verification flair is applied.
-- If the subreddit uses multiple approval flairs, the moderator may choose which approval flair to apply.
 - The app shows the account as verified based on flair detection.
 - Members can later click `Remove Verification` to remove their verified status and stored verification data.
 

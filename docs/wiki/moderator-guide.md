@@ -76,9 +76,7 @@ For a normal pending request:
 - optionally tick `Block user`
 - click `Confirm denial`
 
-Denial opens inline options first; pressing Enter in the notes field does not deny the request. Use `Confirm denial` intentionally.
-
-Denial notes appear in moderator notes and can also be inserted into denial templates with `{{denial_notes}}`. The Templates tab can also auto-append moderator denial notes unless the denial header/body already uses `{{denial_notes}}`.
+Denial notes appear in moderator notes and can also be inserted into denial templates with `{{denial_notes}}`. 
 
 By default, after 3 denials, the app automatically blocks that user from submitting again until a moderator removes the block. The threshold is configurable in install settings and can be disabled by setting it to `0`.
 
@@ -89,9 +87,7 @@ If `Auto-deny shadowbanned accounts` is enabled, Reddit-reported shadowbanned ac
 Use the checkboxes on queue cards to select multiple requests.
 
 - Batch approval requires at least two selected requests.
-- Batch denial requires at least two selected non-reopened requests and a denial reason.
 - Reopened re-review requests are excluded from batch denial.
-- Batch actions use the same lock and permission rules as single-card actions.
 
 ### Re-review
 
@@ -108,7 +104,6 @@ Use `Blocked` to manage accounts that cannot submit.
 - `Remove Block` restores the user’s ability to submit.
 - Search can match username or block reason.
 - Auto-blocked users show their denial count and the threshold reason.
-- Global blocks, when configured by the app owner through Devvit install/global settings, also prevent submissions.
 
 ## History tab
 
@@ -122,9 +117,7 @@ Use this view to search past verification records by:
 - status (`All`, `Approved`, `Denied`, `Reopened`)
 - submitted date range
 
-This view is where moderators can reopen denied cases when the original photos are still available.
-
-The default summary is `Last 45 days`. Large histories are scanned in batches so search can still find older matching records within the retained window.
+This view is where moderators can reopen denied cases when the original photos are still available, default summary is `Last 45 days`..
 
 ### Verified Users
 
