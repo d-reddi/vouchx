@@ -2,6 +2,7 @@ import { disconnectRealtime, connectRealtime } from '@devvit/realtime/client';
 import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client';
 import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 import brandVxUrl from './brand-vx.png';
+import { createImageLightbox } from './image-lightbox.js';
 import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-state.js';
 
 (function () {
@@ -245,6 +246,16 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   const imagePrevBtn = document.getElementById('image-prev');
   const imageNextBtn = document.getElementById('image-next');
   const imageCounter = document.getElementById('image-counter');
+  const imageLightbox = createImageLightbox({
+    closeButton: imageClose,
+    counter: imageCounter,
+    modal: imageModal,
+    nextButton: imageNextBtn,
+    normalizeUrl: normalizeExternalUrl,
+    preview: imagePreview,
+    prevButton: imagePrevBtn,
+  });
+  const openImage = imageLightbox.open;
   const statsModal = document.getElementById('stats-modal');
   const statsCloseBtn = document.getElementById('stats-close-btn');
   const statsUsername = document.getElementById('stats-username');
@@ -447,11 +458,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   let pendingFlaggedOnlyFilter = false;
   let selectedPendingIds = new Set();
   const pendingActionIds = new Set();
-  // Lightbox gallery state: the photo set currently open in the image modal.
-  let lightboxPhotos = [];
-  let lightboxIndex = 0;
-  let lightboxTouchStartX = null;
-  let lightboxTouchStartY = null;
   let batchApprovalFlairDraft = '';
   let batchApprovalOptionsExpanded = false;
   let batchDenyReasonDraft = '';
@@ -7240,80 +7246,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     return title;
   }
 
-  function normalizeLightboxPhotos(photosOrUrl) {
-    const list = Array.isArray(photosOrUrl) ? photosOrUrl : [photosOrUrl];
-    const normalized = [];
-    for (const entry of list) {
-      const url = normalizeExternalUrl(typeof entry === 'string' ? entry : entry && entry.url);
-      if (url) {
-        normalized.push({
-          url,
-          label: entry && typeof entry === 'object' && entry.label ? String(entry.label) : 'Verification photo',
-        });
-      }
-    }
-    return normalized;
-  }
-
-  function renderLightbox() {
-    const photo = lightboxPhotos[lightboxIndex];
-    if (!photo) {
-      closeImage();
-      return;
-    }
-    imagePreview.src = photo.url;
-    imagePreview.alt = photo.label;
-    const hasMultiplePhotos = lightboxPhotos.length > 1;
-    if (imagePrevBtn) {
-      imagePrevBtn.classList.toggle('hidden', !hasMultiplePhotos);
-      imagePrevBtn.disabled = lightboxIndex <= 0;
-    }
-    if (imageNextBtn) {
-      imageNextBtn.classList.toggle('hidden', !hasMultiplePhotos);
-      imageNextBtn.disabled = lightboxIndex >= lightboxPhotos.length - 1;
-    }
-    if (imageCounter) {
-      imageCounter.classList.toggle('hidden', !hasMultiplePhotos);
-      imageCounter.textContent = hasMultiplePhotos ? `${lightboxIndex + 1} of ${lightboxPhotos.length}` : '';
-    }
-    // Preload neighbors so swiping between photos is instant.
-    for (const neighborIndex of [lightboxIndex - 1, lightboxIndex + 1]) {
-      const neighbor = lightboxPhotos[neighborIndex];
-      if (neighbor) {
-        new Image().src = neighbor.url;
-      }
-    }
-  }
-
-  function stepLightbox(delta) {
-    const nextIndex = lightboxIndex + delta;
-    if (nextIndex < 0 || nextIndex >= lightboxPhotos.length) {
-      return;
-    }
-    lightboxIndex = nextIndex;
-    renderLightbox();
-  }
-
-  function openImage(photosOrUrl, startIndex) {
-    lightboxPhotos = normalizeLightboxPhotos(photosOrUrl);
-    if (lightboxPhotos.length === 0) {
-      return;
-    }
-    const requestedIndex = Math.floor(Number(startIndex));
-    lightboxIndex = Number.isFinite(requestedIndex)
-      ? Math.min(Math.max(0, requestedIndex), lightboxPhotos.length - 1)
-      : 0;
-    renderLightbox();
-    imageModal.classList.remove('hidden');
-  }
-
-  function closeImage() {
-    imageModal.classList.add('hidden');
-    imagePreview.src = '';
-    lightboxPhotos = [];
-    lightboxIndex = 0;
-  }
-
   function openBlockModal() {
     if (!blockModal || !blockUsernameInput) {
       return;
@@ -8679,70 +8611,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     });
   }
 
-  imageClose.addEventListener('click', closeImage);
-  imageModal.addEventListener('click', (event) => {
-    if (event.target === imageModal) {
-      closeImage();
-    }
-  });
-  if (imagePrevBtn) {
-    imagePrevBtn.addEventListener('click', () => stepLightbox(-1));
-  }
-  if (imageNextBtn) {
-    imageNextBtn.addEventListener('click', () => stepLightbox(1));
-  }
-  imageModal.addEventListener(
-    'touchstart',
-    (event) => {
-      if (event.touches.length !== 1) {
-        lightboxTouchStartX = null;
-        lightboxTouchStartY = null;
-        return;
-      }
-      lightboxTouchStartX = event.touches[0].clientX;
-      lightboxTouchStartY = event.touches[0].clientY;
-    },
-    { passive: true }
-  );
-  imageModal.addEventListener(
-    'touchend',
-    (event) => {
-      if (lightboxTouchStartX === null || lightboxTouchStartY === null) {
-        return;
-      }
-      const touch = event.changedTouches && event.changedTouches[0];
-      const startX = lightboxTouchStartX;
-      const startY = lightboxTouchStartY;
-      lightboxTouchStartX = null;
-      lightboxTouchStartY = null;
-      if (!touch) {
-        return;
-      }
-      const deltaX = touch.clientX - startX;
-      const deltaY = touch.clientY - startY;
-      // Only treat clearly horizontal gestures as swipes so vertical scrolling stays untouched.
-      if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) {
-        return;
-      }
-      stepLightbox(deltaX < 0 ? 1 : -1);
-    },
-    { passive: true }
-  );
-  document.addEventListener('keydown', (event) => {
-    if (imageModal.classList.contains('hidden')) {
-      return;
-    }
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      stepLightbox(-1);
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      stepLightbox(1);
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      closeImage();
-    }
-  });
   document.addEventListener('keydown', (event) => {
     if (!previousDenialModal || previousDenialModal.classList.contains('hidden')) {
       return;

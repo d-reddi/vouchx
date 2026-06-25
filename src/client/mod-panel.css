@@ -847,6 +847,12 @@ body.wizard-scroll-locked {
   overscroll-behavior: none;
 }
 
+html.image-modal-open,
+body.image-modal-open {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
 .wizard-banner-inner {
   padding: var(--space-6) var(--space-7);
   display: flex;
@@ -3650,18 +3656,41 @@ button.pending-age-denied-before:focus-visible {
   backdrop-filter: blur(8px);
 }
 
+.image-modal {
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+.image-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  touch-action: none;
+}
+
 .image-modal img {
+  position: relative;
+  z-index: 1;
   max-width: 100%;
   max-height: calc(100vh - 80px);
   display: block;
   border-radius: 14px;
   box-shadow: var(--card-shadow);
+  cursor: zoom-in;
+  transform-origin: center center;
+  touch-action: none;
+  will-change: transform;
+}
+
+.image-modal.image-modal-zoomed img {
+  cursor: grab;
 }
 
 .image-close {
   position: fixed;
   top: 14px;
   right: 14px;
+  z-index: 52;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 10px;
