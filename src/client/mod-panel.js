@@ -4468,7 +4468,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     if (isFlagged) {
       const unflagBtn = document.createElement('button');
       unflagBtn.className = 'btn btn-secondary pending-flag-btn pending-unflag-btn';
-      unflagBtn.textContent = 'Cancel Peer Review';
+      unflagBtn.textContent = 'Clear Peer Review';
       unflagBtn.title = actionInFlight
         ? 'This request is being processed.'
         : 'Clear peer review from this record.';
@@ -5765,7 +5765,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       id: 'demo-peer-review',
       type: 'banner',
       title: 'Ask for peer review',
-      body: 'Not sure about a request? Tap Peer Review to flag it for the team. It jumps to the top of the queue and any moderator can add notes here to compare findings. The flag and its notes clear automatically once the request is approved, denied, or peer review is cancelled.',
+      body: 'Not sure about a request? Tap Peer Review to flag it for the team. It jumps to the top of the queue and any moderator can add notes here to compare findings. The flag and its notes clear automatically once the request is approved, denied, or peer review is cleared.',
       tab: 'pending',
       isDemoStep: true,
       demoPeerReviewOpen: true,

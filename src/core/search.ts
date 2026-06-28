@@ -18,9 +18,9 @@ import type {
 } from './types.ts';
 import {
   APPROVED_PREFIX_SEARCH_OVERFETCH_MULTIPLIER,
-  AUDIT_FILTER_SCAN_BATCH_SIZE,
-  AUDIT_FILTER_SCAN_MAX_ENTRIES,
-  AUDIT_FILTER_SCAN_TIME_BUDGET_MS,
+  FILTERED_SEARCH_SCAN_BATCH_SIZE,
+  FILTERED_SEARCH_SCAN_MAX_ENTRIES,
+  FILTERED_SEARCH_SCAN_TIME_BUDGET_MS,
   MAX_PENDING_TO_LOAD,
   MILLIS_PER_DAY,
 } from './constants.ts';
@@ -184,6 +184,89 @@ function matchesHistoryStatusFilter(item: HistorySearchPanelItem, statusFilter: 
   return isReopenedHistoryItem(item);
 }
 
+function toHistorySearchPanelItem(record: VerificationRecord): HistorySearchPanelItem {
+  return {
+    id: record.id,
+    username: record.username,
+    status: record.status,
+    submittedAt: record.submittedAt,
+    acknowledgedAt: record.ageAcknowledgedAt,
+    reviewedAt: record.reviewedAt ?? null,
+    moderator: record.moderator ?? null,
+    denyReason: parseDenyReason(record.denyReason) ?? null,
+    parentVerificationId: record.parentVerificationId ?? null,
+    reopenedChildId: null,
+    reopenedState: 'none',
+    ...(record.status === 'approved' ? toSearchPhotoLinkFields(record) : {}),
+  };
+}
+
+async function enrichHistoryReopenState(
+  context: Devvit.Context,
+  subredditId: string,
+  items: HistorySearchPanelItem[]
+): Promise<void> {
+  const deniedItems = items.filter((item) => item.status === 'denied');
+  if (deniedItems.length === 0) {
+    return;
+  }
+
+  const [reopenedChildIds, reopenedStates] = await Promise.all([
+    mGetStringValuesInChunks(
+      context,
+      deniedItems.map((item) => reopenedChildByDeniedKey(subredditId, item.id))
+    ),
+    mGetStringValuesInChunks(
+      context,
+      deniedItems.map((item) => reopenedStateByDeniedKey(subredditId, item.id))
+    ),
+  ]);
+  const deniedIndexesByChildId = new Map<string, number>();
+  const presentChildIds: string[] = [];
+  for (let index = 0; index < deniedItems.length; index++) {
+    const childId = reopenedChildIds[index];
+    const normalizedChildId = typeof childId === 'string' ? childId.trim() : '';
+    deniedItems[index].reopenedChildId = normalizedChildId || null;
+    deniedItems[index].reopenedState = normalizedChildId
+      ? 'yes'
+      : reopenedStates[index] === 'cancelled'
+        ? 'yes_cancelled'
+        : 'none';
+    if (normalizedChildId) {
+      deniedIndexesByChildId.set(normalizedChildId, index);
+      presentChildIds.push(normalizedChildId);
+    }
+  }
+
+  if (presentChildIds.length === 0) {
+    return;
+  }
+
+  const childPayloads = await mGetStringValuesInChunks(
+    context,
+    presentChildIds.map((childId) => verificationRecordKey(subredditId, childId))
+  );
+  const staleParentIds: string[] = [];
+  for (let childIndex = 0; childIndex < childPayloads.length; childIndex++) {
+    if (childPayloads[childIndex]) {
+      continue;
+    }
+    const childId = presentChildIds[childIndex];
+    const deniedIndex = deniedIndexesByChildId.get(childId);
+    if (deniedIndex === undefined) {
+      continue;
+    }
+    deniedItems[deniedIndex].reopenedChildId = null;
+    if (deniedItems[deniedIndex].reopenedState === 'yes') {
+      deniedItems[deniedIndex].reopenedState = 'none';
+    }
+    staleParentIds.push(deniedItems[deniedIndex].id);
+  }
+  if (staleParentIds.length > 0) {
+    await context.redis.del(...staleParentIds.map((parentId) => reopenedChildByDeniedKey(subredditId, parentId)));
+  }
+}
+
 export async function searchHistoryRecords(
   context: Devvit.Context,
   subredditId: string,
@@ -209,133 +292,106 @@ export async function searchHistoryRecords(
   }
 
   const baseKey = historyDateIndexKey(subredditId);
-  const candidateCount = limit * (usernameFilter || statusFilter !== 'all' ? 8 : 3);
-
-  const candidates = await context.redis.zRange(baseKey, minScore, maxScore, {
-    by: 'score',
-    reverse: true,
-    limit: { offset, count: candidateCount },
-  });
-  if (candidates.length === 0) {
-    return { items: [], offset, hasMore: false, requestId: 0 };
-  }
-
-  const candidateIds = candidates.map((entry) => entry.member);
-  const payloads = await mGetStringValuesInChunks(
-    context,
-    candidateIds.map((recordId) => verificationRecordKey(subredditId, recordId))
-  );
+  const hasRecordFilters = Boolean(usernameFilter || statusFilter !== 'all');
+  const batchSize = hasRecordFilters ? FILTERED_SEARCH_SCAN_BATCH_SIZE : limit * 3;
+  const maxEntriesToScan = hasRecordFilters ? FILTERED_SEARCH_SCAN_MAX_ENTRIES : batchSize;
+  const scanStartedAt = Date.now();
   const items: HistorySearchPanelItem[] = [];
-  const staleIds: string[] = [];
-  let scannedCount = 0;
+  let scanOffset = offset;
+  let inspectedCount = 0;
+  let hasMore = false;
 
-  for (let index = 0; index < payloads.length; index++) {
-    scannedCount += 1;
-    const payload = payloads[index];
-    const recordId = candidateIds[index];
-    if (!payload) {
-      staleIds.push(recordId);
-      continue;
-    }
-    const parsed = parseRecord(payload);
-    if (!parsed) {
-      staleIds.push(recordId);
-      continue;
-    }
-    if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
-      continue;
-    }
-    if (!shouldConsiderRecordForHistoryStatusFilter(parsed, statusFilter)) {
-      continue;
-    }
-    items.push({
-      id: parsed.id,
-      username: parsed.username,
-      status: parsed.status,
-      submittedAt: parsed.submittedAt,
-      acknowledgedAt: parsed.ageAcknowledgedAt,
-      reviewedAt: parsed.reviewedAt ?? null,
-      moderator: parsed.moderator ?? null,
-      denyReason: parseDenyReason(parsed.denyReason) ?? null,
-      parentVerificationId: parsed.parentVerificationId ?? null,
-      reopenedChildId: null,
-      reopenedState: 'none',
-      ...(parsed.status === 'approved' ? toSearchPhotoLinkFields(parsed) : {}),
+  while (inspectedCount < maxEntriesToScan) {
+    const requestedCount = Math.min(batchSize, maxEntriesToScan - inspectedCount);
+    const loadedCandidates = await context.redis.zRange(baseKey, minScore, maxScore, {
+      by: 'score',
+      reverse: true,
+      limit: { offset: scanOffset, count: hasRecordFilters ? requestedCount + 1 : requestedCount },
     });
-    if ((statusFilter === 'all' || statusFilter === 'approved') && items.length >= limit) {
+    if (loadedCandidates.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    const candidates = hasRecordFilters ? loadedCandidates.slice(0, requestedCount) : loadedCandidates;
+    const hasMoreCandidates = hasRecordFilters && loadedCandidates.length > requestedCount;
+    const candidateIds = candidates.map((entry) => entry.member);
+    const payloads = await mGetStringValuesInChunks(
+      context,
+      candidateIds.map((recordId) => verificationRecordKey(subredditId, recordId))
+    );
+    const parsedRecords: Array<VerificationRecord | null> = [];
+    const candidateItems: Array<HistorySearchPanelItem | null> = [];
+    const staleIds: string[] = [];
+    for (let index = 0; index < payloads.length; index++) {
+      const parsed = payloads[index] ? parseRecord(payloads[index]!) : null;
+      parsedRecords.push(parsed);
+      if (!parsed) {
+        staleIds.push(candidateIds[index]);
+        candidateItems.push(null);
+        continue;
+      }
+      if (usernameFilter && !normalizeUsernameForLookup(parsed.username).startsWith(usernameFilter)) {
+        candidateItems.push(null);
+        continue;
+      }
+      if (!shouldConsiderRecordForHistoryStatusFilter(parsed, statusFilter)) {
+        candidateItems.push(null);
+        continue;
+      }
+      candidateItems.push(toHistorySearchPanelItem(parsed));
+    }
+    await enrichHistoryReopenState(
+      context,
+      subredditId,
+      candidateItems.filter((item): item is HistorySearchPanelItem => item !== null)
+    );
+
+    let consumedCount = 0;
+    let consumedLiveCount = 0;
+    for (let index = 0; index < candidates.length; index++) {
+      consumedCount += 1;
+      inspectedCount += 1;
+      if (parsedRecords[index]) {
+        consumedLiveCount += 1;
+      }
+      const item = candidateItems[index];
+      if (!item || !matchesHistoryStatusFilter(item, statusFilter)) {
+        continue;
+      }
+      items.push(item);
+      if (items.length >= limit) {
+        break;
+      }
+    }
+
+    if (staleIds.length > 0) {
+      await context.redis.zRem(baseKey, Array.from(new Set(staleIds)));
+    }
+
+    // Stale entries were removed above, so only live entries advance the
+    // cursor. This keeps the next scan aligned with the compacted index.
+    scanOffset += consumedLiveCount;
+    hasMore =
+      consumedCount < candidates.length ||
+      (hasRecordFilters ? hasMoreCandidates : candidates.length >= requestedCount);
+
+    if (items.length >= limit || !hasRecordFilters || !hasMoreCandidates) {
+      break;
+    }
+    if (
+      inspectedCount >= maxEntriesToScan ||
+      Date.now() - scanStartedAt >= FILTERED_SEARCH_SCAN_TIME_BUDGET_MS
+    ) {
+      hasMore = true;
       break;
     }
   }
 
-  if (staleIds.length > 0) {
-    await context.redis.zRem(baseKey, Array.from(new Set(staleIds)));
-  }
-
-  const deniedItems = items.filter((item) => item.status === 'denied');
-  if (deniedItems.length > 0) {
-    const [reopenedChildIds, reopenedStates] = await Promise.all([
-      mGetStringValuesInChunks(
-        context,
-        deniedItems.map((item) => reopenedChildByDeniedKey(subredditId, item.id))
-      ),
-      mGetStringValuesInChunks(
-        context,
-        deniedItems.map((item) => reopenedStateByDeniedKey(subredditId, item.id))
-      ),
-    ]);
-    const deniedIndexesByChildId = new Map<string, number>();
-    const presentChildIds: string[] = [];
-    for (let index = 0; index < deniedItems.length; index++) {
-      const childId = reopenedChildIds[index];
-      const normalizedChildId = typeof childId === 'string' ? childId.trim() : '';
-      deniedItems[index].reopenedChildId = normalizedChildId || null;
-      deniedItems[index].reopenedState = normalizedChildId
-        ? 'yes'
-        : reopenedStates[index] === 'cancelled'
-          ? 'yes_cancelled'
-          : 'none';
-      if (normalizedChildId) {
-        deniedIndexesByChildId.set(normalizedChildId, index);
-        presentChildIds.push(normalizedChildId);
-      }
-    }
-
-    if (presentChildIds.length > 0) {
-      const childPayloads = await mGetStringValuesInChunks(
-        context,
-        presentChildIds.map((childId) => verificationRecordKey(subredditId, childId))
-      );
-      const staleParentIds: string[] = [];
-      for (let childIndex = 0; childIndex < childPayloads.length; childIndex++) {
-        const payload = childPayloads[childIndex];
-        if (payload) {
-          continue;
-        }
-        const childId = presentChildIds[childIndex];
-        const deniedIndex = deniedIndexesByChildId.get(childId);
-        if (deniedIndex === undefined) {
-          continue;
-        }
-        deniedItems[deniedIndex].reopenedChildId = null;
-        if (deniedItems[deniedIndex].reopenedState === 'yes') {
-          deniedItems[deniedIndex].reopenedState = 'none';
-        }
-        staleParentIds.push(deniedItems[deniedIndex].id);
-      }
-      if (staleParentIds.length > 0) {
-        await context.redis.del(...staleParentIds.map((parentId) => reopenedChildByDeniedKey(subredditId, parentId)));
-      }
-    }
-  }
-
-  const filteredItems = statusFilter === 'all'
-    ? items
-    : items.filter((item) => matchesHistoryStatusFilter(item, statusFilter)).slice(0, limit);
-
   return {
-    items: filteredItems,
-    offset: offset + scannedCount,
-    hasMore: scannedCount < candidates.length || candidates.length >= candidateCount,
+    items,
+    offset: scanOffset,
+    hasMore,
     requestId: 0,
   };
 }
@@ -598,8 +654,8 @@ export async function searchAuditEntries(
   const items: AuditSearchPanelItem[] = [];
   const approvedAuditItemsByVerificationId = new Map<string, AuditSearchPanelItem[]>();
   const hasEntryFilters = Boolean(usernameFilter || actorFilter || actionFilter);
-  const batchSize = hasEntryFilters ? AUDIT_FILTER_SCAN_BATCH_SIZE : limit * 4;
-  const maxEntriesToScan = hasEntryFilters ? AUDIT_FILTER_SCAN_MAX_ENTRIES : batchSize;
+  const batchSize = hasEntryFilters ? FILTERED_SEARCH_SCAN_BATCH_SIZE : limit * 4;
+  const maxEntriesToScan = hasEntryFilters ? FILTERED_SEARCH_SCAN_MAX_ENTRIES : batchSize;
   const scanStartedAt = Date.now();
   let scanOffset = offset;
   let inspectedCount = 0;
@@ -663,7 +719,7 @@ export async function searchAuditEntries(
     }
     if (
       inspectedCount >= maxEntriesToScan ||
-      Date.now() - scanStartedAt >= AUDIT_FILTER_SCAN_TIME_BUDGET_MS
+      Date.now() - scanStartedAt >= FILTERED_SEARCH_SCAN_TIME_BUDGET_MS
     ) {
       hasMore = true;
       break;

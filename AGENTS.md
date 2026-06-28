@@ -43,8 +43,10 @@ The client UI lives in `src/client/` (`hub-app.js`, `mod-panel.js`,
 over the HTTP routes defined in `src/index.ts`, never by importing `src/core`.
 
 The mod panel setup/onboarding/feature wizard lives in `src/client/mod-panel.html`,
-`src/client/mod-panel.js`, and `src/client/mod-panel.css`. Server state for the
-wizard flows through `DashboardData` / `ModPanelStatePayload`
+`src/client/mod-panel.js`, `src/client/mod-panel.css`, and the shared pure state
+helpers in `src/client/wizard-state.js` (covered by
+`src/client/wizard-state.test.js`). Server state for the wizard flows through
+`DashboardData` / `ModPanelStatePayload`
 (`requiresInitialSetup`, `needsOnboarding`, `newFeaturePacks`) and
 `/api/mod/onboarding/complete` / `/api/mod/feature-education/complete`;
 per-moderator onboarding and feature-education completion storage belongs in
@@ -90,6 +92,12 @@ mode should stay `null` in production.
   selected range. Do not use average or median as the primary SLA metric.
   Older audit entries without timing metadata are excluded from timing stats.
   Denial-reason breakdowns also come from audit metadata recorded going forward.
+- Filtered History and Audit searches must deep-scan beyond the first Redis
+  page using the shared bounded batch, entry-cap, and time-budget constants.
+  Do not make moderators select **Load more** merely because a match is older
+  than the initial candidate window. Returned offsets must advance by consumed
+  live entries after stale-index cleanup; **Load more** is the continuation only
+  when additional matches remain or a safety bound is reached.
 
 ## Import rules
 
@@ -98,8 +106,9 @@ mode should stay `null` in production.
   constants from `./constants.ts`, shared helpers from
   `../shared/global-usernames.ts`.
 - **Never import from `../core.ts` inside a module.** The barrel is only for
-  external consumers (`src/index.ts`, `src/core.test.ts`). Reach an internal
-  helper through its owning module, not the barrel.
+  external consumers (`src/index.ts`, `src/runtime-guards.ts`, and
+  `src/core.test.ts`). Reach an internal helper through its owning module, not
+  the barrel.
 - The Devvit runtime (`redis` / `reddit` / `settings`) is passed in as the
   `context` **parameter** — it is not imported. Keep that pattern.
 
@@ -114,6 +123,6 @@ mode should stay `null` in production.
 
 ```
 npm run check     # tsc --noEmit
-npm test          # node --test src/core.test.ts (full suite)
+npm test          # node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js
 npm run build     # vite build (client + server bundles)
 ```

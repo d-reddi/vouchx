@@ -4077,6 +4077,111 @@ test('searchHistoryRecords filters approved denied and reopened records', async 
   });
 });
 
+test('searchHistoryRecords deep-scans the existing date index for an older username match', async () => {
+  const reviewContext = createReviewActionContext();
+  const baseMs = new Date('2026-03-01T00:00:00.000Z').getTime();
+  seedApprovedRecords(
+    reviewContext,
+    Array.from({ length: 301 }, (_, index) => ({
+      id: `history_deep_${String(index).padStart(5, '0')}`,
+      approvedAt: new Date(baseMs + index * 1_000).toISOString(),
+      username: index === 0 ? 'Deep_History_Target' : `other_history_user_${index}`,
+      includeApprovedIndex: false,
+    }))
+  );
+
+  const result = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {
+    username: 'Deep_History_Target',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ['history_deep_00000']);
+  assert.equal(result.hasMore, false);
+});
+
+test('searchHistoryRecords deep-scans status filters for older records', async () => {
+  const reviewContext = createReviewActionContext();
+  const baseMs = new Date('2026-03-01T00:00:00.000Z').getTime();
+  seedApprovedRecords(
+    reviewContext,
+    Array.from({ length: 300 }, (_, index) => ({
+      id: `history_status_${String(index).padStart(5, '0')}`,
+      approvedAt: new Date(baseMs + (index + 1) * 1_000).toISOString(),
+      includeApprovedIndex: false,
+    }))
+  );
+  const deniedRecord = buildRecord({
+    id: 'history_status_denied_oldest',
+    username: 'old_denied_user',
+    subredditId: reviewContext.subredditId,
+    subredditName: reviewContext.record.subredditName,
+    status: 'denied',
+    submittedAt: new Date(baseMs).toISOString(),
+    ageAcknowledgedAt: new Date(baseMs).toISOString(),
+    reviewedAt: new Date(baseMs).toISOString(),
+    moderator: 'Mod_One',
+    denyReason: 'reason_1',
+  });
+  reviewContext.redisStore.set(
+    verificationRecordTestKey(reviewContext.subredditId, deniedRecord.id),
+    JSON.stringify(deniedRecord)
+  );
+  ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).set(
+    deniedRecord.id,
+    baseMs
+  );
+
+  const result = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {
+    status: 'denied',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    offset: 0,
+    limit: 25,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.id), ['history_status_denied_oldest']);
+  assert.equal(result.hasMore, false);
+});
+
+test('searchHistoryRecords paginates deep filtered matches without gaps or duplicates', async () => {
+  const reviewContext = createReviewActionContext();
+  const baseMs = new Date('2026-03-01T00:00:00.000Z').getTime();
+  seedApprovedRecords(
+    reviewContext,
+    Array.from({ length: 340 }, (_, index) => ({
+      id: `history_page_${String(index).padStart(5, '0')}`,
+      approvedAt: new Date(baseMs + index * 1_000).toISOString(),
+      username: index < 40 ? 'Repeated_History_Target' : `other_page_user_${index}`,
+      includeApprovedIndex: false,
+    }))
+  );
+  const query = {
+    username: 'Repeated_History_Target',
+    fromDate: '2026-03-01T00:00:00.000Z',
+    toDate: '2026-03-02T00:00:00.000Z',
+    limit: 25,
+  };
+
+  const first = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {
+    ...query,
+    offset: 0,
+  });
+  const second = await searchHistoryRecords(reviewContext.context as never, reviewContext.subredditId, {
+    ...query,
+    offset: first.offset,
+  });
+  const combinedIds = [...first.items, ...second.items].map((item) => item.id);
+
+  assert.equal(first.items.length, 25);
+  assert.equal(first.hasMore, true);
+  assert.equal(second.items.length, 15);
+  assert.equal(second.hasMore, false);
+  assert.equal(new Set(combinedIds).size, 40);
+});
+
 test('searchApprovedRecords treats short username prefixes as unfiltered baseline queries', async () => {
   const reviewContext = createReviewActionContext({
     recordOverrides: {
