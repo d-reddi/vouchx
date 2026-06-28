@@ -365,7 +365,7 @@ export type RetentionReconcileSummary = {
 
 export type ValidationCheckResult =
   | { outcome: 'valid' }
-  | { outcome: 'deleted_or_suspended'; reason: string }
+  | { outcome: 'account_unavailable'; reason: string }
   | { outcome: 'retry'; reason: string };
 
 export type RedisContext = Pick<Devvit.Context, 'redis'>;
@@ -591,9 +591,11 @@ export type FlairApplyResult = {
 };
 
 export type StorageUsage = {
-  estimatedBytes: number;
+  estimateStatus: 'available' | 'unavailable';
+  estimatedBytes: number | null;
   capBytes: number;
-  percent: number;
+  percent: number | null;
+  calibratedAt: string | null;
   recordCount: number;
   auditCount: number;
   blockedCount: number;

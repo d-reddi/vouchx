@@ -7,6 +7,9 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
 
 (function () {
   const STORAGE_WARNING_THRESHOLD_PERCENT = 75;
+  // Temporarily disabled in favor of the always-visible footer indicator. Flip back to true to
+  // restore the threshold-gated warning card (the threshold logic below is left intact).
+  const STORAGE_WARNING_CARD_ENABLED = false;
   const HISTORY_DEFAULT_DAYS = 45;
   const DEFAULT_DENY_REASON_LABELS = {
     reason_1: 'Altered or edited image',
@@ -142,6 +145,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   const storagePercent = document.getElementById('storage-percent');
   const storageSummary = document.getElementById('storage-summary');
   const storageBreakdown = document.getElementById('storage-breakdown');
+  const storageFooter = document.getElementById('storage-footer');
   const toastEl = document.getElementById('toast');
 
   const backToHubBtn = document.getElementById('back-to-hub-btn');
@@ -7057,6 +7061,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       if (storageWarning) {
         storageWarning.classList.add('hidden');
       }
+      if (storageFooter) {
+        storageFooter.classList.add('hidden');
+      }
+      return;
+    }
+    const estimateAvailable = state.storage.estimateStatus !== 'unavailable';
+    if (!estimateAvailable) {
+      if (storageWarning) {
+        storageWarning.classList.add('hidden');
+      }
+      if (storageFooter) {
+        storageFooter.textContent = 'Storage estimate unavailable';
+        storageFooter.title = 'Redis payload sampling failed. The estimate will retry on the next dashboard refresh.';
+        storageFooter.classList.add('footer-storage-elevated');
+        storageFooter.classList.remove('hidden');
+      }
       return;
     }
     const usedBytes = Number(state.storage.estimatedBytes || 0);
@@ -7069,7 +7089,8 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
           : 0;
     const percent = Math.max(0, Math.min(100, percentRaw));
     const shouldShowStorageWarning =
-      FORCE_APP_DATA_USAGE_WARNING_VISIBLE === true || percent >= STORAGE_WARNING_THRESHOLD_PERCENT;
+      STORAGE_WARNING_CARD_ENABLED &&
+      (FORCE_APP_DATA_USAGE_WARNING_VISIBLE === true || percent >= STORAGE_WARNING_THRESHOLD_PERCENT);
 
     if (storageWarning) {
       storageWarning.classList.toggle('hidden', !shouldShowStorageWarning);
@@ -7091,6 +7112,14 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
         `Moderator audit events: ${state.storage.auditCount || 0} | ` +
         `Blocked: ${state.storage.blockedCount || 0} | ` +
         `Denial counters: ${state.storage.deniedCountEntries || 0}`;
+    }
+    // Always-visible at-a-glance indicator in the page footer (the warning card above only
+    // appears at the threshold). Elevated styling kicks in at the same threshold.
+    if (storageFooter) {
+      storageFooter.textContent = `Storage ${percent.toFixed(1)}%`;
+      storageFooter.title = `${formatBytes(usedBytes)} of ${formatBytes(capBytes || 0)} Redis app data limit`;
+      storageFooter.classList.toggle('footer-storage-elevated', percent >= STORAGE_WARNING_THRESHOLD_PERCENT);
+      storageFooter.classList.remove('hidden');
     }
   }
 

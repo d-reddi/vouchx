@@ -187,10 +187,6 @@ export async function removeReviewTargetForInvalidAccount(
     member: record.id,
     score: historyAnchorMs,
   });
-  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
-    member: record.id,
-    score: historyAnchorMs,
-  });
   await removeValidationTrackingForRecordIds(context, subredditId, [record.id]);
 
   await clearUserPendingPointersIfMatch(context, subredditId, normalizedUsername, record.userId, record.id);
@@ -273,7 +269,7 @@ export async function approveVerification(
     const parentDeniedId = record.parentVerificationId?.trim() ?? '';
 
     const validation = await preflightReviewTargetAccount(context, record);
-    if (validation.outcome === 'deleted_or_suspended') {
+    if (validation.outcome === 'account_unavailable') {
       return await removeReviewTargetForInvalidAccount(
         context,
         subredditId,
@@ -386,10 +382,6 @@ export async function approveVerification(
       score: historyAnchorMs,
     });
     await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
       member: verificationId,
       score: historyAnchorMs,
     });
@@ -598,7 +590,7 @@ export async function denyVerification(
     assertClaimAllowsAction(record, moderator);
 
     const validation = await preflightReviewTargetAccount(context, record);
-    if (validation.outcome === 'deleted_or_suspended') {
+    if (validation.outcome === 'account_unavailable') {
       return await removeReviewTargetForInvalidAccount(
         context,
         subredditId,
@@ -679,10 +671,6 @@ export async function finalizeDeniedVerification(
     score: historyAnchorMs,
   });
   await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(reviewedRecord.username)), {
-    member: verificationId,
-    score: historyAnchorMs,
-  });
-  await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(actor)), {
     member: verificationId,
     score: historyAnchorMs,
   });
@@ -1293,10 +1281,6 @@ export async function removeApprovedVerificationByModerator(
     await removeApprovedPrefixIndexEntry(context, subredditId, verificationId, record.username);
     await context.redis.zAdd(historyDateIndexKey(subredditId), { member: verificationId, score: historyAnchorMs });
     await context.redis.zAdd(historyByUserIndexKey(subredditId, normalizeUsername(record.username)), {
-      member: verificationId,
-      score: historyAnchorMs,
-    });
-    await context.redis.zAdd(historyByModeratorIndexKey(subredditId, normalizeUsername(moderator)), {
       member: verificationId,
       score: historyAnchorMs,
     });

@@ -57,6 +57,7 @@ import {
   onModeratorPurgeUserData,
   parseAuditEntry,
   parseRecord,
+  reconcileApprovedUsersForRetention,
   releaseRedisLockIfOwned,
   repairMissingAutoBlockForUser,
   refreshConfiguredFlairTemplateCache,
@@ -235,9 +236,11 @@ function buildDashboardData(overrides: Partial<Parameters<typeof toHubState>[0]>
     blocked: [],
     auditLog: [],
     storage: {
+      estimateStatus: 'available',
       estimatedBytes: 0,
       capBytes: 0,
       percent: 0,
+      calibratedAt: null,
       recordCount: 0,
       auditCount: 0,
       blockedCount: 0,
@@ -975,6 +978,7 @@ function createHubDashboardContext(options?: {
   >;
   record?: Record<string, unknown> | null;
   hashValues?: Record<string, string>;
+  strLenError?: Error | null;
 }) {
   const subredditId = options?.subredditId ?? 't5_example';
   const subredditName = options?.subredditName ?? 'example';
@@ -983,6 +987,8 @@ function createHubDashboardContext(options?: {
   const redisStore = new Map<string, string>();
   const hashStore = new Map<string, Map<string, string>>();
   const zsetStore = new Map<string, Map<string, number>>();
+  const setCalls: Array<[string, string, unknown?]> = [];
+  const strLenCalls: string[] = [];
   let currentUserCallCount = 0;
   let currentUsernameCallCount = 0;
 
@@ -1092,7 +1098,8 @@ function createHubDashboardContext(options?: {
         async mGet(keys: string[]) {
           return keys.map((key) => redisStore.get(key) ?? null);
         },
-        async set(key: string, value: string) {
+        async set(key: string, value: string, setOptions?: unknown) {
+          setCalls.push([key, value, setOptions]);
           redisStore.set(key, value);
           return 'OK';
         },
@@ -1166,11 +1173,20 @@ function createHubDashboardContext(options?: {
         async zCard(key: string) {
           return ensureTestZSet(zsetStore, key).size;
         },
+        async strLen(key: string) {
+          strLenCalls.push(key);
+          if (options?.strLenError) {
+            throw options.strLenError;
+          }
+          return Buffer.byteLength(redisStore.get(key) ?? '', 'utf8');
+        },
       },
     },
     redisStore,
     hashStore,
     zsetStore,
+    setCalls,
+    strLenCalls,
     get currentUserCallCount() {
       return currentUserCallCount;
     },
@@ -1339,6 +1355,14 @@ function validationDueIndexTestKey(subredditId: string): string {
 
 function validationHardExpireIndexTestKey(subredditId: string): string {
   return `${subredditPrefixKey(subredditId)}:idx:validation:hard-expire`;
+}
+
+function validationNonApprovedFailureCountTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:validation:non-approved-failures`;
+}
+
+function storageCalibrationTestKey(subredditId: string): string {
+  return `${subredditPrefixKey(subredditId)}:storage:calibration`;
 }
 
 function denialCountTestKey(subredditId: string): string {
@@ -2801,6 +2825,44 @@ test('loadHubDashboard uses the userId latest pointer when viewer identity is un
   assert.equal(hubContext.currentUsernameCallCount, 0);
 });
 
+test('loadHubDashboard bumps approved viewer record retention on load', async () => {
+  await withFixedNow('2026-04-10T12:00:00.000Z', async (nowMs) => {
+    const record = buildRecord({
+      id: 'verification_approved_bump',
+      username: 'verified_user',
+      userId: 't2_viewer',
+      status: 'approved',
+      reviewedAt: '2026-03-01T12:00:00.000Z',
+      submittedAt: '2026-03-01T11:50:00.000Z',
+      lastTtlBumpAt: new Date('2026-03-01T12:00:00.000Z').getTime(),
+      retentionDays: 180,
+    });
+    const hubContext = createHubDashboardContext({
+      userId: 't2_viewer',
+      currentUsername: 'verified_user',
+      currentUserResponses: [
+        {
+          username: 'verified_user',
+          id: 't2_viewer',
+        },
+      ],
+      record,
+    });
+    const recordKey = verificationRecordTestKey('t5_example', record.id);
+    hubContext.redisStore.set(userLatestByIdTestKey('t5_example', 't2_viewer'), record.id);
+
+    const dashboard = await loadHubDashboard(hubContext.context as never);
+    const storedRecord = parseRecord(hubContext.redisStore.get(recordKey) ?? '');
+    const recordSetCall = hubContext.setCalls.find(([key]) => key === recordKey);
+    const setOptions = recordSetCall?.[2] as { expiration?: Date } | undefined;
+
+    assert.equal(dashboard.userLatest?.id, record.id);
+    assert.equal(dashboard.userLatest?.lastTtlBumpAt, nowMs);
+    assert.equal(storedRecord?.lastTtlBumpAt, nowMs);
+    assert.equal(setOptions?.expiration?.toISOString(), '2026-10-07T12:00:00.000Z');
+  });
+});
+
 test('loadHubDashboard backfills userId pointers from legacy username pointers', async () => {
   const record = buildRecord({
     id: 'verification_pending',
@@ -2875,6 +2937,84 @@ test('loadModDashboard reports total pending count while loading the oldest capp
   assert.equal(dashboard.pending[0]?.id, 'verification_000');
   assert.equal(dashboard.pending[149]?.id, 'verification_149');
   assert.equal(dashboard.pending.some((record) => record.id === 'verification_174'), false);
+});
+
+test('loadModDashboard marks storage unavailable and preserves stale high-water calibration when sampling fails', async () => {
+  await withFixedNow('2026-06-27T12:00:00.000Z', async (nowMs) => {
+    const modContext = createHubDashboardContext({
+      userId: 't2_mod',
+      currentUsername: 'mod_one',
+      currentUserResponses: [{ username: 'mod_one', id: 't2_mod' }],
+      permissions: ['access'],
+      hashValues: { flair_template_id: '' },
+      record: {
+        id: 'storage_sample_record',
+        username: 'storage_user',
+        status: 'denied',
+        subredditId: 't5_example',
+        subredditName: 'example',
+      },
+      strLenError: new Error('transient Redis sampling failure'),
+    });
+    const calibrationKey = storageCalibrationTestKey('t5_example');
+    const staleCalibration = JSON.stringify({
+      avgRecordBytes: 5000,
+      avgAuditBytes: 1200,
+      sampledAtMs: nowMs - 13 * 60 * 60 * 1000,
+      hasRecordSample: true,
+      hasAuditSample: true,
+    });
+    modContext.redisStore.set(calibrationKey, staleCalibration);
+
+    const dashboard = await loadModDashboard(modContext.context as never);
+
+    assert.equal(dashboard.storage.estimateStatus, 'unavailable');
+    assert.equal(dashboard.storage.estimatedBytes, null);
+    assert.equal(dashboard.storage.percent, null);
+    assert.equal(dashboard.storage.calibratedAt, null);
+    assert.equal(modContext.redisStore.get(calibrationKey), staleCalibration);
+    assert.equal(modContext.setCalls.some(([key]) => key === calibrationKey), false);
+    assert.equal(modContext.strLenCalls.length, 1);
+  });
+});
+
+test('loadModDashboard reuses fresh high-water calibration without resampling', async () => {
+  await withFixedNow('2026-06-27T12:00:00.000Z', async (nowMs) => {
+    const modContext = createHubDashboardContext({
+      userId: 't2_mod',
+      currentUsername: 'mod_one',
+      currentUserResponses: [{ username: 'mod_one', id: 't2_mod' }],
+      permissions: ['access'],
+      hashValues: { flair_template_id: '' },
+      record: {
+        id: 'storage_cached_record',
+        username: 'storage_user',
+        status: 'denied',
+        subredditId: 't5_example',
+        subredditName: 'example',
+      },
+      strLenError: new Error('strLen should not run for a fresh calibration'),
+    });
+    const calibrationKey = storageCalibrationTestKey('t5_example');
+    modContext.redisStore.set(
+      calibrationKey,
+      JSON.stringify({
+        avgRecordBytes: 5000,
+        avgAuditBytes: 1200,
+        sampledAtMs: nowMs,
+        hasRecordSample: true,
+        hasAuditSample: true,
+      })
+    );
+
+    const dashboard = await loadModDashboard(modContext.context as never);
+
+    assert.equal(dashboard.storage.estimateStatus, 'available');
+    assert.equal(dashboard.storage.recordCount, 1);
+    assert.equal(dashboard.storage.estimatedBytes, 7448);
+    assert.equal(dashboard.storage.calibratedAt, '2026-06-27T12:00:00.000Z');
+    assert.equal(modContext.strLenCalls.length, 0);
+  });
 });
 
 test('loadModDashboard prioritizes peer-reviewed records by oldest request time', async () => {
@@ -6432,6 +6572,189 @@ test('withRedisLock surfaces lock contention without running the callback', asyn
     /lock contention/
   );
   assert.equal(callbackRan, false);
+});
+
+test('reconcileApprovedUsersForRetention confirms a terminal lookup once before purging without waiting for hard expiry', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error('user_doesnt_exist')],
+  });
+  reviewContext.redisStore.clear();
+  reviewContext.zsetStore.clear();
+
+  await withFixedNow('2026-04-10T12:00:00.000Z', async (nowMs) => {
+    const approvedRecord = buildRecord({
+      id: 'approved_terminal_retry',
+      username: 'verified_user',
+      subredditId: reviewContext.subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'approved',
+      moderator: 'Mod_One',
+      submittedAt: '2026-03-01T12:00:00.000Z',
+      reviewedAt: '2026-03-01T12:05:00.000Z',
+      lastValidatedAt: '2026-03-01T12:05:00.000Z',
+      nextValidationAt: '2026-04-10T12:00:00.000Z',
+      hardExpireAt: '2026-04-20T12:00:00.000Z',
+      terminalValidationFailureCount: 0,
+      lastTtlBumpAt: new Date('2026-03-01T12:05:00.000Z').getTime(),
+      retentionDays: 180,
+    });
+    const reviewedAtMs = new Date(String(approvedRecord.reviewedAt)).getTime();
+    reviewContext.redisStore.set(
+      verificationRecordTestKey(reviewContext.subredditId, approvedRecord.id),
+      JSON.stringify(approvedRecord)
+    );
+    reviewContext.redisStore.set(userLatestTestKey(reviewContext.subredditId, approvedRecord.username), approvedRecord.id);
+    ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      reviewedAtMs
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      reviewedAtMs
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyByUserIndexTestKey(reviewContext.subredditId, approvedRecord.username)).set(
+      approvedRecord.id,
+      reviewedAtMs
+    );
+    ensureTestZSet(reviewContext.zsetStore, validationDueIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      nowMs
+    );
+    ensureTestZSet(reviewContext.zsetStore, validationHardExpireIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      new Date(String(approvedRecord.hardExpireAt)).getTime()
+    );
+
+    const firstSummary = await reconcileApprovedUsersForRetention(
+      reviewContext.context as never,
+      reviewContext.subredditId,
+      reviewContext.record.subredditName
+    );
+    const confirmationRecord = reviewContext.getParsedRecord(approvedRecord.id);
+
+    assert.equal(firstSummary.processed, 1);
+    assert.equal(firstSummary.purged, 0);
+    assert.equal(firstSummary.retried, 1);
+    assert.equal(confirmationRecord?.status, 'approved');
+    assert.equal(confirmationRecord?.terminalValidationFailureCount, 1);
+    assert.equal(confirmationRecord?.nextValidationAt, '2026-04-11T12:00:00.000Z');
+    assert.equal(confirmationRecord?.hardExpireAt, '2026-04-20T12:00:00.000Z');
+
+    ensureTestZSet(reviewContext.zsetStore, validationDueIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      nowMs
+    );
+    const secondSummary = await reconcileApprovedUsersForRetention(
+      reviewContext.context as never,
+      reviewContext.subredditId,
+      reviewContext.record.subredditName
+    );
+
+    assert.equal(secondSummary.processed, 1);
+    assert.equal(secondSummary.purged, 1);
+    assert.equal(secondSummary.retried, 0);
+    assert.equal(reviewContext.getParsedRecord(approvedRecord.id), null);
+    assert.equal(
+      ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).has(approvedRecord.id),
+      false
+    );
+  });
+});
+
+test('reconcileApprovedUsersForRetention lets confirmed non-approved validation purge a terminal account', async () => {
+  const reviewContext = createReviewActionContext({
+    validationResponses: [new Error('user_doesnt_exist')],
+  });
+  reviewContext.redisStore.clear();
+  reviewContext.zsetStore.clear();
+
+  await withFixedNow('2026-04-10T12:00:00.000Z', async () => {
+    const username = 'shared_user';
+    const deniedRecord = buildRecord({
+      id: 'denied_history_record',
+      username,
+      subredditId: reviewContext.subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'denied',
+      moderator: 'Mod_Two',
+      reviewedAt: '2026-04-09T12:00:00.000Z',
+      submittedAt: '2026-04-09T11:30:00.000Z',
+    });
+    const approvedRecord = buildRecord({
+      id: 'approved_current_record',
+      username,
+      subredditId: reviewContext.subredditId,
+      subredditName: reviewContext.record.subredditName,
+      status: 'approved',
+      moderator: 'Mod_One',
+      submittedAt: '2026-04-10T10:00:00.000Z',
+      reviewedAt: '2026-04-10T11:00:00.000Z',
+      lastValidatedAt: '2026-04-10T11:00:00.000Z',
+      nextValidationAt: '2026-05-10T11:00:00.000Z',
+      hardExpireAt: '2026-05-25T11:00:00.000Z',
+      lastTtlBumpAt: new Date('2026-04-10T11:00:00.000Z').getTime(),
+      retentionDays: 180,
+    });
+    const deniedScore = new Date(String(deniedRecord.reviewedAt)).getTime();
+    const approvedScore = new Date(String(approvedRecord.reviewedAt)).getTime();
+    for (const record of [deniedRecord, approvedRecord]) {
+      reviewContext.redisStore.set(
+        verificationRecordTestKey(reviewContext.subredditId, record.id),
+        JSON.stringify(record)
+      );
+    }
+    reviewContext.redisStore.set(userLatestTestKey(reviewContext.subredditId, username), approvedRecord.id);
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).set(
+      deniedRecord.id,
+      deniedScore
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyDateIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      approvedScore
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyByUserIndexTestKey(reviewContext.subredditId, username)).set(
+      deniedRecord.id,
+      deniedScore
+    );
+    ensureTestZSet(reviewContext.zsetStore, historyByUserIndexTestKey(reviewContext.subredditId, username)).set(
+      approvedRecord.id,
+      approvedScore
+    );
+    ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).set(
+      approvedRecord.id,
+      approvedScore
+    );
+    ensureTestZSet(reviewContext.zsetStore, approvedPrefixIndexTestKey(reviewContext.subredditId, username)).set(
+      approvedRecord.id,
+      approvedScore
+    );
+    ensureTestHash(reviewContext.hashStore, validationNonApprovedFailureCountTestKey(reviewContext.subredditId)).set(
+      username,
+      '1'
+    );
+
+    const summary = await reconcileApprovedUsersForRetention(
+      reviewContext.context as never,
+      reviewContext.subredditId,
+      reviewContext.record.subredditName
+    );
+
+    assert.equal(summary.nonApprovedProcessed, 1);
+    assert.equal(summary.nonApprovedPurged, 1);
+    assert.equal(summary.nonApprovedRetried, 0);
+    assert.equal(reviewContext.getParsedRecord(approvedRecord.id), null);
+    assert.equal(reviewContext.getParsedRecord(deniedRecord.id), null);
+    assert.equal(
+      ensureTestZSet(reviewContext.zsetStore, approvedIndexTestKey(reviewContext.subredditId)).has(approvedRecord.id),
+      false
+    );
+    assert.equal(
+      ensureTestHash(reviewContext.hashStore, validationNonApprovedFailureCountTestKey(reviewContext.subredditId)).has(
+        username
+      ),
+      false
+    );
+  });
 });
 
 test('ensureUserValidationSchedule registers the user-validation scheduled job when missing', async () => {

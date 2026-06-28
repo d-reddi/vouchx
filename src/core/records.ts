@@ -29,6 +29,7 @@ import {
   makeVerificationId,
   pendingIndexKey,
   staleRecordIndexSweepCursorKey,
+  storageCalibrationKey,
   subredditConfigKey,
   userLatestKey,
   userLatestKeyById,
@@ -282,6 +283,163 @@ export async function sweepStaleRecordIndexEntries(
   return staleIds.length;
 }
 
+type StorageCalibration = {
+  avgRecordBytes: number;
+  avgAuditBytes: number;
+  sampledAtMs: number;
+  hasRecordSample: boolean;
+  hasAuditSample: boolean;
+};
+
+type StorageSample =
+  | { status: 'sampled'; averageBytes: number }
+  | { status: 'empty' }
+  | { status: 'failed' };
+
+type StorageCalibrationResult =
+  | { status: 'available'; calibration: StorageCalibration }
+  | { status: 'unavailable' };
+
+// Fallbacks used until a live sample exists (brand-new installs) or when a sample yields nothing.
+const STORAGE_FALLBACK_BYTES_PER_RECORD = 1100; // record JSON (photo URLs + metadata)
+const STORAGE_FALLBACK_BYTES_PER_AUDIT = 500; // audit entry JSON
+// Bounded sample so the meter measures real payload sizes instead of guessing. Newest-N is
+// intentionally a touch conservative (the pending queue carries the heavier account snapshot),
+// which is the safe direction for a capacity gauge. strLen reads the at-rest byte length, so this
+// automatically tracks Devvit's transparent compression if `redisCompressed` is ever adopted.
+const STORAGE_CALIBRATION_SAMPLE_SIZE = 25;
+const STORAGE_CALIBRATION_TTL_MS = 12 * 60 * 60 * 1000;
+const STORAGE_ESTIMATE_HEADROOM_MULTIPLIER = 1.35;
+
+async function sampleAverageStoredBytes(
+  context: RedisContext,
+  indexKey: string,
+  toEntryKey: (id: string) => string
+): Promise<StorageSample> {
+  try {
+    const members = await context.redis.zRange(indexKey, 0, STORAGE_CALIBRATION_SAMPLE_SIZE - 1, {
+      by: 'rank',
+      reverse: true,
+    });
+    if (members.length === 0) {
+      return { status: 'empty' };
+    }
+    const lengths = await Promise.all(members.map((entry) => context.redis.strLen(toEntryKey(entry.member))));
+    if (lengths.some((length) => length <= 0)) {
+      return { status: 'failed' };
+    }
+    let total = 0;
+    let counted = 0;
+    for (const length of lengths) {
+      if (length > 0) {
+        total += length;
+        counted += 1;
+      }
+    }
+    return counted > 0 ? { status: 'sampled', averageBytes: total / counted } : { status: 'empty' };
+  } catch {
+    return { status: 'failed' };
+  }
+}
+
+function parseStorageCalibration(payload: string | null | undefined): StorageCalibration | null {
+  if (!payload) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payload) as Partial<StorageCalibration>;
+    if (
+      typeof parsed.avgRecordBytes !== 'number' ||
+      parsed.avgRecordBytes <= 0 ||
+      typeof parsed.avgAuditBytes !== 'number' ||
+      parsed.avgAuditBytes <= 0
+    ) {
+      return null;
+    }
+    return {
+      avgRecordBytes: Math.round(parsed.avgRecordBytes),
+      avgAuditBytes: Math.round(parsed.avgAuditBytes),
+      sampledAtMs:
+        typeof parsed.sampledAtMs === 'number' && Number.isFinite(parsed.sampledAtMs)
+          ? Math.max(0, Math.floor(parsed.sampledAtMs))
+          : 0,
+      hasRecordSample: parsed.hasRecordSample === true,
+      hasAuditSample: parsed.hasAuditSample === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Keep the highest successful payload averages durably. A failed refresh never overwrites this
+// high-water calibration and never produces a numeric estimate presented as current.
+async function getStorageCalibration(
+  context: RedisContext,
+  subredditId: string,
+  recordCount: number,
+  auditCount: number
+): Promise<StorageCalibrationResult> {
+  const cacheKey = storageCalibrationKey(subredditId);
+  let cached: StorageCalibration | null = null;
+  try {
+    cached = parseStorageCalibration(await context.redis.get(cacheKey));
+  } catch {
+    // Sampling can still establish a trustworthy estimate for this request.
+  }
+
+  const nowMs = Date.now();
+  const cacheIsFresh = Boolean(
+    cached &&
+      cached.sampledAtMs > 0 &&
+      nowMs - cached.sampledAtMs < STORAGE_CALIBRATION_TTL_MS &&
+      (recordCount === 0 || cached.hasRecordSample) &&
+      (auditCount === 0 || cached.hasAuditSample)
+  );
+  if (cached && cacheIsFresh) {
+    return { status: 'available', calibration: cached };
+  }
+
+  const [recordSample, auditSample] = await Promise.all([
+    sampleAverageStoredBytes(
+      context,
+      historyDateIndexKey(subredditId),
+      (id) => verificationRecordKey(subredditId, id)
+    ),
+    sampleAverageStoredBytes(
+      context,
+      auditDateIndexKey(subredditId),
+      (id) => auditEntryKey(subredditId, id)
+    ),
+  ]);
+  const recordSampleSucceeded = recordCount === 0 || recordSample.status === 'sampled';
+  const auditSampleSucceeded = auditCount === 0 || auditSample.status === 'sampled';
+  if (!recordSampleSucceeded || !auditSampleSucceeded) {
+    return { status: 'unavailable' };
+  }
+
+  const calibration: StorageCalibration = {
+    avgRecordBytes: Math.max(
+      STORAGE_FALLBACK_BYTES_PER_RECORD,
+      cached?.avgRecordBytes ?? 0,
+      recordSample.status === 'sampled' ? Math.round(recordSample.averageBytes) : 0
+    ),
+    avgAuditBytes: Math.max(
+      STORAGE_FALLBACK_BYTES_PER_AUDIT,
+      cached?.avgAuditBytes ?? 0,
+      auditSample.status === 'sampled' ? Math.round(auditSample.averageBytes) : 0
+    ),
+    sampledAtMs: nowMs,
+    hasRecordSample: cached?.hasRecordSample === true || recordSample.status === 'sampled',
+    hasAuditSample: cached?.hasAuditSample === true || auditSample.status === 'sampled',
+  };
+  try {
+    await context.redis.set(cacheKey, JSON.stringify(calibration));
+  } catch {
+    // Best-effort persistence; this request still has a successful live calibration.
+  }
+  return { status: 'available', calibration };
+}
+
 export async function estimateSubredditStorageUsage(
   context: Devvit.Context,
   subredditId: string
@@ -289,6 +447,8 @@ export async function estimateSubredditStorageUsage(
   await sweepStaleRecordIndexEntries(context, subredditId);
   await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
   const recordCount = await context.redis.zCard(historyDateIndexKey(subredditId));
+  const pendingCount = await context.redis.zCard(pendingIndexKey(subredditId));
+  const approvedCount = await context.redis.zCard(approvedIndexKey(subredditId));
   const auditCount = await context.redis.zCard(auditDateIndexKey(subredditId));
   const blockedCount = await context.redis.hLen(blockedUsersKey(subredditId));
   const deniedCountEntries = await context.redis.hLen(denialCountKey(subredditId));
@@ -298,18 +458,56 @@ export async function estimateSubredditStorageUsage(
     0
   );
 
-  // Approximation to avoid expensive full scans for large subreddits.
-  const estimatedBytes =
-    configBytes +
-    recordCount * 1100 +
-    auditCount * 500 +
-    blockedCount * 220 +
-    deniedCountEntries * 60;
+  // Capacity approximation that avoids expensive full scans. Payload sizes (record + audit JSON)
+  // are measured from a small live sample and cached (see getStorageCalibration); the structural
+  // costs below — sorted-set memberships and pointer keys, whose Redis overhead the old
+  // payload-only estimate ignored — stay heuristic over-estimates since sorted sets have no strLen.
+  // ~20% precision is fine for a capacity gauge. All counts come from cheap zCard/hLen.
+  const calibrationResult = await getStorageCalibration(context, subredditId, recordCount, auditCount);
+  if (calibrationResult.status === 'unavailable') {
+    return {
+      estimateStatus: 'unavailable',
+      estimatedBytes: null,
+      capBytes: STORAGE_METER_CAP_BYTES,
+      percent: null,
+      calibratedAt: null,
+      recordCount,
+      auditCount,
+      blockedCount,
+      deniedCountEntries,
+    };
+  }
+  const { avgRecordBytes, avgAuditBytes, sampledAtMs } = calibrationResult.calibration;
+  const BYTES_PER_ZSET_MEMBERSHIP = 100; // one sorted-set entry: member id + score + overhead
+  const BYTES_PER_POINTER_KEY = 150; // one pointer key: key string + value + overhead
+
+  // Every record sits in history:date + history:user and carries latest pointers (by-name + by-id).
+  const recordBytes =
+    recordCount * (avgRecordBytes + 2 * BYTES_PER_ZSET_MEMBERSHIP + 2 * BYTES_PER_POINTER_KEY);
+  // Pending records add the pending sorted set plus pending pointers (by-name + by-id).
+  const pendingOverheadBytes = pendingCount * (BYTES_PER_ZSET_MEMBERSHIP + 2 * BYTES_PER_POINTER_KEY);
+  // Approved records add approved + approved-prefix + validation-due + validation-hard-expire sets.
+  const approvedOverheadBytes = approvedCount * (4 * BYTES_PER_ZSET_MEMBERSHIP);
+  // Audit entries are a payload plus their date-index membership.
+  const auditBytes = auditCount * (avgAuditBytes + BYTES_PER_ZSET_MEMBERSHIP);
+
+  const estimatedBytes = Math.ceil(
+    (configBytes +
+      recordBytes +
+      pendingOverheadBytes +
+      approvedOverheadBytes +
+      auditBytes +
+      blockedCount * 220 +
+      deniedCountEntries * 60) *
+      STORAGE_ESTIMATE_HEADROOM_MULTIPLIER
+  );
   const percent = Math.max(0, Math.min(100, Math.round((estimatedBytes / STORAGE_METER_CAP_BYTES) * 1000) / 10));
   return {
+    estimateStatus: 'available',
     estimatedBytes,
     capBytes: STORAGE_METER_CAP_BYTES,
     percent,
+    calibratedAt: new Date(sampledAtMs).toISOString(),
     recordCount,
     auditCount,
     blockedCount,
@@ -319,9 +517,11 @@ export async function estimateSubredditStorageUsage(
 
 export function emptyStorageUsage(): StorageUsage {
   return {
+    estimateStatus: 'available',
     estimatedBytes: 0,
     capBytes: STORAGE_METER_CAP_BYTES,
     percent: 0,
+    calibratedAt: null,
     recordCount: 0,
     auditCount: 0,
     blockedCount: 0,

@@ -114,6 +114,10 @@ export function staleRecordIndexSweepCursorKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:cleanup:stale-record-index-cursor`;
 }
 
+export function storageCalibrationKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:storage:calibration`;
+}
+
 export function modmailThreadByUserKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:modmail:thread-by-user`;
 }

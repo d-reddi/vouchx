@@ -321,6 +321,11 @@ export function initializeValidationScheduleFromRecord(record: VerificationRecor
   };
 }
 
+function getValidationHardExpireAt(record: VerificationRecord, nowMs: number): string {
+  const hardExpireMs = record.hardExpireAt ? new Date(record.hardExpireAt).getTime() : Number.NaN;
+  return Number.isFinite(hardExpireMs) ? record.hardExpireAt! : addDaysIso(VALIDATION_HARD_EXPIRY_DAYS, nowMs);
+}
+
 export async function upsertValidationTracking(
   context: RedisContext,
   subredditId: string,
@@ -560,17 +565,14 @@ export async function reconcileApprovedUsersForRetention(
         continue;
       }
 
-      if (check.outcome === 'deleted_or_suspended') {
+      if (check.outcome === 'account_unavailable') {
         const terminalFailures = (record.terminalValidationFailureCount ?? 0) + 1;
         if (terminalFailures < 2) {
           const confirmRecord: VerificationRecord = {
             ...record,
             terminalValidationFailureCount: terminalFailures,
             nextValidationAt: addDaysIso(1, nowMs),
-            hardExpireAt:
-              typeof record.hardExpireAt === 'string' && Number.isFinite(new Date(record.hardExpireAt).getTime())
-                ? record.hardExpireAt
-                : addDaysIso(VALIDATION_HARD_EXPIRY_DAYS, nowMs),
+            hardExpireAt: getValidationHardExpireAt(record, nowMs),
           };
           await setRecord(context, subredditId, confirmRecord);
           await upsertValidationTracking(context, subredditId, confirmRecord);
@@ -592,10 +594,7 @@ export async function reconcileApprovedUsersForRetention(
         validationFailureCount: currentFailures,
         terminalValidationFailureCount: 0,
         nextValidationAt: addDaysIso(1, nowMs),
-        hardExpireAt:
-          typeof record.hardExpireAt === 'string' && Number.isFinite(new Date(record.hardExpireAt).getTime())
-            ? record.hardExpireAt
-            : addDaysIso(VALIDATION_HARD_EXPIRY_DAYS, nowMs),
+        hardExpireAt: getValidationHardExpireAt(record, nowMs),
       };
       await setRecord(context, subredditId, retryRecord);
       await upsertValidationTracking(context, subredditId, retryRecord);
@@ -735,23 +734,23 @@ export async function validateVerificationUserState(
 export async function validateUsernameState(context: Pick<Devvit.Context, 'reddit'>, username: string): Promise<ValidationCheckResult> {
   const normalizedUsername = normalizeUsernameStrict(username);
   if (!normalizedUsername) {
-    return { outcome: 'deleted_or_suspended', reason: 'empty username' };
+    return { outcome: 'account_unavailable', reason: 'empty username' };
   }
 
   try {
     const user = await context.reddit.getUserByUsername(normalizedUsername);
     if (!user) {
-      return { outcome: 'deleted_or_suspended', reason: 'lookup returned null user' };
+      return { outcome: 'account_unavailable', reason: 'lookup returned no user' };
     }
     const maybeSuspended = Boolean((user as unknown as { isSuspended?: boolean }).isSuspended);
     if (maybeSuspended) {
-      return { outcome: 'deleted_or_suspended', reason: 'account suspended' };
+      return { outcome: 'account_unavailable', reason: 'account unavailable' };
     }
     return { outcome: 'valid' };
   } catch (error) {
     const message = errorText(error).toLowerCase();
     if (looksLikeDeletedOrSuspendedError(message)) {
-      return { outcome: 'deleted_or_suspended', reason: message };
+      return { outcome: 'account_unavailable', reason: message };
     }
     return { outcome: 'retry', reason: message };
   }

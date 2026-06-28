@@ -3033,6 +3033,16 @@ button.pending-age-denied-before:focus-visible {
   font: inherit;
 }
 
+.footer-storage {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.footer-storage.footer-storage-elevated {
+  color: color-mix(in srgb, var(--danger) 82%, white 18%);
+  font-weight: var(--font-weight-semibold);
+}
+
 .storage-percent {
   color: var(--text);
   font-family: var(--font-display);
