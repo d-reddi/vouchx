@@ -284,41 +284,16 @@
         "defaultValue": "Verifications are temporarily disabled.  Please check back soon.",
         "validationEndpoint": "/internal/settings/validate/verifications-disabled-message"
       },
-      "max_denials_before_block": {
-        "type": "number",
-        "label": "Max denials before auto-block",
-        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter 0 to disable auto-block, or a whole number of 2 or greater.",
-        "defaultValue": 3,
-        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
-      },
-      "auto_flair_reconcile_enabled": {
+      "show_photo_instructions_before_submit": {
         "type": "boolean",
-        "label": "Automatically repair verification flair",
-        "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
-        "defaultValue": true
-      },
-      "auto_archive_pending_modmail_enabled": {
-        "type": "boolean",
-        "label": "Auto-archive pending verification modmail",
-        "helpText": "When enabled the app archives pending verification modmail conversations and user replies before a moderator approval or denial is made.",
-        "defaultValue": true
-      },
-      "app_announcements_enabled": {
-        "type": "boolean",
-        "label": "Receive VouchX app announcements",
-        "helpText": "When on, this subreddit's modmail receives optional VouchX app announcements (new features, tips, and similar updates) as mod notifications. Turn it off to stop receiving them. Important operational notifications from the developer are always delivered regardless of this setting.",
+        "label": "Show photo instructions before verification submission",
+        "helpText": "When enabled users see the configured Photo Instructions after clicking \"Submit Verification\" and before uploading photos. If no instructions are configured the user proceeds directly to the acknowledgement screen and photo upload.",
         "defaultValue": true
       },
       "auto_deny_shadowbanned_enabled": {
         "type": "boolean",
         "label": "Auto-deny shadowbanned accounts",
         "helpText": "When enabled the app automatically denies a new verification submission if Reddit reports the account as shadowbanned. The denial counts toward the auto-block threshold and is logged as an automated action. Leave off to keep shadowbanned submissions in the queue for manual review.",
-        "defaultValue": false
-      },
-      "multiple_approval_flairs_enabled": {
-        "type": "boolean",
-        "label": "Enable multiple approval flairs",
-        "helpText": "When enabled, moderators can configure additional approval flair template IDs and choose one per approval in the queue.",
         "defaultValue": false
       },
       "user_advisory_score_badge_enabled": {
@@ -333,24 +308,24 @@
         "helpText": "When enabled, pending profile cards show the content creator badge when account links match known adult creator platforms. Turn off to keep account details visible without showing the creator badge.",
         "defaultValue": true
       },
-      "show_photo_instructions_before_submit": {
+      "auto_flair_reconcile_enabled": {
         "type": "boolean",
-        "label": "Show photo instructions before verification submission",
-        "helpText": "When enabled users see the configured Photo Instructions after clicking \"Submit Verification\" and before uploading photos. If no instructions are configured the user proceeds directly to the acknowledgement screen and photo upload.",
+        "label": "Automatically repair verification flair",
+        "helpText": "When enabled the app checks approved users' flair when they open the hub (no more than once every 24 hours). If the verification flair was removed or changed the app attempts to restore it. Existing flair that still matches the configured CSS class will not be replaced.",
         "defaultValue": true
       },
-      "settings_tab_requires_config_access": {
+      "multiple_approval_flairs_enabled": {
         "type": "boolean",
-        "label": "Restrict Settings tab to mods with config/settings access",
-        "helpText": "When enabled, only moderators with config/settings access can see and use the Settings tab in the moderator panel. Review queue access is unchanged.",
+        "label": "Enable multiple approval flairs",
+        "helpText": "When enabled, moderators can configure additional approval flair template IDs and choose one per approval in the queue.",
         "defaultValue": false
       },
-      "mod_menu_audit_purge_days": {
+      "max_denials_before_block": {
         "type": "number",
-        "label": "Purge audit log data older than (days)",
-        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
-        "defaultValue": 30,
-        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
+        "label": "Max denials before auto-block",
+        "helpText": "Users are automatically blocked in this subreddit after reaching this many denied verification submissions. Enter 0 to disable auto-block, or a whole number of 2 or greater.",
+        "defaultValue": 3,
+        "validationEndpoint": "/internal/settings/validate/max-denials-before-block"
       },
       "deny_reason_1_label": {
         "type": "string",
@@ -379,6 +354,31 @@
         "helpText": "Display name for this denial reason in this subreddit. Leave blank to hide the reason and its template field in the moderator panel. Maximum 48 characters.",
         "defaultValue": "Other",
         "validationEndpoint": "/internal/settings/validate/deny-reason-label"
+      },
+      "auto_archive_pending_modmail_enabled": {
+        "type": "boolean",
+        "label": "Auto-archive pending verification modmail",
+        "helpText": "When enabled the app archives pending verification modmail conversations and user replies before a moderator approval or denial is made.",
+        "defaultValue": true
+      },
+      "app_announcements_enabled": {
+        "type": "boolean",
+        "label": "Receive VouchX app announcements",
+        "helpText": "When on, this subreddit's modmail receives optional VouchX app announcements (new features, tips, and similar updates) as mod notifications. Turn it off to stop receiving them. Important operational notifications from the developer are always delivered regardless of this setting.",
+        "defaultValue": true
+      },
+      "settings_tab_requires_config_access": {
+        "type": "boolean",
+        "label": "Restrict Settings tab to mods with config/settings access",
+        "helpText": "When enabled, only moderators with config/settings access can see and use the Settings tab in the moderator panel. Review queue access is unchanged.",
+        "defaultValue": false
+      },
+      "mod_menu_audit_purge_days": {
+        "type": "number",
+        "label": "Purge audit log data older than (days)",
+        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
+        "defaultValue": 30,
+        "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
       }
     }
   },
