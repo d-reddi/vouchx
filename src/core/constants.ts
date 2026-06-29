@@ -92,6 +92,10 @@ export const INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT = 'show_photo
 
 export const INSTALL_SETTING_SETTINGS_TAB_REQUIRES_CONFIG_ACCESS = 'settings_tab_requires_config_access';
 
+// When off, this subreddit stops receiving opt-out "App Announcement" broadcasts.
+// "Notification" broadcasts ignore this setting and are always delivered.
+export const INSTALL_SETTING_APP_ANNOUNCEMENTS_ENABLED = 'app_announcements_enabled';
+
 export const GLOBAL_SETTING_LATEST_RELEASE_VERSION = 'latest_release_version';
 
 export const GLOBAL_SETTING_LATEST_RELEASE_TITLE = 'latest_release_title';
@@ -103,6 +107,11 @@ export const GLOBAL_SETTING_LATEST_RELEASE_LINK = 'latest_release_link';
 export const GLOBAL_SETTING_LATEST_RELEASE_SEVERITY = 'latest_release_severity';
 
 export const GLOBAL_SETTING_DEVELOPER_UI_USERNAMES = 'developer_ui_usernames';
+
+// Dev-only pointer to the wiki page (on BROADCAST_HOST_SUBREDDIT) that holds the
+// modmail-broadcast log. Set via the Devvit CLI. It doubles as the master
+// kill-switch: while it is empty, no installation reads or sends any broadcast.
+export const GLOBAL_SETTING_BROADCAST_WIKI_PAGE = 'broadcast_wiki_page';
 
 export const MAX_VERIFICATIONS_DISABLED_MESSAGE_LENGTH = 200;
 
@@ -202,6 +211,52 @@ export const USER_VALIDATION_JOB_NAME = `${APP_KEY_PREFIX}:user-validation-recon
 export const USER_VALIDATION_SCHEDULE_LOCK_TTL_MS = 15000;
 
 export const USER_VALIDATION_SCHEDULE_PRESENT_TTL_MS = 60 * 60 * 1000;
+
+// Modmail broadcast (developer console). The broadcast log lives on this
+// subreddit's wiki page; every installation polls it on a schedule, self-selects
+// by its own app version, and delivers a mod notification locally. "Sent or not"
+// is tracked per-installation in Redis — never written back to the shared page.
+export const BROADCAST_HOST_SUBREDDIT = 'vouchx';
+
+// Playtest/dev subreddit. Allowed to drive the broadcast interface (compose /
+// publish / revoke) so the tool can be operated from the dev hub. It still reads
+// and writes the canonical BROADCAST_HOST_SUBREDDIT wiki, not its own.
+export const BROADCAST_DEV_SUBREDDIT = 'vouchx_dev';
+
+// The poll runs on the hour, every 4 hours, but each installation is offset into
+// a per-subreddit slot so hundreds of installs spread their shared-wiki reads
+// across a window instead of all reading at once (see broadcastPollCron). Slots
+// are 5 seconds apart across a 10-minute window => 120 slots (minutes 0..9,
+// seconds 0/5/.../55). Changing the cadence makes each installation cancel its
+// existing job and reschedule on the next state load.
+export const BROADCAST_POLL_SECOND_SLOT_STEP = 5;
+
+export const BROADCAST_POLL_WINDOW_MINUTES = 10;
+
+export const BROADCAST_POLL_SLOT_COUNT = (BROADCAST_POLL_WINDOW_MINUTES * 60) / BROADCAST_POLL_SECOND_SLOT_STEP;
+
+export const BROADCAST_POLL_JOB_NAME = `${APP_KEY_PREFIX}:broadcast-poll`;
+
+export const BROADCAST_POLL_SCHEDULE_LOCK_TTL_MS = 15000;
+
+export const BROADCAST_POLL_SCHEDULE_PRESENT_TTL_MS = 60 * 60 * 1000;
+
+// Ignore broadcast entries older than this so a freshly installed subreddit does
+// not blast historical announcements on its first poll.
+export const BROADCAST_MAX_AGE_MS = 7 * MILLIS_PER_DAY;
+
+// Per-installation "already delivered" marker lifetime. Comfortably longer than
+// BROADCAST_MAX_AGE_MS so a marker never expires while its entry is still live.
+export const BROADCAST_PROCESSED_TTL_MS = 90 * MILLIS_PER_DAY;
+
+// Keep the shared wiki log small; older entries are pruned on publish.
+export const BROADCAST_MAX_ENTRIES_ON_PAGE = 20;
+
+export const BROADCAST_SUBJECT_MAX_LENGTH = 100;
+
+export const BROADCAST_BODY_MAX_LENGTH = 10000;
+
+export const BROADCAST_PAGE_SCHEMA_VERSION = 1;
 
 export const VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
 

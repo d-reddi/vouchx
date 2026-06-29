@@ -8,6 +8,7 @@ import {
   archivePendingVerificationModmailReply,
   batchReviewVerifications,
   blockUserForModerator,
+  BROADCAST_HOST_SUBREDDIT,
   buildBatchReviewToast,
   buildModeratorUpdateNotice,
   buildSubmitVerificationForm,
@@ -16,7 +17,15 @@ import {
   deleteVerificationDataFormDefinition,
   dismissModeratorUpdateNotice,
   denyVerification,
+  ensureBroadcastPollSchedule,
   ensureUserValidationSchedule,
+  getDeveloperBroadcastState,
+  isBroadcastDeveloper,
+  isBroadcastHostSubreddit,
+  publishBroadcast,
+  revokeBroadcast,
+  runBroadcastPoll,
+  sendBroadcastTest,
   markModeratorFeatureEducationCompleted,
   markModeratorOnboardingCompleted,
   moderatorRemoveHubPostTargetKey,
@@ -337,6 +346,14 @@ async function requireModerator(appContext: Context): Promise<{ moderator: strin
   return { moderator, subredditName };
 }
 
+async function requireDeveloper(appContext: Context): Promise<{ developer: string; subredditName: string }> {
+  const { moderator, subredditName } = await requireModeratorIdentity(appContext);
+  if (!(await isBroadcastDeveloper(appContext, moderator))) {
+    throw httpError(403, 'This tool is restricted to VouchX developers.');
+  }
+  return { developer: moderator, subredditName };
+}
+
 async function requireReviewAccess(appContext: Context): Promise<{ moderator: string; subredditName: string }> {
   const { moderator, subredditName, access } = await requireRouteModeratorAccess(appContext);
   await assertCanReview(appContext, subredditName, moderator, access);
@@ -346,11 +363,9 @@ async function requireReviewAccess(appContext: Context): Promise<{ moderator: st
 
 async function ensureValidationScheduleForStateLoad(appContext: Context): Promise<void> {
   const subredditName = String(appContext.subredditName ?? '').trim() || (await getCurrentSubredditNameCompat(appContext));
-  await ensureUserValidationSchedule(
-    appContext,
-    sanitizeSubredditId(appContext.subredditId),
-    subredditName
-  );
+  const subredditId = sanitizeSubredditId(appContext.subredditId);
+  await ensureUserValidationSchedule(appContext, subredditId, subredditName);
+  await ensureBroadcastPollSchedule(appContext, subredditId, subredditName);
 }
 
 async function buildHubPayload(appContext: Context) {
@@ -433,7 +448,9 @@ async function ensureValidationScheduleFromLifecycleEvent(event: TriggerLifecycl
     return;
   }
 
-  await ensureUserValidationSchedule(currentContext(), subredditId, subredditName);
+  const appContext = currentContext();
+  await ensureUserValidationSchedule(appContext, subredditId, subredditName);
+  await ensureBroadcastPollSchedule(appContext, subredditId, subredditName);
 }
 
 function normalizeRealtimeChannelPart(value: string): string {
@@ -593,6 +610,25 @@ app.post('/internal/scheduler/user-validation-reconcile', async (req, res) => {
       }
     } catch (error) {
       console.log(`[user-validation] Failed reconciliation for r/${subredditName}: ${errorText(error)}`);
+    }
+  }
+  res.json({});
+});
+
+app.post('/internal/scheduler/broadcast-poll', async (req, res) => {
+  const body = (req.body ?? {}) as { data?: { subredditId?: string; subredditName?: string } };
+  const subredditId = sanitizeSubredditId(body.data?.subredditId ?? '');
+  const subredditName = sanitizeSubredditName(body.data?.subredditName ?? '');
+  if (subredditId && subredditName) {
+    try {
+      const summary = await runBroadcastPoll(currentContext(), subredditId, subredditName);
+      if (!summary.skipped && (summary.delivered > 0 || summary.failed > 0)) {
+        console.log(
+          `[broadcast] r/${subredditName}: delivered=${summary.delivered} already=${summary.alreadyDelivered} version_skipped=${summary.skippedByVersion} opted_out=${summary.skippedOptedOut} expired=${summary.skippedExpired} revoked=${summary.skippedRevoked} failed=${summary.failed}`
+        );
+      }
+    } catch (error) {
+      console.log(`[broadcast] Failed poll for r/${subredditName}: ${errorText(error)}`);
     }
   }
   res.json({});
@@ -1209,6 +1245,106 @@ app.post('/api/mod/unblock', async (req, res) => {
         text: unblocked ? `Removed block for u/${username}.` : `u/${username} was not blocked.`,
         tone: unblocked ? 'success' : 'info',
       },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/dev/broadcast/state', async (_req, res) => {
+  try {
+    const appContext = currentContext();
+    const { subredditName } = await requireDeveloper(appContext);
+    const state = await getDeveloperBroadcastState(appContext, subredditName);
+    res.json({ state });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/dev/broadcast', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    const { developer, subredditName } = await requireDeveloper(appContext);
+    if (!isBroadcastHostSubreddit(subredditName)) {
+      throw httpError(403, `Broadcasts can only be composed from r/${BROADCAST_HOST_SUBREDDIT}.`);
+    }
+    const payload = (req.body ?? {}) as { subject?: string; body?: string; type?: string; maxVersion?: string | null };
+    const result = await publishBroadcast(appContext, {
+      authoredBy: developer,
+      input: {
+        subject: String(payload.subject ?? ''),
+        body: String(payload.body ?? ''),
+        type: payload.type === 'notification' ? 'notification' : 'announcement',
+        maxVersion: payload.maxVersion == null ? null : String(payload.maxVersion),
+      },
+    });
+    if (!result.ok) {
+      throw httpError(400, result.error);
+    }
+    const state = await getDeveloperBroadcastState(appContext, subredditName);
+    res.json({
+      state,
+      toast: {
+        text: result.entry.maxVersion
+          ? `Broadcast published for installations below v${result.entry.maxVersion}. Each delivers within the hour.`
+          : 'Broadcast published for all installations. Each delivers within the hour.',
+        tone: 'success',
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/dev/broadcast/test', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    const { subredditName } = await requireDeveloper(appContext);
+    if (!isBroadcastHostSubreddit(subredditName)) {
+      throw httpError(403, `Test sends are only available from r/${BROADCAST_HOST_SUBREDDIT}.`);
+    }
+    const payload = (req.body ?? {}) as { subject?: string; body?: string; type?: string; maxVersion?: string | null };
+    const result = await sendBroadcastTest(appContext, {
+      subredditId: sanitizeSubredditId(appContext.subredditId),
+      subredditName,
+      input: {
+        subject: String(payload.subject ?? ''),
+        body: String(payload.body ?? ''),
+        type: payload.type === 'notification' ? 'notification' : 'announcement',
+        maxVersion: payload.maxVersion == null ? null : String(payload.maxVersion),
+      },
+    });
+    if (result.status === 'failed') {
+      throw httpError(400, result.reason ?? 'Could not send the test notification.');
+    }
+    res.json({
+      toast: { text: `Sent a test mod notification to r/${subredditName}'s modmail.`, tone: 'success' },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/dev/broadcast/revoke', async (req, res) => {
+  try {
+    const appContext = currentContext();
+    const { subredditName } = await requireDeveloper(appContext);
+    if (!isBroadcastHostSubreddit(subredditName)) {
+      throw httpError(403, `Broadcasts can only be managed from r/${BROADCAST_HOST_SUBREDDIT}.`);
+    }
+    const broadcastId = String(req.body?.id ?? '').trim();
+    if (!broadcastId) {
+      throw httpError(400, 'Missing broadcast id.');
+    }
+    const result = await revokeBroadcast(appContext, broadcastId);
+    if (!result.ok) {
+      throw httpError(400, result.error);
+    }
+    const state = await getDeveloperBroadcastState(appContext, subredditName);
+    res.json({
+      state,
+      toast: { text: 'Broadcast revoked. Installations that have not yet delivered it will skip it.', tone: 'success' },
     });
   } catch (error) {
     sendError(res, error);

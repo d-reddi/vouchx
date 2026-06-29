@@ -11,6 +11,13 @@ import {
   blockUserForModerator,
   buildBatchReviewToast,
   buildModeratorUpdateNotice,
+  BROADCAST_POLL_JOB_NAME,
+  broadcastPollCron,
+  ensureBroadcastPollSchedule,
+  isBroadcastHostSubreddit,
+  publishBroadcast,
+  revokeBroadcast,
+  runBroadcastPoll,
   checkVerificationFlair,
   clearExpiredPendingClaim,
   collectPendingAccountDetailsSnapshot,
@@ -7251,4 +7258,383 @@ test('autoDenyShadowbannedSubmission is a no-op when the record is no longer pen
 
   assert.equal(result, null);
   assert.equal(reviewContext.addModNoteCalls.length, 0);
+});
+
+function createBroadcastContext(options?: {
+  pointer?: string | null;
+  pages?: Record<string, string>;
+  appVersion?: string | null;
+  notificationError?: Error | null;
+  appAnnouncementsEnabled?: boolean;
+}) {
+  const pointer = options?.pointer === undefined ? 'broadcasts' : options.pointer;
+  const appAnnouncementsEnabled = options?.appAnnouncementsEnabled ?? true;
+  const pages = new Map<string, string>(Object.entries(options?.pages ?? {}));
+  const redisStore = new Map<string, string>();
+  const notifications: Array<{ subject: string; bodyMarkdown: string; subredditId: string }> = [];
+  const wikiWrites: Array<{ subredditName: string; page: string; content: string }> = [];
+  let notifCount = 0;
+
+  const context = {
+    appVersion: options?.appVersion ?? '1.0.0',
+    settings: {
+      async get(name: string) {
+        if (name === 'broadcast_wiki_page') {
+          return pointer ?? '';
+        }
+        if (name === 'app_announcements_enabled') {
+          return appAnnouncementsEnabled;
+        }
+        return '';
+      },
+    },
+    reddit: {
+      async getWikiPage(subredditName: string, page: string) {
+        const content = pages.get(`${subredditName}/${page}`);
+        if (content === undefined) {
+          throw new Error('wiki page not found');
+        }
+        return { content };
+      },
+      async updateWikiPage(args: { subredditName: string; page: string; content: string }) {
+        const key = `${args.subredditName}/${args.page}`;
+        if (!pages.has(key)) {
+          throw new Error('cannot update missing page');
+        }
+        pages.set(key, args.content);
+        wikiWrites.push(args);
+      },
+      async createWikiPage(args: { subredditName: string; page: string; content: string }) {
+        pages.set(`${args.subredditName}/${args.page}`, args.content);
+        wikiWrites.push(args);
+      },
+      modMail: {
+        async createModNotification(args: { subject: string; bodyMarkdown: string; subredditId: string }) {
+          notifications.push(args);
+          notifCount += 1;
+          if (options?.notificationError) {
+            throw options.notificationError;
+          }
+          return `mod-notif-${notifCount}`;
+        },
+      },
+    },
+    redis: {
+      async get(key: string) {
+        return redisStore.get(key) ?? null;
+      },
+      async set(key: string, value: string) {
+        redisStore.set(key, value);
+        return 'OK';
+      },
+      async del(...keys: string[]) {
+        for (const key of keys) {
+          redisStore.delete(key);
+        }
+      },
+    },
+  };
+  return { context, pages, redisStore, notifications, wikiWrites };
+}
+
+function broadcastPageJson(
+  entries: Array<{
+    id?: string;
+    createdAt?: string;
+    subject?: string;
+    body?: string;
+    type?: string;
+    maxVersion?: string | null;
+    revoked?: boolean;
+    authoredBy?: string | null;
+  }>
+): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    broadcasts: entries.map((entry, index) => ({
+      id: entry.id ?? `b${index}`,
+      createdAt: entry.createdAt ?? new Date().toISOString(),
+      subject: entry.subject ?? 'Subject',
+      body: entry.body ?? 'Body',
+      type: entry.type ?? 'announcement',
+      maxVersion: entry.maxVersion ?? null,
+      revoked: entry.revoked ?? false,
+      authoredBy: entry.authoredBy ?? null,
+    })),
+  });
+}
+
+test('isBroadcastHostSubreddit allows the production and dev hubs, case- and prefix-insensitively', () => {
+  assert.equal(isBroadcastHostSubreddit('vouchx'), true);
+  assert.equal(isBroadcastHostSubreddit('VouchX'), true);
+  assert.equal(isBroadcastHostSubreddit('r/vouchx'), true);
+  assert.equal(isBroadcastHostSubreddit('vouchx_dev'), true);
+  assert.equal(isBroadcastHostSubreddit('r/VouchX_Dev'), true);
+  assert.equal(isBroadcastHostSubreddit('somewhere_else'), false);
+  assert.equal(isBroadcastHostSubreddit(''), false);
+});
+
+test('runBroadcastPoll delivers a matching broadcast, resolves {{subreddit}}, and is idempotent', async () => {
+  const page = broadcastPageJson([{ id: 'b1', subject: 'Hi {{subreddit}}', body: 'Hello {{ subreddit }} mods' }]);
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page } });
+
+  const first = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(first.delivered, 1);
+  assert.equal(ctx.notifications.length, 1);
+  assert.equal(ctx.notifications[0]?.subject, 'Hi r/test');
+  assert.equal(ctx.notifications[0]?.bodyMarkdown, 'Hello r/test mods');
+  assert.equal(ctx.notifications[0]?.subredditId, 't5_test');
+
+  const second = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(second.delivered, 0);
+  assert.equal(second.alreadyDelivered, 1);
+  assert.equal(ctx.notifications.length, 1);
+});
+
+test('runBroadcastPoll honors the maxVersion filter (delivers only below the cutoff)', async () => {
+  const page = broadcastPageJson([{ id: 'v1', maxVersion: '1.2.0' }]);
+
+  const below = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appVersion: '1.1.0' });
+  assert.equal((await runBroadcastPoll(below.context as never, 't5_test', 'test')).delivered, 1);
+
+  const equal = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appVersion: '1.2.0' });
+  const equalSummary = await runBroadcastPoll(equal.context as never, 't5_test', 'test');
+  assert.equal(equalSummary.delivered, 0);
+  assert.equal(equalSummary.skippedByVersion, 1);
+  assert.equal(equal.notifications.length, 0);
+
+  const above = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appVersion: '2.0.0' });
+  assert.equal((await runBroadcastPoll(above.context as never, 't5_test', 'test')).skippedByVersion, 1);
+});
+
+test('runBroadcastPoll skips revoked and expired broadcasts', async () => {
+  const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  const page = broadcastPageJson([
+    { id: 'revoked', revoked: true },
+    { id: 'expired', createdAt: eightDaysAgo },
+  ]);
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page } });
+
+  const summary = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(summary.delivered, 0);
+  assert.equal(summary.skippedRevoked, 1);
+  assert.equal(summary.skippedExpired, 1);
+  assert.equal(ctx.notifications.length, 0);
+});
+
+test('runBroadcastPoll retries delivery after a failed mod notification', async () => {
+  const page = broadcastPageJson([{ id: 'b1' }]);
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, notificationError: new Error('reddit down') });
+
+  const first = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(first.failed, 1);
+  assert.equal(first.delivered, 0);
+
+  const second = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(second.alreadyDelivered, 0);
+  assert.equal(second.failed, 1);
+  assert.equal(ctx.notifications.length, 2);
+});
+
+test('runBroadcastPoll skips when no broadcast page pointer is configured', async () => {
+  const ctx = createBroadcastContext({ pointer: '' });
+  const summary = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(summary.skipped, true);
+  assert.equal(summary.reason, 'no-pointer');
+  assert.equal(ctx.notifications.length, 0);
+});
+
+test('runBroadcastPoll degrades to no-op for a missing or malformed wiki page', async () => {
+  const missing = createBroadcastContext({ pages: {} });
+  const missingSummary = await runBroadcastPoll(missing.context as never, 't5_test', 'test');
+  assert.equal(missingSummary.skipped, true);
+  assert.equal(missingSummary.reason, 'no-page');
+
+  const malformed = createBroadcastContext({ pages: { 'vouchx/broadcasts': 'not json{{' } });
+  const malformedSummary = await runBroadcastPoll(malformed.context as never, 't5_test', 'test');
+  assert.equal(malformedSummary.skipped, false);
+  assert.equal(malformedSummary.considered, 0);
+  assert.equal(malformed.notifications.length, 0);
+});
+
+test('publishBroadcast appends an entry to the wiki page and rejects invalid input', async () => {
+  const ctx = createBroadcastContext({ pages: {} });
+
+  const result = await publishBroadcast(ctx.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Heads up {{subreddit}}', body: 'Please update soon.', maxVersion: '2.0.0' },
+  });
+  assert.equal(result.ok, true);
+
+  const stored = ctx.pages.get('vouchx/broadcasts');
+  assert.ok(stored);
+  const parsed = JSON.parse(stored as string);
+  assert.equal(parsed.broadcasts.length, 1);
+  assert.equal(parsed.broadcasts[0].subject, 'Heads up {{subreddit}}');
+  assert.equal(parsed.broadcasts[0].maxVersion, '2.0.0');
+  assert.equal(parsed.broadcasts[0].authoredBy, 'devuser');
+  assert.equal(parsed.broadcasts[0].revoked, false);
+
+  const invalid = await publishBroadcast(ctx.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: '', body: 'no subject' },
+  });
+  assert.equal(invalid.ok, false);
+});
+
+test('publishBroadcast fails when no broadcast page pointer is configured', async () => {
+  const ctx = createBroadcastContext({ pointer: '' });
+  const result = await publishBroadcast(ctx.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Hi', body: 'There' },
+  });
+  assert.equal(result.ok, false);
+});
+
+test('a published broadcast is delivered by a later poll, and revoke stops further delivery', async () => {
+  const ctx = createBroadcastContext({ pages: {} });
+
+  const published = await publishBroadcast(ctx.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Notice for {{subreddit}}', body: 'Body {{subreddit}}' },
+  });
+  assert.equal(published.ok, true);
+  if (!published.ok) {
+    return;
+  }
+
+  const delivered = await runBroadcastPoll(ctx.context as never, 't5_other', 'other');
+  assert.equal(delivered.delivered, 1);
+  assert.equal(ctx.notifications[ctx.notifications.length - 1]?.subject, 'Notice for r/other');
+
+  const revoked = await revokeBroadcast(ctx.context as never, published.entry.id);
+  assert.equal(revoked.ok, true);
+
+  const afterRevoke = await runBroadcastPoll(ctx.context as never, 't5_new', 'new');
+  assert.equal(afterRevoke.delivered, 0);
+  assert.equal(afterRevoke.skippedRevoked, 1);
+});
+
+function createBroadcastScheduleContext(
+  jobs: Array<{ id: string; name: string; cron?: string; data?: { subredditId?: string; subredditName?: string } }> = []
+) {
+  const redisStore = new Map<string, string>();
+  const runJobCalls: Array<{ name: string; cron: string; data?: unknown }> = [];
+  const cancelJobCalls: string[] = [];
+  const context = {
+    redis: {
+      async get(key: string) {
+        return redisStore.get(key) ?? null;
+      },
+      async set(key: string, value: string) {
+        redisStore.set(key, value);
+        return 'OK';
+      },
+      async del(...keys: string[]) {
+        for (const key of keys) {
+          redisStore.delete(key);
+        }
+      },
+    },
+    scheduler: {
+      async listJobs() {
+        return jobs;
+      },
+      async runJob(job: { name: string; cron: string; data?: unknown }) {
+        runJobCalls.push(job);
+        return 'new-job-id';
+      },
+      async cancelJob(id: string) {
+        cancelJobCalls.push(id);
+      },
+    },
+  };
+  return { context, redisStore, runJobCalls, cancelJobCalls };
+}
+
+test('ensureBroadcastPollSchedule schedules the poll when none exists', async () => {
+  const ctx = createBroadcastScheduleContext([]);
+  await ensureBroadcastPollSchedule(ctx.context as never, 't5_test', 'test');
+  assert.equal(ctx.runJobCalls.length, 1);
+  assert.equal(ctx.runJobCalls[0]?.name, BROADCAST_POLL_JOB_NAME);
+  assert.equal(ctx.runJobCalls[0]?.cron, broadcastPollCron('t5_test'));
+  assert.equal(ctx.cancelJobCalls.length, 0);
+  assert.ok([...ctx.redisStore.values()].includes(broadcastPollCron('t5_test')));
+});
+
+test('ensureBroadcastPollSchedule cancels a stale-cron job and reschedules', async () => {
+  const ctx = createBroadcastScheduleContext([
+    { id: 'old-job', name: BROADCAST_POLL_JOB_NAME, cron: '0 0 * * *', data: { subredditId: 't5_test' } },
+  ]);
+  await ensureBroadcastPollSchedule(ctx.context as never, 't5_test', 'test');
+  assert.deepEqual(ctx.cancelJobCalls, ['old-job']);
+  assert.equal(ctx.runJobCalls.length, 1);
+  assert.equal(ctx.runJobCalls[0]?.cron, broadcastPollCron('t5_test'));
+});
+
+test('ensureBroadcastPollSchedule leaves a correctly-scheduled job untouched', async () => {
+  const ctx = createBroadcastScheduleContext([
+    { id: 'good-job', name: BROADCAST_POLL_JOB_NAME, cron: broadcastPollCron('t5_test'), data: { subredditId: 't5_test' } },
+  ]);
+  await ensureBroadcastPollSchedule(ctx.context as never, 't5_test', 'test');
+  assert.equal(ctx.cancelJobCalls.length, 0);
+  assert.equal(ctx.runJobCalls.length, 0);
+});
+
+test('runBroadcastPoll suppresses opt-out announcements when app announcements are disabled', async () => {
+  const page = broadcastPageJson([{ id: 'a1', type: 'announcement' }]);
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appAnnouncementsEnabled: false });
+  const summary = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(summary.delivered, 0);
+  assert.equal(summary.skippedOptedOut, 1);
+  assert.equal(ctx.notifications.length, 0);
+  // Left unmarked so re-enabling before expiry still delivers it.
+  const reenabled = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appAnnouncementsEnabled: true });
+  assert.equal((await runBroadcastPoll(reenabled.context as never, 't5_test', 'test')).delivered, 1);
+});
+
+test('runBroadcastPoll always delivers notification-type broadcasts even when announcements are disabled', async () => {
+  const page = broadcastPageJson([{ id: 'n1', type: 'notification' }]);
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appAnnouncementsEnabled: false });
+  const summary = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+  assert.equal(summary.delivered, 1);
+  assert.equal(summary.skippedOptedOut, 0);
+  assert.equal(ctx.notifications.length, 1);
+});
+
+test('publishBroadcast records the broadcast type and defaults legacy entries to announcement', async () => {
+  const ctx = createBroadcastContext({ pages: {} });
+  const published = await publishBroadcast(ctx.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Critical', body: 'Read me', type: 'notification' },
+  });
+  assert.equal(published.ok, true);
+  const parsed = JSON.parse(ctx.pages.get('vouchx/broadcasts') as string);
+  assert.equal(parsed.broadcasts[0].type, 'notification');
+
+  // An entry on the page with no type is treated as an announcement.
+  const legacyPage = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': '{"schemaVersion":1,"broadcasts":[{"id":"x","createdAt":"' + new Date().toISOString() + '","subject":"S","body":"B"}]}' },
+    appAnnouncementsEnabled: false,
+  });
+  const summary = await runBroadcastPoll(legacyPage.context as never, 't5_test', 'test');
+  assert.equal(summary.skippedOptedOut, 1);
+});
+
+test('broadcastPollCron staggers installs across a stable multi-minute window on a 4-hour schedule', () => {
+  const cron = broadcastPollCron('t5_example');
+  const match = cron.match(/^(\d+) (\d+) \*\/4 \* \* \*$/);
+  assert.ok(match, `unexpected cron shape: ${cron}`);
+  const second = Number(match[1]);
+  const minute = Number(match[2]);
+  assert.equal(second % 5, 0);
+  assert.ok(second >= 0 && second <= 55);
+  // 10-minute window => minutes 0..9.
+  assert.ok(minute >= 0 && minute <= 9);
+  // Deterministic per subreddit id (so the schedule never churns).
+  assert.equal(broadcastPollCron('t5_example'), cron);
+  // A few hundred ids spread across many distinct slots (120 available).
+  const ids = Array.from({ length: 300 }, (_value, index) => `t5_sub_${index}`);
+  const slots = new Set(ids.map(broadcastPollCron));
+  assert.ok(slots.size >= 50, `expected wide spread, got ${slots.size} slots`);
 });
