@@ -27,7 +27,7 @@ structure — do not re-merge the modules back into one file.**
 | `blocking.ts` | Blocked-user storage, denial counts, block/unblock, global blocklist readers |
 | `submission.ts` | `submitVerification`, user grading/scoring, content-creator detection, pending account snapshot |
 | `review-actions.ts` | Approve/deny/reopen/cancel, batch review, auto-deny shadowban, moderator removal |
-| `modmail.ts` | Modmail send/archive, mod notes, denial template rendering |
+| `modmail.ts` | Modmail send/archive, mod notes, `sendModNotification` (standalone mod-notification), denial template rendering |
 | `flair.ts` | Approval flair config, template validation, viewer flair snapshots, verification flair checks |
 | `search.ts` | Pending/approved/history/audit search, moderator stats |
 | `dashboard.ts` | Hub/mod dashboard loaders, state payload builders (`toHubState` / `toModPanelState`) |
@@ -37,6 +37,7 @@ structure — do not re-merge the modules back into one file.**
 | `retention.ts` | Validation scheduling, retention reconcile, history prune, audit purge (scheduled jobs) |
 | `purge.ts` | User data deletion, pending withdrawal |
 | `update-notice.ts` | Release metadata, moderator update notices |
+| `broadcast.ts` | Developer modmail broadcast: host-sub wiki-log read/write, per-install poll + delivery, version & announcement-opt-out filtering, local idempotency, staggered poll scheduling |
 
 The client UI lives in `src/client/` (`hub-app.js`, `mod-panel.js`,
 `mod-panel.css`, etc.) and is a separate bundle — it talks to the server only
@@ -61,6 +62,14 @@ enough for slow-updating communities to catch up, and remove old packs only
 after their `retainUntilAtLeast` version has passed. Keep wizard debug controls
 production-safe: `wizardDebugMode` is a manual boolean debug switch, and forced
 mode should stay `null` in production.
+
+The **developer console** lives in `src/client/hub-app.js` / `hub-ui.css` as an
+in-hub modal (not a separate entrypoint), gated by the `developer_ui_usernames`
+global setting and surfaced via the `developerPanel` hub-state payload. It has
+two tabs — **Broadcast Modmail** and **Global Blocklist** — and talks to the
+`/api/dev/broadcast/*` routes (developer-gated server-side via `requireDeveloper`,
+independent of the client gate). Its message formatting toolbar mirrors the mod
+panel's photo-instructions helpers.
 
 ## Current product behavior
 
@@ -98,6 +107,23 @@ mode should stay `null` in production.
   than the initial candidate window. Returned offsets must advance by consumed
   live entries after stale-index cleanup; **Load more** is the continuation only
   when additional matches remain or a safety bound is reached.
+- The developer **modmail broadcast** log lives on `BROADCAST_HOST_SUBREDDIT`'s
+  wiki page; the `broadcast_wiki_page` global setting is both the pointer to that
+  page and the master kill-switch (empty = no installation reads or sends).
+  A broadcast's delivered state is tracked **per installation in Redis, keyed by
+  broadcast id — never written back to the shared wiki page.** The version filter
+  (`maxVersion`) and the announcement opt-out are evaluated **locally per
+  installation** at poll time; there is no central install registry. A max-age
+  guard stops freshly installed subs from replaying old broadcasts.
+- Broadcast **type** is `announcement` (opt-out via the `app_announcements_enabled`
+  install setting, default on) or `notification` (always delivered, ignores the
+  setting). Unknown/legacy entries default to `announcement`.
+- Authoring (compose/publish/revoke) is allowed only from the host sub
+  (`BROADCAST_HOST_SUBREDDIT`) and the dev sub (`BROADCAST_DEV_SUBREDDIT`); both
+  read and write the canonical host wiki, not their own. The per-install poll is
+  scheduled by `ensureBroadcastPollSchedule` using a per-subreddit staggered cron
+  from `broadcastPollCron`; it is cron-aware (cancels and reschedules when the
+  cadence changes), so changing the cadence needs no reinstall.
 
 ## Import rules
 
