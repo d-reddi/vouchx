@@ -628,7 +628,11 @@ app.post('/internal/scheduler/broadcast-poll', async (req, res) => {
   if (subredditId && subredditName) {
     try {
       const summary = await runBroadcastPoll(currentContext(), subredditId, subredditName);
-      if (!summary.skipped && (summary.delivered > 0 || summary.failed > 0)) {
+      if (summary.skipped && summary.reason === 'no-page') {
+        console.log(
+          `[broadcast] Failed poll for r/${subredditName}: configured broadcast wiki page is missing, unreadable, or invalid.`
+        );
+      } else if (!summary.skipped && (summary.delivered > 0 || summary.failed > 0)) {
         console.log(
           `[broadcast] r/${subredditName}: delivered=${summary.delivered} already=${summary.alreadyDelivered} version_skipped=${summary.skippedByVersion} opted_out=${summary.skippedOptedOut} expired=${summary.skippedExpired} revoked=${summary.skippedRevoked} failed=${summary.failed}`
         );
