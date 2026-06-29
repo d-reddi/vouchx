@@ -35,6 +35,7 @@ import {
   ensureUserValidationSchedule,
   getCurrentModeratorPermissionList,
   getHubModeratorUiState,
+  getModMenuAuditPurgeMinAgeDays,
   getRuntimeConfig,
   getModeratorAccessSnapshot,
   getModeratorStats,
@@ -6562,9 +6563,35 @@ test('onModeratorPurgeUserData writes an audit entry after manually purging the 
   assert.match(auditEntries.items[0]?.line ?? '', /Purged 2 audit log entries/i);
   assert.equal(toastCalls.length, 1);
   assert.deepEqual(toastCalls[0], {
-    text: 'Purged 2 audit log entries for r/examplesub.',
+    text: 'Purged 2 audit log entries older than 30 days for r/examplesub.',
     appearance: 'success',
   });
+});
+
+test('getModMenuAuditPurgeMinAgeDays clamps legacy install settings to 30 days', async () => {
+  for (const storedValue of [0, 29, '12']) {
+    const minAgeDays = await getModMenuAuditPurgeMinAgeDays({
+      settings: {
+        async get() {
+          return storedValue;
+        },
+      },
+    } as never);
+
+    assert.equal(minAgeDays, 30);
+  }
+});
+
+test('getModMenuAuditPurgeMinAgeDays preserves valid install settings above 30 days', async () => {
+  const minAgeDays = await getModMenuAuditPurgeMinAgeDays({
+    settings: {
+      async get() {
+        return 45;
+      },
+    },
+  } as never);
+
+  assert.equal(minAgeDays, 45);
 });
 
 test('releaseRedisLockIfOwned deletes the cleanup lock when the token matches', async () => {

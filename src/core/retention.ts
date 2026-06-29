@@ -240,7 +240,7 @@ export async function getModMenuAuditPurgeMinAgeDays(
   context: Pick<Devvit.Context, 'settings'>
 ): Promise<number> {
   const rawValue = await context.settings.get<number | string>(INSTALL_SETTING_MOD_MENU_AUDIT_PURGE_DAYS);
-  return typeof rawValue === 'number'
+  const parsedValue = typeof rawValue === 'number'
     ? Number.isFinite(rawValue)
       ? Math.max(0, Math.floor(rawValue))
       : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
@@ -248,6 +248,7 @@ export async function getModMenuAuditPurgeMinAgeDays(
       ? parseNonNegativeInt(rawValue, DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS) ??
         DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS
       : DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS;
+  return Math.max(DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS, parsedValue);
 }
 
 export function isApprovedRetentionBumpDue(record: VerificationRecord, nowMs = Date.now()): boolean {

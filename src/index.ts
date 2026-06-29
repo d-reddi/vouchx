@@ -13,6 +13,7 @@ import {
   buildModeratorUpdateNotice,
   buildSubmitVerificationForm,
   cancelReopenedVerification,
+  DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   deleteCurrentUserVerificationData,
   deleteVerificationDataFormDefinition,
   dismissModeratorUpdateNotice,
@@ -296,8 +297,13 @@ function validateAuditPurgeDays(value: unknown): string | undefined {
   if (value === undefined) {
     return;
   }
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
-    return 'Enter a whole number of days (0 or greater).';
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS ||
+    !Number.isInteger(value)
+  ) {
+    return `Enter a whole number of days (${DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS} or greater).`;
   }
 }
 

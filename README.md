@@ -159,6 +159,21 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
+### v1.5.9
+
+**Critical Fix**: Fixes rare issue where some approved records could get deleted during nightly validation
+
+- Photo pop-up in queue card no longer scrolls the queue behind it
+- Reordered install settings for better grouping
+- Modmail Developer Notifications: op-out for non-critical announcements in install settings.
+- Improved History Search
+- Updated Readme instructions
+- Hub post deletion fix
+- Purge button limited to 30 days for proper auditing.
+- Backend / Developer changes
+
+---
+
 ### v1.5.8
 
 #### New Features

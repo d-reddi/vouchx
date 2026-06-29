@@ -376,7 +376,7 @@
       "mod_menu_audit_purge_days": {
         "type": "number",
         "label": "Purge audit log data older than (days)",
-        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter 0 to purge all audit log entries.",
+        "helpText": "Used by the subreddit menu action \"Purge Audit Log.\" Enter a whole number of 30 or greater so the most recent 30 days of audit data are always retained.",
         "defaultValue": 30,
         "validationEndpoint": "/internal/settings/validate/mod-menu-audit-purge-days"
       }
