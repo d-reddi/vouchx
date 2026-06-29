@@ -62,7 +62,8 @@
   },
   "scheduler": {
     "tasks": {
-      "photo-verification:user-validation-reconcile": "/internal/scheduler/user-validation-reconcile"
+      "photo-verification:user-validation-reconcile": "/internal/scheduler/user-validation-reconcile",
+      "photo-verification:broadcast-poll": "/internal/scheduler/broadcast-poll"
     }
   },
   "permissions": {
@@ -265,7 +266,13 @@
       "developer_ui_usernames": {
         "type": "string",
         "label": "Developer UI usernames",
-        "helpText": "Secret comma-separated Reddit usernames allowed to view the developer-only global blocklist editor in the hub UI.",
+        "helpText": "Secret comma-separated Reddit usernames allowed to open the developer console in the hub UI (global blocklist editor and modmail broadcast).",
+        "isSecret": true
+      },
+      "broadcast_wiki_page": {
+        "type": "string",
+        "label": "Modmail broadcast wiki page",
+        "helpText": "Name of the wiki page on r/vouchx that holds the developer modmail-broadcast log. Set this to enable broadcasts; clear it to immediately stop every installation from reading or sending them. Managed through the Devvit CLI.",
         "isSecret": true
       }
     },
@@ -294,6 +301,12 @@
         "type": "boolean",
         "label": "Auto-archive pending verification modmail",
         "helpText": "When enabled the app archives pending verification modmail conversations and user replies before a moderator approval or denial is made.",
+        "defaultValue": true
+      },
+      "app_announcements_enabled": {
+        "type": "boolean",
+        "label": "Receive VouchX app announcements",
+        "helpText": "When on, this subreddit's modmail receives optional VouchX app announcements (new features, tips, and similar updates) as mod notifications. Turn it off to stop receiving them. Important operational notifications from the developer are always delivered regardless of this setting.",
         "defaultValue": true
       },
       "auto_deny_shadowbanned_enabled": {

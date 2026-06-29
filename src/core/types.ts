@@ -49,6 +49,75 @@ export type DeveloperPanelPayload = {
   canonicalValue: string;
 };
 
+// 'announcement' broadcasts are opt-out: a subreddit that turns off the
+// app-announcements install setting will not receive them. 'notification'
+// broadcasts ignore that setting and are always delivered.
+export type BroadcastType = 'announcement' | 'notification';
+
+// One announcement in the shared modmail-broadcast log (a wiki page on the
+// official VouchX subreddit). Authored from the developer console; every
+// installation reads the log on a schedule and delivers qualifying entries to
+// its own modmail as a mod notification.
+export type BroadcastEntry = {
+  id: string;
+  createdAt: string;
+  subject: string;
+  body: string;
+  type: BroadcastType;
+  // Deliver only to installations whose app version is strictly less than this.
+  // null means deliver to every installation regardless of version.
+  maxVersion: string | null;
+  revoked: boolean;
+  authoredBy: string | null;
+};
+
+export type BroadcastPage = {
+  schemaVersion: number;
+  broadcasts: BroadcastEntry[];
+};
+
+// Compact entry shown in the developer console history list (no body).
+export type BroadcastHistoryItem = {
+  id: string;
+  createdAt: string;
+  subject: string;
+  type: BroadcastType;
+  maxVersion: string | null;
+  revoked: boolean;
+  authoredBy: string | null;
+};
+
+export type DeveloperBroadcastState = {
+  // True only when the current subreddit is the official host, i.e. this hub may
+  // author/revoke broadcasts. Every installation can still receive them.
+  canPublish: boolean;
+  hostSubreddit: string;
+  // Whether the CLI pointer / kill-switch global setting is configured.
+  pointerConfigured: boolean;
+  pageName: string | null;
+  history: BroadcastHistoryItem[];
+};
+
+export type BroadcastComposeInput = {
+  subject: string;
+  body: string;
+  type: BroadcastType;
+  maxVersion: string | null;
+};
+
+export type BroadcastPollSummary = {
+  skipped: boolean;
+  reason?: string;
+  considered: number;
+  delivered: number;
+  alreadyDelivered: number;
+  skippedByVersion: number;
+  skippedExpired: number;
+  skippedRevoked: number;
+  skippedOptedOut: number;
+  failed: number;
+};
+
 export type UserGrade = 'trusted' | 'normal' | 'low_engagement' | 'spam_risk';
 
 export type UserGradeResult = {

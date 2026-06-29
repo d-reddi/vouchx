@@ -7,6 +7,19 @@ export {
   unblockUserForModerator,
 } from './core/blocking.ts';
 export {
+  broadcastPollCron,
+  ensureBroadcastPollSchedule,
+  getDeveloperBroadcastState,
+  isBroadcastDeveloper,
+  isBroadcastHostSubreddit,
+  publishBroadcast,
+  revokeBroadcast,
+  runBroadcastPoll,
+  sendBroadcastTest,
+} from './core/broadcast.ts';
+export {
+  BROADCAST_HOST_SUBREDDIT,
+  BROADCAST_POLL_JOB_NAME,
   DEFAULT_MOD_MENU_AUDIT_PURGE_MIN_AGE_DAYS,
   DENY_REASON_INSTALL_SETTINGS,
   INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED,

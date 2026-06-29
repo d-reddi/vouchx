@@ -53,6 +53,40 @@ import {
 } from './settings.ts';
 import { getRecord } from './records.ts';
 
+/**
+ * Sends a standalone moderator notification to a subreddit's own modmail inbox.
+ * Unlike the user-facing modmail helpers above it originates from the app (not a
+ * user conversation), surfaces in the modmail "Notifications" section, and does
+ * not touch the per-user dedupe/thread bookkeeping. Used by the developer
+ * modmail-broadcast feature.
+ */
+export async function sendModNotification(
+  context: Pick<Devvit.Context, 'reddit'>,
+  subredditId: string,
+  subject: string,
+  bodyMarkdown: string
+): Promise<ModmailStepResult> {
+  const normalizedSubredditId = sanitizeSubredditId(subredditId);
+  if (!normalizedSubredditId) {
+    return { status: 'failed', reason: 'Missing subreddit id for mod notification.' };
+  }
+  const trimmedSubject = subject.trim();
+  const trimmedBody = bodyMarkdown.trim();
+  if (!trimmedSubject || !trimmedBody) {
+    return { status: 'failed', reason: 'Mod notification requires a subject and body.' };
+  }
+  try {
+    const conversationId = await context.reddit.modMail.createModNotification({
+      subject: trimmedSubject,
+      bodyMarkdown: trimmedBody,
+      subredditId: normalizedSubredditId,
+    });
+    return { status: 'created', conversationId: normalizeModmailConversationId(conversationId) ?? undefined };
+  } catch (error) {
+    return { status: 'failed', reason: errorText(error) };
+  }
+}
+
 export async function sendShadowbanAutoDenyModmail(
   context: Devvit.Context,
   subredditId: string,

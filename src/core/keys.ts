@@ -94,6 +94,21 @@ export function validationSchedulePresentKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:validation:schedule-present`;
 }
 
+export function broadcastPollScheduleLockKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:broadcast:schedule-lock`;
+}
+
+export function broadcastPollSchedulePresentKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:broadcast:schedule-present`;
+}
+
+// Per-installation marker recording that this subreddit has already delivered a
+// given broadcast id. Local to the installation; the shared wiki log is never
+// written back to from here.
+export function broadcastDeliveredKey(subredditId: string, broadcastId: string): string {
+  return `${subredditScopePrefix(subredditId)}:broadcast:delivered:${broadcastId}`;
+}
+
 export function verificationActionLockKey(subredditId: string, verificationId: string): string {
   return `${subredditScopePrefix(subredditId)}:verification-action-lock:${verificationId.trim()}`;
 }

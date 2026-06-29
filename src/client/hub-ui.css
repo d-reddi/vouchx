@@ -1717,3 +1717,235 @@ button:not(:disabled):hover {
 .hidden {
   display: none;
 }
+
+/* ----- Developer console: launcher + modal ----- */
+.hub-developer-launch {
+  position: relative;
+  z-index: 1;
+  margin-top: 6px;
+}
+
+.hub-developer-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hub-developer-open-btn .hub-kicker {
+  margin: 0;
+}
+
+body.hub-developer-modal-open {
+  overflow: hidden;
+}
+
+.hub-developer-modal {
+  z-index: 1100;
+}
+
+.hub-developer-card {
+  width: min(720px, 100%);
+  max-height: min(86vh, 920px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.hub-developer-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hub-developer-modal-head .hub-modal-title {
+  margin: 0;
+}
+
+.hub-developer-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.hub-developer-close:hover,
+.hub-developer-close:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+}
+
+.hub-developer-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.hub-developer-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.92rem;
+  padding: 9px 12px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.hub-developer-tab:hover {
+  color: var(--text);
+}
+
+.hub-developer-tab.is-active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.hub-developer-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Beat the equal-specificity .hidden utility (defined earlier in the file) so
+   the inactive tab panel actually hides instead of stacking below the active one. */
+.hub-developer-tabpanel.hidden {
+  display: none;
+}
+
+.hub-developer-preview {
+  padding: 12px 14px;
+  border: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--card) 86%, var(--bg) 14%);
+}
+
+.hub-developer-preview-subject {
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.hub-developer-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hub-developer-history-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: var(--radius-control);
+}
+
+.hub-developer-history-row.is-revoked {
+  opacity: 0.6;
+}
+
+.hub-developer-history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hub-developer-history-subject {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.hub-developer-history-revoke {
+  flex: 0 0 auto;
+}
+
+/* Broadcast message markdown toolbar */
+.hub-md-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.hub-md-btn {
+  min-width: 32px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--card) 86%, var(--bg) 14%);
+  color: color-mix(in srgb, var(--text) 88%, var(--muted) 12%);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.hub-md-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 44%, var(--line) 56%);
+  background: color-mix(in srgb, var(--primary) 12%, var(--card) 88%);
+  color: var(--text);
+}
+
+.hub-md-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hub-md-btn-italic {
+  font-style: italic;
+}
+
+/* Broadcast type selector */
+.hub-broadcast-type {
+  display: grid;
+  gap: 8px;
+}
+
+.hub-broadcast-type-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.hub-broadcast-type-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--primary) 52%, var(--line) 48%);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card) 92%);
+}
+
+.hub-broadcast-type-option input {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.hub-broadcast-type-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hub-broadcast-type-name {
+  font-weight: 600;
+}
+
+.hub-broadcast-type-desc {
+  color: var(--muted);
+  font-size: 0.85rem;
+}

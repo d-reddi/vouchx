@@ -144,75 +144,186 @@ function createShell(root, inline) {
             <div data-el="action-row" class="row hub-action-dock"></div>
           </header>
 
-          <details data-el="developer-panel" class="hub-developer hidden">
-            <summary class="hub-developer-summary">
-              <span class="hub-kicker">Developer Tools</span>
-              <span class="hub-developer-summary-icon" aria-hidden="true"></span>
-            </summary>
-            <section class="hub-developer-content">
-              <div class="hub-developer-copy">
-                <h2>Global blocklist</h2>
-                <p class="meta">
-                  This editor is read-only for app settings. Add or remove usernames here, then copy the updated value into the Devvit CLI.
-                </p>
+          <div data-el="developer-panel" class="hub-developer-launch hidden">
+            <button data-el="developer-open-btn" class="btn-secondary hub-developer-open-btn" type="button">
+              <span class="hub-kicker">Developer Console</span>
+            </button>
+          </div>
+
+          <div data-el="developer-modal" class="hub-modal hub-developer-modal hidden">
+            <div class="hub-modal-card hub-developer-card" role="dialog" aria-modal="true" aria-labelledby="developer-modal-title">
+              <div class="hub-developer-modal-head">
+                <h2 id="developer-modal-title" class="hub-modal-title">Developer Console</h2>
+                <button data-el="developer-close-btn" class="hub-developer-close" type="button" aria-label="Close developer console">&times;</button>
               </div>
-              <div class="hub-developer-stack">
-                <div>
-                  <p class="hub-developer-label">Currently blocked</p>
-                  <div data-el="developer-current-list" class="hub-developer-list"></div>
-                  <p data-el="developer-empty" class="meta hidden">No usernames are currently blocked app-wide.</p>
+              <div class="hub-developer-tabs" role="tablist">
+                <button data-el="developer-tab-broadcast" class="hub-developer-tab is-active" type="button" role="tab" aria-selected="true">Broadcast Modmail</button>
+                <button data-el="developer-tab-blocklist" class="hub-developer-tab" type="button" role="tab" aria-selected="false">Global Blocklist</button>
+              </div>
+
+              <section data-el="developer-broadcast-tab" class="hub-developer-tabpanel" role="tabpanel">
+                <div class="hub-developer-copy">
+                  <h3>Send a modmail to every installation</h3>
+                  <p class="meta">
+                    Publishing writes to the broadcast log on r/<span data-el="broadcast-host">vouchx</span>. Each
+                    installation polls hourly and delivers the message to its own modmail as a mod notification,
+                    self-selecting by app version. Use <code>&#123;&#123;subreddit&#125;&#125;</code> to insert each
+                    community's name.
+                  </p>
                 </div>
-                <div>
-                  <p class="hub-developer-label">Add one username</p>
-                  <div class="hub-developer-input-row">
+                <p data-el="broadcast-host-note" class="hub-developer-warning hidden"></p>
+                <p data-el="broadcast-pointer-note" class="hub-developer-warning hidden"></p>
+                <div data-el="broadcast-compose" class="hub-developer-stack">
+                  <div>
+                    <p class="hub-developer-label">Type</p>
+                    <div class="hub-broadcast-type" role="radiogroup" aria-label="Broadcast type">
+                      <label class="hub-broadcast-type-option">
+                        <input data-el="broadcast-type-announcement" type="radio" name="broadcast-type" value="announcement" checked />
+                        <span class="hub-broadcast-type-text">
+                          <span class="hub-broadcast-type-name">App Announcement</span>
+                          <span class="hub-broadcast-type-desc">Opt-out &mdash; subreddits that turned off app announcements won't receive it.</span>
+                        </span>
+                      </label>
+                      <label class="hub-broadcast-type-option">
+                        <input data-el="broadcast-type-notification" type="radio" name="broadcast-type" value="notification" />
+                        <span class="hub-broadcast-type-text">
+                          <span class="hub-broadcast-type-name">Notification</span>
+                          <span class="hub-broadcast-type-desc">Always delivered, regardless of a subreddit's announcement setting.</span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="hub-developer-label">Subject</p>
                     <input
-                      data-el="developer-add-input"
+                      data-el="broadcast-subject"
                       class="hub-developer-input"
                       type="text"
-                      placeholder="u/example_user"
+                      maxlength="100"
+                      placeholder="Heads up for {{subreddit}}"
                       autocomplete="off"
                       spellcheck="false"
                     />
-                    <button data-el="developer-add-btn" class="btn-secondary" type="button">Add</button>
                   </div>
-                </div>
-                <div>
-                  <p class="hub-developer-label">Add multiple usernames</p>
-                  <textarea
-                    data-el="developer-bulk-input"
-                    class="hub-developer-textarea"
-                    rows="4"
-                    placeholder="u/test_user1&#10;test_user2, test_user3"
-                    spellcheck="false"
-                  ></textarea>
+                  <div>
+                    <p class="hub-developer-label">Message &mdash; Markdown supported</p>
+                    <div data-el="broadcast-format-toolbar" class="hub-md-toolbar" aria-label="Message formatting">
+                      <button class="hub-md-btn" type="button" data-md-action="bold" title="Bold" aria-label="Bold">B</button>
+                      <button class="hub-md-btn hub-md-btn-italic" type="button" data-md-action="italic" title="Italic" aria-label="Italic">i</button>
+                      <button class="hub-md-btn" type="button" data-md-action="link" title="Link" aria-label="Insert link">Link</button>
+                      <button class="hub-md-btn" type="button" data-md-action="quote" title="Quote" aria-label="Quote">Quote</button>
+                      <button class="hub-md-btn" type="button" data-md-action="heading-1" title="Heading 1" aria-label="Heading 1">H1</button>
+                      <button class="hub-md-btn" type="button" data-md-action="heading-2" title="Heading 2" aria-label="Heading 2">H2</button>
+                      <button class="hub-md-btn" type="button" data-md-action="heading-3" title="Heading 3" aria-label="Heading 3">H3</button>
+                      <button class="hub-md-btn" type="button" data-md-action="bullet-list" title="Bullet list" aria-label="Bullet list">List</button>
+                      <button class="hub-md-btn" type="button" data-md-action="numbered-list" title="Numbered list" aria-label="Numbered list">1. List</button>
+                    </div>
+                    <textarea
+                      data-el="broadcast-body"
+                      class="hub-developer-textarea"
+                      rows="6"
+                      placeholder="Write your announcement..."
+                      spellcheck="false"
+                    ></textarea>
+                    <div class="row">
+                      <button data-el="broadcast-insert-token" class="btn-secondary" type="button">Insert {{subreddit}}</button>
+                      <button data-el="broadcast-preview-toggle" class="btn-secondary" type="button">Preview</button>
+                    </div>
+                  </div>
+                  <div data-el="broadcast-preview" class="hub-developer-preview hidden">
+                    <p class="hub-developer-label">Preview</p>
+                    <p data-el="broadcast-preview-subject" class="hub-developer-preview-subject"></p>
+                    <div data-el="broadcast-preview-body" class="markdown-body"></div>
+                  </div>
+                  <div>
+                    <p class="hub-developer-label">Only send to installations below version (optional)</p>
+                    <input
+                      data-el="broadcast-max-version"
+                      class="hub-developer-input"
+                      type="text"
+                      placeholder="e.g. 1.4.0 — leave blank to reach all"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                  </div>
+                  <div data-el="broadcast-error" class="hub-developer-warning hidden"></div>
                   <div class="row">
-                    <button data-el="developer-bulk-btn" class="btn-secondary" type="button">Add Pasted List</button>
-                    <button data-el="developer-reset-btn" class="btn-secondary" type="button">Reset to Current</button>
+                    <button data-el="broadcast-test-btn" class="btn-secondary" type="button">Send test to this subreddit</button>
+                    <button data-el="broadcast-send-btn" class="btn-primary" type="button">Publish broadcast</button>
                   </div>
                 </div>
-                <div data-el="developer-invalid" class="hub-developer-warning hidden"></div>
-                <p data-el="developer-draft-status" class="hub-developer-status"></p>
-                <div>
-                  <p class="hub-developer-label">Commands to paste into Devvit CLI</p>
-                  <textarea
-                    data-el="developer-canonical-output"
-                    class="hub-developer-textarea hub-developer-output"
-                    rows="10"
-                    readonly
-                  ></textarea>
-                  <div class="row">
-                    <button data-el="developer-copy-btn" class="btn-primary" type="button">Copy Terminal Commands</button>
+                <div class="hub-developer-history">
+                  <p class="hub-developer-label">Recent broadcasts</p>
+                  <div data-el="broadcast-history-list" class="hub-developer-list"></div>
+                  <p data-el="broadcast-history-empty" class="meta hidden">No broadcasts published yet.</p>
+                </div>
+              </section>
+
+              <section data-el="developer-blocklist-tab" class="hub-developer-tabpanel hidden" role="tabpanel">
+                <div class="hub-developer-copy">
+                  <h3>Global blocklist</h3>
+                  <p class="meta">
+                    This editor is read-only for app settings. Add or remove usernames here, then copy the updated value into the Devvit CLI.
+                  </p>
+                </div>
+                <div class="hub-developer-stack">
+                  <div>
+                    <p class="hub-developer-label">Currently blocked</p>
+                    <div data-el="developer-current-list" class="hub-developer-list"></div>
+                    <p data-el="developer-empty" class="meta hidden">No usernames are currently blocked app-wide.</p>
+                  </div>
+                  <div>
+                    <p class="hub-developer-label">Add one username</p>
+                    <div class="hub-developer-input-row">
+                      <input
+                        data-el="developer-add-input"
+                        class="hub-developer-input"
+                        type="text"
+                        placeholder="u/example_user"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                      <button data-el="developer-add-btn" class="btn-secondary" type="button">Add</button>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="hub-developer-label">Add multiple usernames</p>
+                    <textarea
+                      data-el="developer-bulk-input"
+                      class="hub-developer-textarea"
+                      rows="4"
+                      placeholder="u/test_user1&#10;test_user2, test_user3"
+                      spellcheck="false"
+                    ></textarea>
+                    <div class="row">
+                      <button data-el="developer-bulk-btn" class="btn-secondary" type="button">Add Pasted List</button>
+                      <button data-el="developer-reset-btn" class="btn-secondary" type="button">Reset to Current</button>
+                    </div>
+                  </div>
+                  <div data-el="developer-invalid" class="hub-developer-warning hidden"></div>
+                  <p data-el="developer-draft-status" class="hub-developer-status"></p>
+                  <div>
+                    <p class="hub-developer-label">Commands to paste into Devvit CLI</p>
+                    <textarea
+                      data-el="developer-canonical-output"
+                      class="hub-developer-textarea hub-developer-output"
+                      rows="10"
+                      readonly
+                    ></textarea>
+                    <div class="row">
+                      <button data-el="developer-copy-btn" class="btn-primary" type="button">Copy Terminal Commands</button>
+                    </div>
+                  </div>
+                  <div class="hub-developer-instructions">
+                    <p class="hub-developer-label">Apply the change</p>
+                    <p class="meta">1. Paste the copied commands into your terminal.</p>
+                    <p class="meta">2. The populated blocklist chunks are updated first, and the final line updates the active chunk count.</p>
+                    <p class="meta">3. Refresh the app to confirm the updated list.</p>
                   </div>
                 </div>
-                <div class="hub-developer-instructions">
-                  <p class="hub-developer-label">Apply the change</p>
-                  <p class="meta">1. Paste the copied commands into your terminal.</p>
-                  <p class="meta">2. The populated blocklist chunks are updated first, and the final line updates the active chunk count.</p>
-                  <p class="meta">3. Refresh the app to confirm the updated list.</p>
-                </div>
-              </div>
-            </section>
-          </details>
+              </section>
+            </div>
+          </div>
 
           <footer data-el="legal-links" class="legal-links hidden"></footer>
         </section>
@@ -334,6 +445,33 @@ function createShell(root, inline) {
     developerDraftStatus: root.querySelector('[data-el="developer-draft-status"]'),
     developerCanonicalOutput: root.querySelector('[data-el="developer-canonical-output"]'),
     developerCopyBtn: root.querySelector('[data-el="developer-copy-btn"]'),
+    developerOpenBtn: root.querySelector('[data-el="developer-open-btn"]'),
+    developerModal: root.querySelector('[data-el="developer-modal"]'),
+    developerCloseBtn: root.querySelector('[data-el="developer-close-btn"]'),
+    developerTabBroadcast: root.querySelector('[data-el="developer-tab-broadcast"]'),
+    developerTabBlocklist: root.querySelector('[data-el="developer-tab-blocklist"]'),
+    developerBroadcastTab: root.querySelector('[data-el="developer-broadcast-tab"]'),
+    developerBlocklistTab: root.querySelector('[data-el="developer-blocklist-tab"]'),
+    broadcastHost: root.querySelector('[data-el="broadcast-host"]'),
+    broadcastHostNote: root.querySelector('[data-el="broadcast-host-note"]'),
+    broadcastPointerNote: root.querySelector('[data-el="broadcast-pointer-note"]'),
+    broadcastCompose: root.querySelector('[data-el="broadcast-compose"]'),
+    broadcastTypeAnnouncement: root.querySelector('[data-el="broadcast-type-announcement"]'),
+    broadcastTypeNotification: root.querySelector('[data-el="broadcast-type-notification"]'),
+    broadcastFormatToolbar: root.querySelector('[data-el="broadcast-format-toolbar"]'),
+    broadcastSubject: root.querySelector('[data-el="broadcast-subject"]'),
+    broadcastBody: root.querySelector('[data-el="broadcast-body"]'),
+    broadcastMaxVersion: root.querySelector('[data-el="broadcast-max-version"]'),
+    broadcastInsertToken: root.querySelector('[data-el="broadcast-insert-token"]'),
+    broadcastPreviewToggle: root.querySelector('[data-el="broadcast-preview-toggle"]'),
+    broadcastPreview: root.querySelector('[data-el="broadcast-preview"]'),
+    broadcastPreviewSubject: root.querySelector('[data-el="broadcast-preview-subject"]'),
+    broadcastPreviewBody: root.querySelector('[data-el="broadcast-preview-body"]'),
+    broadcastError: root.querySelector('[data-el="broadcast-error"]'),
+    broadcastTestBtn: root.querySelector('[data-el="broadcast-test-btn"]'),
+    broadcastSendBtn: root.querySelector('[data-el="broadcast-send-btn"]'),
+    broadcastHistoryList: root.querySelector('[data-el="broadcast-history-list"]'),
+    broadcastHistoryEmpty: root.querySelector('[data-el="broadcast-history-empty"]'),
     legalLinks: root.querySelector('[data-el="legal-links"]'),
     submitWarningModal: root.querySelector('[data-el="submit-warning-modal"]'),
     submitWarningList: root.querySelector('[data-el="submit-warning-list"]'),
@@ -1880,6 +2018,463 @@ export function mountHub(options = {}) {
       } catch (error) {
         showToast(error instanceof Error ? error.message : String(error), 'error');
       }
+    });
+  }
+
+  // ----- Developer console modal: modmail broadcast -----
+  let broadcastState = null;
+  let broadcastStateLoading = false;
+  let broadcastBusy = false;
+
+  function resolveBroadcastPreviewText(text) {
+    const subredditName = String(hubState?.subredditName || '').trim();
+    const replacement = subredditName ? `r/${subredditName}` : 'this subreddit';
+    return String(text ?? '').replace(/\{\{\s*subreddit\s*\}\}/gi, replacement);
+  }
+
+  function setDeveloperTab(tab) {
+    const isBroadcast = tab !== 'blocklist';
+    if (refs.developerTabBroadcast) {
+      refs.developerTabBroadcast.classList.toggle('is-active', isBroadcast);
+      refs.developerTabBroadcast.setAttribute('aria-selected', isBroadcast ? 'true' : 'false');
+    }
+    if (refs.developerTabBlocklist) {
+      refs.developerTabBlocklist.classList.toggle('is-active', !isBroadcast);
+      refs.developerTabBlocklist.setAttribute('aria-selected', !isBroadcast ? 'true' : 'false');
+    }
+    if (refs.developerBroadcastTab) {
+      refs.developerBroadcastTab.classList.toggle('hidden', !isBroadcast);
+    }
+    if (refs.developerBlocklistTab) {
+      refs.developerBlocklistTab.classList.toggle('hidden', isBroadcast);
+    }
+  }
+
+  function setBroadcastError(message) {
+    if (!refs.broadcastError) {
+      return;
+    }
+    refs.broadcastError.textContent = message || '';
+    refs.broadcastError.classList.toggle('hidden', !message);
+  }
+
+  function renderBroadcastPreview() {
+    if (!refs.broadcastPreview || refs.broadcastPreview.classList.contains('hidden')) {
+      return;
+    }
+    const subject = resolveBroadcastPreviewText(refs.broadcastSubject?.value ?? '');
+    const body = resolveBroadcastPreviewText(refs.broadcastBody?.value ?? '');
+    if (refs.broadcastPreviewSubject) {
+      refs.broadcastPreviewSubject.textContent = subject.trim() || '(no subject)';
+    }
+    if (refs.broadcastPreviewBody) {
+      refs.broadcastPreviewBody.innerHTML = body.trim()
+        ? renderMarkdown(body)
+        : '<p class="markdown-empty">Nothing to preview yet.</p>';
+    }
+  }
+
+  function formatBroadcastTimestamp(iso) {
+    const ms = new Date(iso).getTime();
+    if (!Number.isFinite(ms)) {
+      return '';
+    }
+    try {
+      return new Date(ms).toLocaleString();
+    } catch (error) {
+      void error;
+      return new Date(ms).toISOString();
+    }
+  }
+
+  function renderBroadcastHistory() {
+    if (!refs.broadcastHistoryList) {
+      return;
+    }
+    const history = Array.isArray(broadcastState?.history) ? broadcastState.history : [];
+    const canManage = Boolean(broadcastState?.canPublish);
+    refs.broadcastHistoryList.innerHTML = '';
+    if (refs.broadcastHistoryEmpty) {
+      refs.broadcastHistoryEmpty.classList.toggle('hidden', history.length > 0);
+    }
+    for (const item of history) {
+      const row = document.createElement('div');
+      row.className = 'hub-developer-history-row';
+      if (item.revoked) {
+        row.classList.add('is-revoked');
+      }
+
+      const info = document.createElement('div');
+      info.className = 'hub-developer-history-info';
+      const subjectLine = document.createElement('p');
+      subjectLine.className = 'hub-developer-history-subject';
+      subjectLine.textContent = item.subject || '(no subject)';
+      const metaLine = document.createElement('p');
+      metaLine.className = 'meta';
+      const bits = [];
+      bits.push(item.type === 'notification' ? 'Notification' : 'Announcement');
+      const stamp = formatBroadcastTimestamp(item.createdAt);
+      if (stamp) {
+        bits.push(stamp);
+      }
+      bits.push(item.maxVersion ? `below v${item.maxVersion}` : 'all installations');
+      if (item.authoredBy) {
+        bits.push(`by u/${item.authoredBy}`);
+      }
+      if (item.revoked) {
+        bits.push('revoked');
+      }
+      metaLine.textContent = bits.join(' · ');
+      info.appendChild(subjectLine);
+      info.appendChild(metaLine);
+      row.appendChild(info);
+
+      if (canManage && !item.revoked) {
+        row.appendChild(
+          makeButton('Revoke', 'btn-secondary hub-developer-history-revoke', () => {
+            void revokeBroadcastEntry(item.id);
+          })
+        );
+      }
+      refs.broadcastHistoryList.appendChild(row);
+    }
+  }
+
+  function renderBroadcastState() {
+    const canPublish = Boolean(broadcastState?.canPublish);
+    const pointerConfigured = Boolean(broadcastState?.pointerConfigured);
+    const host = String(broadcastState?.hostSubreddit || 'vouchx');
+    if (refs.broadcastHost) {
+      refs.broadcastHost.textContent = host;
+    }
+    if (refs.broadcastHostNote) {
+      refs.broadcastHostNote.classList.toggle('hidden', canPublish);
+      if (!canPublish) {
+        refs.broadcastHostNote.textContent = `Composing and publishing are only available from the r/${host} hub. You can still review recent broadcasts here.`;
+      }
+    }
+    if (refs.broadcastPointerNote) {
+      const showPointerNote = canPublish && !pointerConfigured;
+      refs.broadcastPointerNote.classList.toggle('hidden', !showPointerNote);
+      if (showPointerNote) {
+        refs.broadcastPointerNote.textContent =
+          'No broadcast page is configured yet. Set the broadcast_wiki_page global setting via the Devvit CLI before publishing.';
+      }
+    }
+    const disabled = !canPublish || !pointerConfigured || broadcastBusy;
+    const controls = [
+      refs.broadcastSubject,
+      refs.broadcastBody,
+      refs.broadcastMaxVersion,
+      refs.broadcastInsertToken,
+      refs.broadcastTypeAnnouncement,
+      refs.broadcastTypeNotification,
+      refs.broadcastTestBtn,
+      refs.broadcastSendBtn,
+    ];
+    if (refs.broadcastFormatToolbar) {
+      controls.push(...refs.broadcastFormatToolbar.querySelectorAll('button'));
+    }
+    for (const control of controls) {
+      if (control) {
+        control.disabled = disabled;
+      }
+    }
+    renderBroadcastHistory();
+  }
+
+  async function loadBroadcastState() {
+    if (broadcastStateLoading) {
+      return;
+    }
+    broadcastStateLoading = true;
+    try {
+      const payload = await requestJson('/api/dev/broadcast/state', {});
+      broadcastState = payload?.state ?? null;
+    } catch (error) {
+      broadcastState = null;
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      broadcastStateLoading = false;
+      renderBroadcastState();
+    }
+  }
+
+  function getBroadcastInput() {
+    return {
+      subject: refs.broadcastSubject?.value ?? '',
+      body: refs.broadcastBody?.value ?? '',
+      type: refs.broadcastTypeNotification?.checked ? 'notification' : 'announcement',
+      maxVersion: (refs.broadcastMaxVersion?.value ?? '').trim() || null,
+    };
+  }
+
+  async function submitBroadcast(path, body, { clearOnSuccess } = {}) {
+    if (broadcastBusy) {
+      return;
+    }
+    setBroadcastError('');
+    broadcastBusy = true;
+    renderBroadcastState();
+    try {
+      const payload = await requestJson(path, body);
+      if (payload?.state) {
+        broadcastState = payload.state;
+      }
+      if (payload?.toast?.text) {
+        showToast(payload.toast.text, payload.toast.tone || 'success');
+      }
+      if (clearOnSuccess) {
+        if (refs.broadcastSubject) {
+          refs.broadcastSubject.value = '';
+        }
+        if (refs.broadcastBody) {
+          refs.broadcastBody.value = '';
+        }
+        if (refs.broadcastMaxVersion) {
+          refs.broadcastMaxVersion.value = '';
+        }
+        if (refs.broadcastTypeAnnouncement) {
+          refs.broadcastTypeAnnouncement.checked = true;
+        }
+        renderBroadcastPreview();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBroadcastError(message);
+      showToast(message, 'error');
+    } finally {
+      broadcastBusy = false;
+      renderBroadcastState();
+    }
+  }
+
+  async function revokeBroadcastEntry(id) {
+    if (!id || broadcastBusy) {
+      return;
+    }
+    await submitBroadcast('/api/dev/broadcast/revoke', { id });
+  }
+
+  // --- Broadcast message markdown toolbar (mirrors the mod panel helpers) ---
+  function broadcastBodyRange() {
+    const field = refs.broadcastBody;
+    const length = field ? String(field.value || '').length : 0;
+    let start = length;
+    let end = length;
+    if (field && typeof field.selectionStart === 'number' && typeof field.selectionEnd === 'number') {
+      start = Math.max(0, Math.min(field.selectionStart, length));
+      end = Math.max(start, Math.min(field.selectionEnd, length));
+    }
+    return { start, end };
+  }
+
+  function replaceBroadcastBodyRange(start, end, replacement, selStart, selEnd) {
+    const field = refs.broadcastBody;
+    if (!field) {
+      return;
+    }
+    const value = String(field.value || '');
+    const boundedStart = Math.max(0, Math.min(start, value.length));
+    const boundedEnd = Math.max(boundedStart, Math.min(end, value.length));
+    field.value = value.slice(0, boundedStart) + replacement + value.slice(boundedEnd);
+    field.focus();
+    try {
+      field.setSelectionRange(boundedStart + selStart, boundedStart + selEnd);
+    } catch (error) {
+      void error;
+    }
+    renderBroadcastPreview();
+  }
+
+  function insertBroadcastToken(token) {
+    const { start, end } = broadcastBodyRange();
+    replaceBroadcastBodyRange(start, end, token, token.length, token.length);
+  }
+
+  function wrapBroadcastSelection(prefix, suffix, fallbackText) {
+    const field = refs.broadcastBody;
+    if (!field) {
+      return;
+    }
+    const value = String(field.value || '');
+    const { start, end } = broadcastBodyRange();
+    const selected = value.slice(start, end);
+    const bodyText = selected || fallbackText;
+    const replacement = `${prefix}${bodyText}${suffix}`;
+    if (selected) {
+      replaceBroadcastBodyRange(start, end, replacement, replacement.length, replacement.length);
+    } else {
+      replaceBroadcastBodyRange(start, end, replacement, prefix.length, prefix.length + bodyText.length);
+    }
+  }
+
+  function broadcastLinePrefix(prefix, fallbackText, formatLine) {
+    const field = refs.broadcastBody;
+    if (!field) {
+      return;
+    }
+    const value = String(field.value || '');
+    if (!value) {
+      const replacement = `${prefix}${fallbackText}`;
+      replaceBroadcastBodyRange(0, 0, replacement, prefix.length, replacement.length);
+      return;
+    }
+    const { start, end } = broadcastBodyRange();
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const nextBreak = value.indexOf('\n', end > start ? end - 1 : end);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const slice = value.slice(lineStart, lineEnd);
+    const formatted = slice
+      ? slice.split('\n').map((line) => (line ? formatLine(line) : line)).join('\n')
+      : `${prefix}${fallbackText}`;
+    replaceBroadcastBodyRange(lineStart, lineEnd, formatted, formatted.length, formatted.length);
+  }
+
+  function insertBroadcastBlock(fallbackText, formatLine) {
+    const field = refs.broadcastBody;
+    if (!field) {
+      return;
+    }
+    const value = String(field.value || '');
+    const { start, end } = broadcastBodyRange();
+    const selected = value.slice(start, end);
+    const source = selected || fallbackText;
+    const block = source.split('\n').map((line) => (line.trim() ? formatLine(line) : line)).join('\n');
+    const before = value.slice(0, start);
+    const leading = before && !before.endsWith('\n') ? '\n\n' : '';
+    const replacement = `${leading}${block}`;
+    replaceBroadcastBodyRange(start, end, replacement, replacement.length, replacement.length);
+  }
+
+  function insertBroadcastLink() {
+    const field = refs.broadcastBody;
+    if (!field) {
+      return;
+    }
+    const value = String(field.value || '');
+    const { start, end } = broadcastBodyRange();
+    const label = value.slice(start, end) || 'link text';
+    const urlPlaceholder = 'https://';
+    const replacement = `[${label}](${urlPlaceholder})`;
+    const urlStart = `[${label}](`.length;
+    replaceBroadcastBodyRange(start, end, replacement, urlStart, urlStart + urlPlaceholder.length);
+  }
+
+  function applyBroadcastFormat(action) {
+    if (action === 'bold') {
+      wrapBroadcastSelection('**', '**', 'bold text');
+    } else if (action === 'italic') {
+      wrapBroadcastSelection('*', '*', 'italic text');
+    } else if (action === 'quote') {
+      broadcastLinePrefix('> ', 'Quote', (line) => (line.startsWith('>') ? line : `> ${line}`));
+    } else if (action === 'heading-1' || action === 'heading-2' || action === 'heading-3') {
+      const marker = action === 'heading-1' ? '#' : action === 'heading-2' ? '##' : '###';
+      broadcastLinePrefix(`${marker} `, 'Heading', (line) => `${marker} ${line.replace(/^#{1,3}\s+/, '')}`);
+    } else if (action === 'bullet-list') {
+      insertBroadcastBlock('Item\nItem', (line) => `- ${line}`);
+    } else if (action === 'numbered-list') {
+      let index = 0;
+      insertBroadcastBlock('Item\nItem', (line) => {
+        index += 1;
+        return `${index}. ${line}`;
+      });
+    } else if (action === 'link') {
+      insertBroadcastLink();
+    }
+  }
+
+  function openDeveloperModal() {
+    if (!refs.developerModal) {
+      return;
+    }
+    setDeveloperTab('broadcast');
+    setBroadcastError('');
+    refs.developerModal.classList.remove('hidden');
+    document.body.classList.add('hub-developer-modal-open');
+    void loadBroadcastState();
+  }
+
+  function closeDeveloperModal() {
+    if (!refs.developerModal) {
+      return;
+    }
+    refs.developerModal.classList.add('hidden');
+    document.body.classList.remove('hub-developer-modal-open');
+  }
+
+  if (refs.developerOpenBtn) {
+    refs.developerOpenBtn.addEventListener('click', openDeveloperModal);
+  }
+  if (refs.developerCloseBtn) {
+    refs.developerCloseBtn.addEventListener('click', closeDeveloperModal);
+  }
+  if (refs.developerModal) {
+    refs.developerModal.addEventListener('click', (event) => {
+      if (event.target === refs.developerModal) {
+        closeDeveloperModal();
+      }
+    });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && refs.developerModal && !refs.developerModal.classList.contains('hidden')) {
+      closeDeveloperModal();
+    }
+  });
+  if (refs.developerTabBroadcast) {
+    refs.developerTabBroadcast.addEventListener('click', () => setDeveloperTab('broadcast'));
+  }
+  if (refs.developerTabBlocklist) {
+    refs.developerTabBlocklist.addEventListener('click', () => setDeveloperTab('blocklist'));
+  }
+  if (refs.broadcastInsertToken) {
+    refs.broadcastInsertToken.addEventListener('click', () => {
+      insertBroadcastToken('{{subreddit}}');
+      renderBroadcastPreview();
+    });
+  }
+  if (refs.broadcastFormatToolbar) {
+    // preventDefault on pointerdown keeps the textarea's selection/focus when a
+    // toolbar button is pressed, so formatting applies to the selected text.
+    refs.broadcastFormatToolbar.addEventListener('pointerdown', (event) => {
+      if (event.target instanceof Element && event.target.closest('[data-md-action]')) {
+        event.preventDefault();
+      }
+    });
+    refs.broadcastFormatToolbar.addEventListener('click', (event) => {
+      const button = event.target instanceof Element ? event.target.closest('[data-md-action]') : null;
+      if (!(button instanceof HTMLButtonElement) || button.disabled) {
+        return;
+      }
+      event.preventDefault();
+      applyBroadcastFormat(String(button.dataset.mdAction || ''));
+    });
+  }
+  if (refs.broadcastPreviewToggle) {
+    refs.broadcastPreviewToggle.addEventListener('click', () => {
+      if (!refs.broadcastPreview) {
+        return;
+      }
+      const willShow = refs.broadcastPreview.classList.contains('hidden');
+      refs.broadcastPreview.classList.toggle('hidden', !willShow);
+      refs.broadcastPreviewToggle.textContent = willShow ? 'Hide preview' : 'Preview';
+      renderBroadcastPreview();
+    });
+  }
+  if (refs.broadcastBody) {
+    refs.broadcastBody.addEventListener('input', renderBroadcastPreview);
+  }
+  if (refs.broadcastSubject) {
+    refs.broadcastSubject.addEventListener('input', renderBroadcastPreview);
+  }
+  if (refs.broadcastTestBtn) {
+    refs.broadcastTestBtn.addEventListener('click', () => {
+      void submitBroadcast('/api/dev/broadcast/test', getBroadcastInput());
+    });
+  }
+  if (refs.broadcastSendBtn) {
+    refs.broadcastSendBtn.addEventListener('click', () => {
+      void submitBroadcast('/api/dev/broadcast', getBroadcastInput(), { clearOnSuccess: true });
     });
   }
 
