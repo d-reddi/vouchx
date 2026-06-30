@@ -402,7 +402,7 @@ export async function loadDashboardData(
     }
     const reconcileResult = await applyApprovalFlairWithFallbacks(context, userLatest, config, desiredTemplateId);
     if (reconcileResult.applied) {
-      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName);
+      viewerFlairSnapshot = await getViewerFlairSnapshot(context, subredditName, { forceFreshUserLookup: true });
       flairCheck = await checkVerificationFlair(context, subredditName, config, viewerFlairSnapshot);
       const updatedTemplateId = normalizeTemplateId(reconcileResult.appliedTemplateId ?? desiredTemplateId);
       const detectedTemplateAfterReconcile = normalizeTemplateId(

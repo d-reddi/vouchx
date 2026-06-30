@@ -9,7 +9,7 @@
     "build": "vite build",
     "deploy": "npx devvit upload",
     "check": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js"
+    "test": "node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js src/client/realtime-filter.test.js"
   },
   "devDependencies": {
     "@devvit/public-api": "0.13.4",

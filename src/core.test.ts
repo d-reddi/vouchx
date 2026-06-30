@@ -3782,16 +3782,16 @@ test('approveVerification and denyVerification write decision-quality audit meta
   assert.equal(deniedAudit?.denyReason, 'reason_2');
 });
 
-test('getViewerFlairSnapshot resolves flair through the username lookup after confirming the viewer identity', async () => {
+test('getViewerFlairSnapshot reuses the confirmed viewer identity without a redundant username lookup', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
       {
         username: 'Ornery_Locksmith_176',
         id: 't2_viewer',
         flair: {
-          flairText: 'Ignored current-user flair',
-          flairCssClass: 'ignored',
-          flairTemplateId: 'zzz999',
+          flairText: 'Verified',
+          flairCssClass: 'verified',
+          flairTemplateId: 'abc123',
         },
       },
     ],
@@ -3800,9 +3800,9 @@ test('getViewerFlairSnapshot resolves flair through the username lookup after co
         username: 'Ornery_Locksmith_176',
         id: 't2_viewer',
         flair: {
-          flairText: 'Verified',
-          flairCssClass: 'verified',
-          flairTemplateId: 'abc123',
+          flairText: 'Stale username-lookup flair',
+          flairCssClass: 'stale',
+          flairTemplateId: 'zzz999',
         },
       },
     ],
@@ -3822,6 +3822,52 @@ test('getViewerFlairSnapshot resolves flair through the username lookup after co
     error: null,
   });
   assert.equal(snapshotContext.currentUserCallCount, 1);
+  assert.equal(snapshotContext.usernameLookupCallCount, 0);
+  assert.deepEqual(snapshotContext.usernameLookupCalls, []);
+  assert.equal(snapshotContext.flairLookupCallCount, 1);
+});
+
+test('getViewerFlairSnapshot with forceFreshUserLookup re-fetches the viewer via username lookup', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Stale current-user flair',
+          flairCssClass: 'stale',
+          flairTemplateId: 'zzz999',
+        },
+      },
+    ],
+    usernameUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Fresh',
+          flairCssClass: 'fresh',
+          flairTemplateId: 'abc123',
+        },
+      },
+    ],
+  });
+
+  const snapshot = await getViewerFlairSnapshot(
+    snapshotContext.context as never,
+    'Bulges',
+    { forceFreshUserLookup: true }
+  );
+
+  assert.deepEqual(snapshot, {
+    flairText: 'Fresh',
+    flairCssClass: 'fresh',
+    flairTemplateId: 'abc123',
+    userId: 't2_viewer',
+    lookupState: 'confirmed_present',
+    error: null,
+  });
+  assert.equal(snapshotContext.currentUserCallCount, 1);
   assert.equal(snapshotContext.usernameLookupCallCount, 1);
   assert.deepEqual(snapshotContext.usernameLookupCalls, ['ornery_locksmith_176']);
   assert.equal(snapshotContext.flairLookupCallCount, 1);
@@ -3831,12 +3877,6 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
       new Error('2 UNKNOWN: HTTP request failed with error: unexpected EOF'),
-      {
-        username: 'Ornery_Locksmith_176',
-        id: 't2_viewer',
-      },
-    ],
-    usernameUserResponses: [
       {
         username: 'Ornery_Locksmith_176',
         id: 't2_viewer',
@@ -3869,7 +3909,7 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
       error: null,
     });
     assert.equal(snapshotContext.currentUserCallCount, 2);
-    assert.equal(snapshotContext.usernameLookupCallCount, 1);
+    assert.equal(snapshotContext.usernameLookupCallCount, 0);
     assert.equal(consoleLogCallCount, 0);
   } finally {
     console.log = originalConsoleLog;
@@ -3879,12 +3919,6 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
 test('getViewerFlairSnapshot returns unavailable when the current viewer flair lookup is forbidden', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
-      {
-        username: 'HLmikemcd',
-        id: 't2_viewer',
-      },
-    ],
-    usernameUserResponses: [
       {
         username: 'HLmikemcd',
         id: 't2_viewer',
@@ -3913,7 +3947,7 @@ test('getViewerFlairSnapshot returns unavailable when the current viewer flair l
         '2 UNKNOWN: HTTP request to URL: https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1 failed with error: Get "https://oauth.reddit.com/r/penis/api/flairlist.json?name=HLmikemcd&raw_json=1": httpbp.ClientError: http status 403 Forbidden',
     });
     assert.equal(snapshotContext.currentUserCallCount, 1);
-    assert.equal(snapshotContext.usernameLookupCallCount, 1);
+    assert.equal(snapshotContext.usernameLookupCallCount, 0);
     assert.equal(snapshotContext.flairLookupCallCount, 1);
     assert.equal(consoleLogCallCount, 0);
   } finally {

@@ -124,6 +124,25 @@ panel's photo-instructions helpers.
   scheduled by `ensureBroadcastPollSchedule` using a per-subreddit staggered cron
   from `broadcastPollCron`; it is cron-aware (cancels and reschedules when the
   cadence changes), so changing the cadence needs no reinstall.
+- **Realtime refresh is username-targeted to limit Reddit API fan-out.**
+  Mutating routes notify clients via `sendRefreshSignals` /
+  `sendFastModRefreshResponse` (`src/index.ts`). The **mod-panel** channel
+  (`vouchx_mod_refresh`) always gets a bare broadcast — reviewers want every
+  queue change. The **hub** channel (`vouchx_hub_refresh`) is *targeted*: pass
+  the affected username(s) for per-user actions (approve / deny / submit /
+  withdraw / delete / claim / flag / reopen / remove / block / …; batch passes
+  the whole affected-username array in a single send), and omit them only for
+  genuinely global changes (settings / templates / theme) that must refresh
+  everyone. The client gate is the pure `shouldApplyHubRefreshSignal`
+  (`src/client/realtime-filter.js`, covered by
+  `src/client/realtime-filter.test.js`): a hub viewer refetches `/api/hub/state`
+  only when the signal is global, names them, or they `canReview` (so the hub's
+  mod pending-count bubble stays current). **When adding a route that changes one
+  user's state, pass that username — a bare broadcast reintroduces the viewer
+  fan-out that causes Reddit HTTP 429s.** Matching is case-insensitive; the
+  server sends strict-normalized (lowercased) names. Realtime caps are 1 MB/msg
+  and 100 sends/sec per installation, and targeting is always a single send, so
+  it stays well under.
 
 ## Import rules
 
@@ -149,6 +168,9 @@ panel's photo-instructions helpers.
 
 ```
 npm run check     # tsc --noEmit
-npm test          # node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js
+npm test          # node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js src/client/realtime-filter.test.js
 npm run build     # vite build (client + server bundles)
 ```
+
+`npm test` runs only the files named in the `package.json` script — when you add
+a new client pure-helper test file, add it there too or it will not run.
