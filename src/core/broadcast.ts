@@ -12,6 +12,7 @@ import type {
 } from './types.ts';
 import {
   BROADCAST_BODY_MAX_LENGTH,
+  BROADCAST_DELIVERY_LOCK_TTL_MS,
   BROADCAST_DEV_SUBREDDIT,
   BROADCAST_HOST_SUBREDDIT,
   BROADCAST_MAX_AGE_MS,
@@ -29,6 +30,7 @@ import {
   GLOBAL_SETTING_DEVELOPER_UI_USERNAMES,
 } from './constants.ts';
 import {
+  broadcastDeliveryLockKey,
   broadcastDeliveredKey,
   broadcastPollScheduleLockKey,
   broadcastPollSchedulePresentKey,
@@ -42,7 +44,7 @@ import {
   sanitizeSubredditId,
   sanitizeSubredditName,
 } from './normalize.ts';
-import { createRedisLockToken } from './locks.ts';
+import { createRedisLockToken, releaseRedisLockIfOwned } from './locks.ts';
 import { readGlobalUsernameSetting } from './blocking.ts';
 import { sendModNotification } from './modmail.ts';
 
@@ -50,8 +52,8 @@ import { sendModNotification } from './modmail.ts';
 // community handle (r/SubName) at delivery time.
 const BROADCAST_SUBREDDIT_TOKEN_PATTERN = /\{\{\s*subreddit\s*\}\}/gi;
 
-// Subreddits allowed to author broadcasts. Each one reads and writes its own
-// wiki, so the dev subreddit stays a self-contained test loop.
+// Subreddits allowed to author broadcasts. Both read and write the canonical
+// wiki on BROADCAST_HOST_SUBREDDIT.
 const BROADCAST_HOST_SUBREDDITS: readonly string[] = [BROADCAST_HOST_SUBREDDIT, BROADCAST_DEV_SUBREDDIT];
 
 type BroadcastReadContext = Pick<Devvit.Context, 'reddit'>;
@@ -72,6 +74,20 @@ export type BroadcastPublishResult =
   | { ok: false; error: string };
 
 export type BroadcastMutationResult = { ok: true } | { ok: false; error: string };
+
+type BroadcastPageParseResult =
+  | { ok: true; page: BroadcastPage }
+  | { ok: false; error: string };
+
+export type BroadcastPageReadResult =
+  | { status: 'ok'; page: BroadcastPage }
+  | { status: 'missing'; error: string }
+  | { status: 'invalid'; error: string }
+  | { status: 'error'; error: string };
+
+type AnnouncementPreference =
+  | { status: 'available'; enabled: boolean }
+  | { status: 'unavailable'; error: string };
 
 export function resolveBroadcastTokens(text: string, subredditName: string): string {
   const normalized = sanitizeSubredditName(subredditName);
@@ -143,6 +159,9 @@ function coerceBroadcastEntry(raw: unknown): BroadcastEntry | null {
   }
   const maxVersionRaw = typeof obj.maxVersion === 'string' ? obj.maxVersion.trim() : '';
   const parsedMaxVersion = maxVersionRaw ? parseVersion(maxVersionRaw) : null;
+  if (maxVersionRaw && !parsedMaxVersion) {
+    return null;
+  }
   const authoredByRaw = typeof obj.authoredBy === 'string' ? obj.authoredBy.trim() : '';
   return {
     id,
@@ -156,34 +175,45 @@ function coerceBroadcastEntry(raw: unknown): BroadcastEntry | null {
   };
 }
 
-export function parseBroadcastPage(content: unknown): BroadcastPage {
+export function parseBroadcastPage(content: unknown): BroadcastPageParseResult {
   const empty: BroadcastPage = { schemaVersion: BROADCAST_PAGE_SCHEMA_VERSION, broadcasts: [] };
   if (typeof content !== 'string' || !content.trim()) {
-    return empty;
+    return { ok: true, page: empty };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    return empty;
+    return { ok: false, error: 'Broadcast wiki content is not valid JSON.' };
   }
   if (!parsed || typeof parsed !== 'object') {
-    return empty;
+    return { ok: false, error: 'Broadcast wiki content must be a JSON object.' };
+  }
+  const schemaVersion = (parsed as { schemaVersion?: unknown }).schemaVersion;
+  if (schemaVersion !== BROADCAST_PAGE_SCHEMA_VERSION) {
+    return {
+      ok: false,
+      error: `Unsupported broadcast wiki schema version ${String(schemaVersion ?? 'missing')}.`,
+    };
   }
   const rawList = (parsed as { broadcasts?: unknown }).broadcasts;
   if (!Array.isArray(rawList)) {
-    return empty;
+    return { ok: false, error: 'Broadcast wiki content must include a broadcasts array.' };
   }
   const broadcasts: BroadcastEntry[] = [];
   const seen = new Set<string>();
   for (const raw of rawList) {
     const entry = coerceBroadcastEntry(raw);
-    if (entry && !seen.has(entry.id)) {
-      seen.add(entry.id);
-      broadcasts.push(entry);
+    if (!entry) {
+      return { ok: false, error: 'Broadcast wiki content contains an invalid entry.' };
     }
+    if (seen.has(entry.id)) {
+      return { ok: false, error: `Broadcast wiki content contains duplicate id ${entry.id}.` };
+    }
+    seen.add(entry.id);
+    broadcasts.push(entry);
   }
-  return { schemaVersion: BROADCAST_PAGE_SCHEMA_VERSION, broadcasts };
+  return { ok: true, page: { schemaVersion: BROADCAST_PAGE_SCHEMA_VERSION, broadcasts } };
 }
 
 export function serializeBroadcastPage(page: BroadcastPage): string {
@@ -220,12 +250,12 @@ function toHistoryItem(entry: BroadcastEntry): BroadcastHistoryItem {
 
 // Default ON: a subreddit only stops receiving opt-out announcements when the
 // install setting is explicitly turned off.
-async function readAppAnnouncementsEnabled(context: BroadcastSettingsContext): Promise<boolean> {
+async function readAppAnnouncementsEnabled(context: BroadcastSettingsContext): Promise<AnnouncementPreference> {
   try {
     const raw = await context.settings.get<boolean | string>(INSTALL_SETTING_APP_ANNOUNCEMENTS_ENABLED);
-    return normalizeOptionalBoolean(raw) !== false;
-  } catch {
-    return true;
+    return { status: 'available', enabled: normalizeOptionalBoolean(raw) !== false };
+  } catch (error) {
+    return { status: 'unavailable', error: errorText(error) };
   }
 }
 
@@ -246,22 +276,40 @@ export async function isBroadcastDeveloper(
   return developers.usernames.includes(normalized);
 }
 
-// Reads the broadcast log from the canonical host subreddit's wiki. Any failure
-// (missing page, permission, transient) resolves to null so a poll degrades to
-// "nothing to deliver" rather than throwing.
+function looksLikeMissingWikiPageError(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null) {
+    const status = 'status' in error ? Number(error.status) : NaN;
+    const code = 'code' in error ? String(error.code).toLowerCase() : '';
+    if (status === 404 || code === '404' || code === 'not_found' || code === 'not-found') {
+      return true;
+    }
+  }
+  const message = errorText(error).toLowerCase();
+  return /(?:wiki\s+)?page\s+(?:was\s+)?(?:not\s+found|does\s+not\s+exist)|\b404\b/.test(message);
+}
+
+// Reads the canonical wiki without collapsing missing, invalid, and transient
+// failures into the same empty state. Polling and publishing can then fail
+// closed without overwriting a valid page after an unsuccessful read.
 export async function readBroadcastPageFromWiki(
   context: BroadcastReadContext,
   pageName: string
-): Promise<BroadcastPage | null> {
+): Promise<BroadcastPageReadResult> {
   const page = sanitizeWikiPageName(pageName);
   if (!page) {
-    return null;
+    return { status: 'error', error: 'The configured broadcast wiki page name is invalid.' };
   }
   try {
     const wikiPage = await context.reddit.getWikiPage(BROADCAST_HOST_SUBREDDIT, page);
-    return parseBroadcastPage(wikiPage?.content ?? '');
-  } catch {
-    return null;
+    const parsed = parseBroadcastPage(wikiPage?.content ?? '');
+    return parsed.ok
+      ? { status: 'ok', page: parsed.page }
+      : { status: 'invalid', error: parsed.error };
+  } catch (error) {
+    const detail = errorText(error);
+    return looksLikeMissingWikiPageError(error)
+      ? { status: 'missing', error: detail || 'Broadcast wiki page was not found.' }
+      : { status: 'error', error: detail || 'Broadcast wiki page could not be read.' };
   }
 }
 
@@ -292,10 +340,13 @@ export async function getDeveloperBroadcastState(
 ): Promise<DeveloperBroadcastState> {
   const pageName = await readBroadcastPagePointer(context);
   let history: BroadcastHistoryItem[] = [];
+  let pageError: string | null = null;
   if (pageName) {
-    const page = await readBroadcastPageFromWiki(context, pageName);
-    if (page) {
-      history = page.broadcasts.map(toHistoryItem);
+    const result = await readBroadcastPageFromWiki(context, pageName);
+    if (result.status === 'ok') {
+      history = result.page.broadcasts.map(toHistoryItem);
+    } else if (result.status !== 'missing') {
+      pageError = result.error;
     }
   }
   return {
@@ -303,6 +354,7 @@ export async function getDeveloperBroadcastState(
     hostSubreddit: BROADCAST_HOST_SUBREDDIT,
     pointerConfigured: Boolean(pageName),
     pageName,
+    pageError,
     history,
   };
 }
@@ -323,10 +375,16 @@ export async function publishBroadcast(
     return { ok: false, error: validation.error };
   }
   const nowMs = params.nowMs ?? Date.now();
-  const existing = (await readBroadcastPageFromWiki(context, pageName)) ?? {
-    schemaVersion: BROADCAST_PAGE_SCHEMA_VERSION,
-    broadcasts: [],
-  };
+  const readResult = await readBroadcastPageFromWiki(context, pageName);
+  if (readResult.status === 'invalid') {
+    return { ok: false, error: `${readResult.error} Fix the canonical wiki page before publishing.` };
+  }
+  if (readResult.status === 'error') {
+    return { ok: false, error: `Could not safely read the broadcast page: ${readResult.error}` };
+  }
+  const existing = readResult.status === 'ok'
+    ? readResult.page
+    : { schemaVersion: BROADCAST_PAGE_SCHEMA_VERSION, broadcasts: [] };
   const entry: BroadcastEntry = {
     id: createBroadcastId(nowMs),
     createdAt: new Date(nowMs).toISOString(),
@@ -366,12 +424,12 @@ export async function revokeBroadcast(
   if (!id) {
     return { ok: false, error: 'Missing broadcast id.' };
   }
-  const page = await readBroadcastPageFromWiki(context, pageName);
-  if (!page) {
-    return { ok: false, error: 'Could not read the broadcast page.' };
+  const readResult = await readBroadcastPageFromWiki(context, pageName);
+  if (readResult.status !== 'ok') {
+    return { ok: false, error: `Could not safely read the broadcast page: ${readResult.error}` };
   }
   let found = false;
-  const broadcasts = page.broadcasts.map((entry) => {
+  const broadcasts = readResult.page.broadcasts.map((entry) => {
     if (entry.id === id) {
       found = true;
       return { ...entry, revoked: true };
@@ -411,13 +469,32 @@ async function markBroadcastDelivered(
   subredditId: string,
   broadcastId: string,
   nowMs: number
-): Promise<void> {
-  try {
-    await context.redis.set(broadcastDeliveredKey(subredditId, broadcastId), '1', {
-      expiration: new Date(nowMs + BROADCAST_PROCESSED_TTL_MS),
-    });
-  } catch {
-    // Best-effort marker; a missed write just means we re-evaluate next poll.
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await context.redis.set(broadcastDeliveredKey(subredditId, broadcastId), '1', {
+        expiration: new Date(nowMs + BROADCAST_PROCESSED_TTL_MS),
+      });
+      return true;
+    } catch {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+      }
+    }
+  }
+  return false;
+}
+
+function appendBroadcastFailure(summary: BroadcastPollSummary, broadcastId: string, reason: string): void {
+  summary.failed += 1;
+  if (summary.failureDetails.length < 5) {
+    summary.failureDetails.push(`${broadcastId}: ${reason}`);
+  }
+}
+
+function appendBroadcastDiagnostic(summary: BroadcastPollSummary, broadcastId: string, reason: string): void {
+  if (summary.failureDetails.length < 5) {
+    summary.failureDetails.push(`${broadcastId}: ${reason}`);
   }
 }
 
@@ -436,11 +513,14 @@ export async function runBroadcastPoll(
     considered: 0,
     delivered: 0,
     alreadyDelivered: 0,
+    deliveryInProgress: 0,
     skippedByVersion: 0,
     skippedExpired: 0,
     skippedRevoked: 0,
     skippedOptedOut: 0,
     failed: 0,
+    markerFailures: 0,
+    failureDetails: [],
   };
   const normalizedSubredditId = sanitizeSubredditId(subredditId);
   const normalizedSubredditName = sanitizeSubredditName(subredditName);
@@ -451,14 +531,19 @@ export async function runBroadcastPoll(
   if (!pageName) {
     return { ...summary, skipped: true, reason: 'no-pointer' };
   }
-  const page = await readBroadcastPageFromWiki(context, pageName);
-  if (!page) {
-    return { ...summary, skipped: true, reason: 'no-page' };
+  const readResult = await readBroadcastPageFromWiki(context, pageName);
+  if (readResult.status !== 'ok') {
+    return {
+      ...summary,
+      skipped: true,
+      reason: 'no-page',
+      detail: `${readResult.status}: ${readResult.error}`,
+    };
   }
 
   const myVersion = parseVersion(context.appVersion ?? null);
-  const announcementsEnabled = await readAppAnnouncementsEnabled(context);
-  for (const entry of page.broadcasts) {
+  const announcementPreference = await readAppAnnouncementsEnabled(context);
+  for (const entry of readResult.page.broadcasts) {
     summary.considered += 1;
     if (entry.revoked) {
       summary.skippedRevoked += 1;
@@ -469,11 +554,13 @@ export async function runBroadcastPoll(
       summary.skippedExpired += 1;
       continue;
     }
-    let alreadyDelivered = false;
+    const deliveredKey = broadcastDeliveredKey(normalizedSubredditId, entry.id);
+    let alreadyDelivered: boolean;
     try {
-      alreadyDelivered = Boolean(await context.redis.get(broadcastDeliveredKey(normalizedSubredditId, entry.id)));
-    } catch {
-      alreadyDelivered = false;
+      alreadyDelivered = Boolean(await context.redis.get(deliveredKey));
+    } catch (error) {
+      appendBroadcastFailure(summary, entry.id, `could not read delivery marker (${errorText(error)})`);
+      continue;
     }
     if (alreadyDelivered) {
       summary.alreadyDelivered += 1;
@@ -490,26 +577,79 @@ export async function runBroadcastPoll(
       if (!maxVersion || compareVersions(myVersion, maxVersion) >= 0) {
         // At or above the cutoff is terminal (the app version only increases).
         summary.skippedByVersion += 1;
-        await markBroadcastDelivered(context, normalizedSubredditId, entry.id, nowMs);
+        if (!(await markBroadcastDelivered(context, normalizedSubredditId, entry.id, nowMs))) {
+          summary.markerFailures += 1;
+          appendBroadcastDiagnostic(summary, entry.id, 'could not persist terminal version-filter marker');
+        }
         continue;
       }
     }
-    if (entry.type === 'announcement' && !announcementsEnabled) {
-      // Opt-out broadcast suppressed for this subreddit. Leave it unmarked so a
-      // mod who re-enables the setting before it expires still receives it.
-      summary.skippedOptedOut += 1;
+    if (entry.type === 'announcement') {
+      if (announcementPreference.status === 'unavailable') {
+        appendBroadcastFailure(
+          summary,
+          entry.id,
+          `could not read announcement preference (${announcementPreference.error})`
+        );
+        continue;
+      }
+      if (!announcementPreference.enabled) {
+        // Opt-out broadcast suppressed for this subreddit. Leave it unmarked so
+        // re-enabling before expiry still delivers it.
+        summary.skippedOptedOut += 1;
+        continue;
+      }
+    }
+
+    const lockKey = broadcastDeliveryLockKey(normalizedSubredditId, entry.id);
+    const lockToken = createRedisLockToken();
+    try {
+      const lock = await context.redis.set(lockKey, lockToken, {
+        nx: true,
+        expiration: new Date(Date.now() + BROADCAST_DELIVERY_LOCK_TTL_MS),
+      });
+      if (lock !== 'OK') {
+        summary.deliveryInProgress += 1;
+        continue;
+      }
+    } catch (error) {
+      appendBroadcastFailure(summary, entry.id, `could not acquire delivery lock (${errorText(error)})`);
       continue;
     }
-    const subject = resolveBroadcastTokens(entry.subject, normalizedSubredditName);
-    const body = resolveBroadcastTokens(entry.body, normalizedSubredditName);
-    const result = await sendModNotification(context, normalizedSubredditId, subject, body);
-    if (result.status === 'failed') {
-      // Leave unmarked so the next poll retries delivery.
-      summary.failed += 1;
-      continue;
+
+    try {
+      // Close the race where another poll completed between the initial marker
+      // read and this execution acquiring the lock.
+      try {
+        if (await context.redis.get(deliveredKey)) {
+          summary.alreadyDelivered += 1;
+          continue;
+        }
+      } catch (error) {
+        appendBroadcastFailure(summary, entry.id, `could not recheck delivery marker (${errorText(error)})`);
+        continue;
+      }
+
+      const subject = resolveBroadcastTokens(entry.subject, normalizedSubredditName);
+      const body = resolveBroadcastTokens(entry.body, normalizedSubredditName);
+      const result = await sendModNotification(context, normalizedSubredditId, subject, body);
+      if (result.status === 'failed') {
+        // Leave unmarked so the next poll retries delivery.
+        appendBroadcastFailure(summary, entry.id, result.reason ?? 'mod notification delivery failed');
+        continue;
+      }
+      summary.delivered += 1;
+      if (!(await markBroadcastDelivered(context, normalizedSubredditId, entry.id, nowMs))) {
+        summary.markerFailures += 1;
+        appendBroadcastDiagnostic(summary, entry.id, 'delivered but could not persist delivery marker');
+      }
+    } finally {
+      try {
+        await releaseRedisLockIfOwned(context, lockKey, lockToken);
+      } catch (error) {
+        appendBroadcastDiagnostic(summary, entry.id, `could not release delivery lock (${errorText(error)})`);
+      }
     }
-    await markBroadcastDelivered(context, normalizedSubredditId, entry.id, nowMs);
-    summary.delivered += 1;
   }
   return summary;
 }

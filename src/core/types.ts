@@ -88,13 +88,14 @@ export type BroadcastHistoryItem = {
 };
 
 export type DeveloperBroadcastState = {
-  // True only when the current subreddit is the official host, i.e. this hub may
-  // author/revoke broadcasts. Every installation can still receive them.
+  // True when the current subreddit is an authorized production or development
+  // authoring hub. Both operate on the canonical production-host wiki.
   canPublish: boolean;
   hostSubreddit: string;
   // Whether the CLI pointer / kill-switch global setting is configured.
   pointerConfigured: boolean;
   pageName: string | null;
+  pageError: string | null;
   history: BroadcastHistoryItem[];
 };
 
@@ -108,14 +109,18 @@ export type BroadcastComposeInput = {
 export type BroadcastPollSummary = {
   skipped: boolean;
   reason?: string;
+  detail?: string;
   considered: number;
   delivered: number;
   alreadyDelivered: number;
+  deliveryInProgress: number;
   skippedByVersion: number;
   skippedExpired: number;
   skippedRevoked: number;
   skippedOptedOut: number;
   failed: number;
+  markerFailures: number;
+  failureDetails: string[];
 };
 
 export type UserGrade = 'trusted' | 'normal' | 'low_engagement' | 'spam_risk';

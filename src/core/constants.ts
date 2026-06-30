@@ -241,6 +241,10 @@ export const BROADCAST_POLL_SCHEDULE_LOCK_TTL_MS = 15000;
 
 export const BROADCAST_POLL_SCHEDULE_PRESENT_TTL_MS = 60 * 60 * 1000;
 
+// Prevent overlapping cron executions from delivering the same broadcast at
+// the same time. Failed sends release the claim so a later poll can retry.
+export const BROADCAST_DELIVERY_LOCK_TTL_MS = 2 * 60 * 1000;
+
 // Ignore broadcast entries older than this so a freshly installed subreddit does
 // not blast historical announcements on its first poll.
 export const BROADCAST_MAX_AGE_MS = 7 * MILLIS_PER_DAY;

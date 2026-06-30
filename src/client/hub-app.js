@@ -166,7 +166,7 @@ function createShell(root, inline) {
                   <h3>Send a modmail to every installation</h3>
                   <p class="meta">
                     Publishing writes to the broadcast log on r/<span data-el="broadcast-host">vouchx</span>. Each
-                    installation polls hourly and delivers the message to its own modmail as a mod notification,
+                    installation polls every four hours and delivers the message to its own modmail as a mod notification,
                     self-selecting by app version. Use <code>&#123;&#123;subreddit&#125;&#125;</code> to insert each
                     community's name.
                   </p>
@@ -2143,6 +2143,7 @@ export function mountHub(options = {}) {
   function renderBroadcastState() {
     const canPublish = Boolean(broadcastState?.canPublish);
     const pointerConfigured = Boolean(broadcastState?.pointerConfigured);
+    const pageError = String(broadcastState?.pageError || '').trim();
     const host = String(broadcastState?.hostSubreddit || 'vouchx');
     if (refs.broadcastHost) {
       refs.broadcastHost.textContent = host;
@@ -2150,18 +2151,19 @@ export function mountHub(options = {}) {
     if (refs.broadcastHostNote) {
       refs.broadcastHostNote.classList.toggle('hidden', canPublish);
       if (!canPublish) {
-        refs.broadcastHostNote.textContent = `Composing and publishing are only available from the r/${host} hub. You can still review recent broadcasts here.`;
+        refs.broadcastHostNote.textContent = `Composing and publishing are only available from an authorized VouchX authoring hub. You can still review recent broadcasts here.`;
       }
     }
     if (refs.broadcastPointerNote) {
-      const showPointerNote = canPublish && !pointerConfigured;
+      const showPointerNote = canPublish && (!pointerConfigured || Boolean(pageError));
       refs.broadcastPointerNote.classList.toggle('hidden', !showPointerNote);
       if (showPointerNote) {
-        refs.broadcastPointerNote.textContent =
-          'No broadcast page is configured yet. Set the broadcast_wiki_page global setting via the Devvit CLI before publishing.';
+        refs.broadcastPointerNote.textContent = pageError
+          ? `Broadcast page unavailable: ${pageError}`
+          : 'No broadcast page is configured yet. Set the broadcast_wiki_page global setting via the Devvit CLI before publishing.';
       }
     }
-    const disabled = !canPublish || !pointerConfigured || broadcastBusy;
+    const disabled = !canPublish || !pointerConfigured || Boolean(pageError) || broadcastBusy;
     const controls = [
       refs.broadcastSubject,
       refs.broadcastBody,

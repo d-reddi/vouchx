@@ -7292,7 +7292,11 @@ function createBroadcastContext(options?: {
   pages?: Record<string, string>;
   appVersion?: string | null;
   notificationError?: Error | null;
+  notificationDelayMs?: number;
   appAnnouncementsEnabled?: boolean;
+  announcementSettingsError?: Error | null;
+  wikiReadError?: Error | null;
+  deliveryMarkerSetFailures?: number;
 }) {
   const pointer = options?.pointer === undefined ? 'broadcasts' : options.pointer;
   const appAnnouncementsEnabled = options?.appAnnouncementsEnabled ?? true;
@@ -7301,6 +7305,7 @@ function createBroadcastContext(options?: {
   const notifications: Array<{ subject: string; bodyMarkdown: string; subredditId: string }> = [];
   const wikiWrites: Array<{ subredditName: string; page: string; content: string }> = [];
   let notifCount = 0;
+  let deliveryMarkerSetFailures = options?.deliveryMarkerSetFailures ?? 0;
 
   const context = {
     appVersion: options?.appVersion ?? '1.0.0',
@@ -7310,6 +7315,9 @@ function createBroadcastContext(options?: {
           return pointer ?? '';
         }
         if (name === 'app_announcements_enabled') {
+          if (options?.announcementSettingsError) {
+            throw options.announcementSettingsError;
+          }
           return appAnnouncementsEnabled;
         }
         return '';
@@ -7317,6 +7325,9 @@ function createBroadcastContext(options?: {
     },
     reddit: {
       async getWikiPage(subredditName: string, page: string) {
+        if (options?.wikiReadError) {
+          throw options.wikiReadError;
+        }
         const content = pages.get(`${subredditName}/${page}`);
         if (content === undefined) {
           throw new Error('wiki page not found');
@@ -7342,6 +7353,9 @@ function createBroadcastContext(options?: {
           if (options?.notificationError) {
             throw options.notificationError;
           }
+          if (options?.notificationDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, options.notificationDelayMs));
+          }
           return `mod-notif-${notifCount}`;
         },
       },
@@ -7350,7 +7364,14 @@ function createBroadcastContext(options?: {
       async get(key: string) {
         return redisStore.get(key) ?? null;
       },
-      async set(key: string, value: string) {
+      async set(key: string, value: string, setOptions?: { nx?: boolean }) {
+        if (setOptions?.nx && redisStore.has(key)) {
+          return null;
+        }
+        if (key.includes(':broadcast:delivered:') && deliveryMarkerSetFailures > 0) {
+          deliveryMarkerSetFailures -= 1;
+          throw new Error('delivery marker unavailable');
+        }
         redisStore.set(key, value);
         return 'OK';
       },
@@ -7418,6 +7439,23 @@ test('runBroadcastPoll delivers a matching broadcast, resolves {{subreddit}}, an
   assert.equal(ctx.notifications.length, 1);
 });
 
+test('runBroadcastPoll claims delivery before sending so overlapping polls do not duplicate modmail', async () => {
+  const page = broadcastPageJson([{ id: 'concurrent', type: 'notification' }]);
+  const ctx = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': page },
+    notificationDelayMs: 10,
+  });
+
+  const summaries = await Promise.all([
+    runBroadcastPoll(ctx.context as never, 't5_test', 'test'),
+    runBroadcastPoll(ctx.context as never, 't5_test', 'test'),
+  ]);
+
+  assert.equal(ctx.notifications.length, 1);
+  assert.equal(summaries.reduce((total, summary) => total + summary.delivered, 0), 1);
+  assert.equal(summaries.reduce((total, summary) => total + summary.deliveryInProgress, 0), 1);
+});
+
 test('runBroadcastPoll honors the maxVersion filter (delivers only below the cutoff)', async () => {
   const page = broadcastPageJson([{ id: 'v1', maxVersion: '1.2.0' }]);
 
@@ -7479,9 +7517,34 @@ test('runBroadcastPoll degrades to no-op for a missing or malformed wiki page', 
 
   const malformed = createBroadcastContext({ pages: { 'vouchx/broadcasts': 'not json{{' } });
   const malformedSummary = await runBroadcastPoll(malformed.context as never, 't5_test', 'test');
-  assert.equal(malformedSummary.skipped, false);
-  assert.equal(malformedSummary.considered, 0);
+  assert.equal(malformedSummary.skipped, true);
+  assert.equal(malformedSummary.reason, 'no-page');
+  assert.match(malformedSummary.detail ?? '', /invalid.*valid json/i);
   assert.equal(malformed.notifications.length, 0);
+});
+
+test('runBroadcastPoll rejects malformed stored version filters instead of widening their audience', async () => {
+  const page = JSON.stringify({
+    schemaVersion: 1,
+    broadcasts: [
+      {
+        id: 'bad-version',
+        createdAt: new Date().toISOString(),
+        subject: 'Targeted notice',
+        body: 'Old versions only',
+        type: 'notification',
+        maxVersion: 'not-a-version',
+        revoked: false,
+      },
+    ],
+  });
+  const ctx = createBroadcastContext({ pages: { 'vouchx/broadcasts': page } });
+
+  const summary = await runBroadcastPoll(ctx.context as never, 't5_test', 'test');
+
+  assert.equal(summary.skipped, true);
+  assert.match(summary.detail ?? '', /invalid.*entry/i);
+  assert.equal(ctx.notifications.length, 0);
 });
 
 test('publishBroadcast appends an entry to the wiki page and rejects invalid input', async () => {
@@ -7516,6 +7579,31 @@ test('publishBroadcast fails when no broadcast page pointer is configured', asyn
     input: { subject: 'Hi', body: 'There' },
   });
   assert.equal(result.ok, false);
+});
+
+test('publishBroadcast fails closed without overwriting malformed or temporarily unreadable wiki content', async () => {
+  const malformedContent = 'not json{{';
+  const malformed = createBroadcastContext({ pages: { 'vouchx/broadcasts': malformedContent } });
+  const malformedResult = await publishBroadcast(malformed.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Do not overwrite', body: 'Existing page needs repair.' },
+  });
+  assert.equal(malformedResult.ok, false);
+  assert.equal(malformed.pages.get('vouchx/broadcasts'), malformedContent);
+  assert.equal(malformed.wikiWrites.length, 0);
+
+  const validContent = broadcastPageJson([{ id: 'existing' }]);
+  const unreadable = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': validContent },
+    wikiReadError: new Error('temporary wiki transport failure'),
+  });
+  const unreadableResult = await publishBroadcast(unreadable.context as never, {
+    authoredBy: 'DevUser',
+    input: { subject: 'Do not overwrite', body: 'Try again later.' },
+  });
+  assert.equal(unreadableResult.ok, false);
+  assert.equal(unreadable.pages.get('vouchx/broadcasts'), validContent);
+  assert.equal(unreadable.wikiWrites.length, 0);
 });
 
 test('a published broadcast is delivered by a later poll, and revoke stops further delivery', async () => {
@@ -7618,6 +7706,48 @@ test('runBroadcastPoll suppresses opt-out announcements when app announcements a
   // Left unmarked so re-enabling before expiry still delivers it.
   const reenabled = createBroadcastContext({ pages: { 'vouchx/broadcasts': page }, appAnnouncementsEnabled: true });
   assert.equal((await runBroadcastPoll(reenabled.context as never, 't5_test', 'test')).delivered, 1);
+});
+
+test('runBroadcastPoll fails closed for announcements when their install preference is unavailable', async () => {
+  const announcementPage = broadcastPageJson([{ id: 'a-settings', type: 'announcement' }]);
+  const announcement = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': announcementPage },
+    announcementSettingsError: new Error('settings unavailable'),
+  });
+  const announcementSummary = await runBroadcastPoll(announcement.context as never, 't5_test', 'test');
+  assert.equal(announcementSummary.delivered, 0);
+  assert.equal(announcementSummary.failed, 1);
+  assert.match(announcementSummary.failureDetails[0] ?? '', /settings unavailable/i);
+  assert.equal(announcement.notifications.length, 0);
+
+  const notificationPage = broadcastPageJson([{ id: 'n-settings', type: 'notification' }]);
+  const notification = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': notificationPage },
+    announcementSettingsError: new Error('settings unavailable'),
+  });
+  const notificationSummary = await runBroadcastPoll(notification.context as never, 't5_test', 'test');
+  assert.equal(notificationSummary.delivered, 1);
+  assert.equal(notification.notifications.length, 1);
+});
+
+test('runBroadcastPoll retries delivery-marker writes and reports a persistent marker failure', async () => {
+  const page = broadcastPageJson([{ id: 'marker', type: 'notification' }]);
+  const recovered = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': page },
+    deliveryMarkerSetFailures: 2,
+  });
+  const recoveredSummary = await runBroadcastPoll(recovered.context as never, 't5_test', 'test');
+  assert.equal(recoveredSummary.delivered, 1);
+  assert.equal(recoveredSummary.markerFailures, 0);
+
+  const persistent = createBroadcastContext({
+    pages: { 'vouchx/broadcasts': page },
+    deliveryMarkerSetFailures: 3,
+  });
+  const persistentSummary = await runBroadcastPoll(persistent.context as never, 't5_test', 'test');
+  assert.equal(persistentSummary.delivered, 1);
+  assert.equal(persistentSummary.markerFailures, 1);
+  assert.match(persistentSummary.failureDetails[0] ?? '', /could not persist delivery marker/i);
 });
 
 test('runBroadcastPoll always delivers notification-type broadcasts even when announcements are disabled', async () => {

@@ -109,6 +109,10 @@ export function broadcastDeliveredKey(subredditId: string, broadcastId: string):
   return `${subredditScopePrefix(subredditId)}:broadcast:delivered:${broadcastId}`;
 }
 
+export function broadcastDeliveryLockKey(subredditId: string, broadcastId: string): string {
+  return `${subredditScopePrefix(subredditId)}:broadcast:delivery-lock:${broadcastId.trim()}`;
+}
+
 export function verificationActionLockKey(subredditId: string, verificationId: string): string {
   return `${subredditScopePrefix(subredditId)}:verification-action-lock:${verificationId.trim()}`;
 }

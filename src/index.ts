@@ -8,7 +8,6 @@ import {
   archivePendingVerificationModmailReply,
   batchReviewVerifications,
   blockUserForModerator,
-  BROADCAST_HOST_SUBREDDIT,
   buildBatchReviewToast,
   buildModeratorUpdateNotice,
   buildSubmitVerificationForm,
@@ -154,7 +153,7 @@ const createVerificationHubForm: Form = {
 const purgeAuditLogForm: Form = {
   title: 'Purge Audit Log',
   description:
-    'Removes audit log entries using your install setting for this subreddit. Set purge days to 0 to purge all entries.',
+    'Removes audit log entries older than the retention period in this subreddit\'s install settings. At least 30 days are always retained.',
   fields: [
     {
       type: 'string',
@@ -630,11 +629,11 @@ app.post('/internal/scheduler/broadcast-poll', async (req, res) => {
       const summary = await runBroadcastPoll(currentContext(), subredditId, subredditName);
       if (summary.skipped && summary.reason === 'no-page') {
         console.log(
-          `[broadcast] Failed poll for r/${subredditName}: configured broadcast wiki page is missing, unreadable, or invalid.`
+          `[broadcast] Failed poll for r/${subredditName}: configured broadcast wiki page is missing, unreadable, or invalid (${summary.detail ?? 'no detail'}).`
         );
-      } else if (!summary.skipped && (summary.delivered > 0 || summary.failed > 0)) {
+      } else if (!summary.skipped && (summary.delivered > 0 || summary.failed > 0 || summary.markerFailures > 0)) {
         console.log(
-          `[broadcast] r/${subredditName}: delivered=${summary.delivered} already=${summary.alreadyDelivered} version_skipped=${summary.skippedByVersion} opted_out=${summary.skippedOptedOut} expired=${summary.skippedExpired} revoked=${summary.skippedRevoked} failed=${summary.failed}`
+          `[broadcast] r/${subredditName}: delivered=${summary.delivered} already=${summary.alreadyDelivered} in_progress=${summary.deliveryInProgress} version_skipped=${summary.skippedByVersion} opted_out=${summary.skippedOptedOut} expired=${summary.skippedExpired} revoked=${summary.skippedRevoked} failed=${summary.failed} marker_failures=${summary.markerFailures}${summary.failureDetails.length ? ` details=${summary.failureDetails.join(' | ')}` : ''}`
         );
       }
     } catch (error) {
@@ -1277,7 +1276,7 @@ app.post('/api/dev/broadcast', async (req, res) => {
     const appContext = currentContext();
     const { developer, subredditName } = await requireDeveloper(appContext);
     if (!isBroadcastHostSubreddit(subredditName)) {
-      throw httpError(403, `Broadcasts can only be composed from r/${BROADCAST_HOST_SUBREDDIT}.`);
+      throw httpError(403, `Broadcasts can only be composed from an authorized VouchX authoring hub.`);
     }
     const payload = (req.body ?? {}) as { subject?: string; body?: string; type?: string; maxVersion?: string | null };
     const result = await publishBroadcast(appContext, {
@@ -1297,8 +1296,8 @@ app.post('/api/dev/broadcast', async (req, res) => {
       state,
       toast: {
         text: result.entry.maxVersion
-          ? `Broadcast published for installations below v${result.entry.maxVersion}. Each delivers within the hour.`
-          : 'Broadcast published for all installations. Each delivers within the hour.',
+          ? `Broadcast published for installations below v${result.entry.maxVersion}. Delivery occurs at each installation's next four-hour poll.`
+          : `Broadcast published for all eligible installations. Delivery occurs at each installation's next four-hour poll.`,
         tone: 'success',
       },
     });
@@ -1312,7 +1311,7 @@ app.post('/api/dev/broadcast/test', async (req, res) => {
     const appContext = currentContext();
     const { subredditName } = await requireDeveloper(appContext);
     if (!isBroadcastHostSubreddit(subredditName)) {
-      throw httpError(403, `Test sends are only available from r/${BROADCAST_HOST_SUBREDDIT}.`);
+      throw httpError(403, `Test sends are only available from an authorized VouchX authoring hub.`);
     }
     const payload = (req.body ?? {}) as { subject?: string; body?: string; type?: string; maxVersion?: string | null };
     const result = await sendBroadcastTest(appContext, {
@@ -1341,7 +1340,7 @@ app.post('/api/dev/broadcast/revoke', async (req, res) => {
     const appContext = currentContext();
     const { subredditName } = await requireDeveloper(appContext);
     if (!isBroadcastHostSubreddit(subredditName)) {
-      throw httpError(403, `Broadcasts can only be managed from r/${BROADCAST_HOST_SUBREDDIT}.`);
+      throw httpError(403, `Broadcasts can only be managed from an authorized VouchX authoring hub.`);
     }
     const broadcastId = String(req.body?.id ?? '').trim();
     if (!broadcastId) {
