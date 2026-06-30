@@ -248,6 +248,8 @@ export function looksLikeTransientRedditTransportError(message: string): boolean
   }
   return (
     normalized.includes('unknown internal error') ||
+    /\bhttp(?:\s+status)?\s+429\b/.test(normalized) ||
+    /\b429\s+too many requests\b/.test(normalized) ||
     (normalized.includes('http request') && /http status 5\d\d\b/.test(normalized)) ||
     (normalized.includes('grpc invocation failed') && /\b5\d\d\b/.test(normalized)) ||
     /\b5\d\d\s+internal server error\b/.test(normalized) ||

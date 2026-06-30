@@ -3876,6 +3876,56 @@ test('getViewerFlairSnapshot retries transient transport errors without logging 
   }
 });
 
+test('getViewerFlairSnapshot treats Reddit HTTP 429 responses as transient without logging them', async () => {
+  const snapshotContext = createViewerFlairSnapshotContext({
+    currentUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+      },
+    ],
+    usernameUserResponses: [
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: new Error('2 UNKNOWN: grpc invocation failed with status 2; HTTP 429'),
+      },
+      {
+        username: 'Ornery_Locksmith_176',
+        id: 't2_viewer',
+        flair: {
+          flairText: 'Verified',
+          flairCssClass: 'verified',
+          flairTemplateId: 'abc123',
+        },
+      },
+    ],
+  });
+  const originalConsoleLog = console.log;
+  let consoleLogCallCount = 0;
+  console.log = () => {
+    consoleLogCallCount += 1;
+  };
+
+  try {
+    const snapshot = await getViewerFlairSnapshot(snapshotContext.context as never, 'Bulges');
+
+    assert.deepEqual(snapshot, {
+      flairText: 'Verified',
+      flairCssClass: 'verified',
+      flairTemplateId: 'abc123',
+      userId: 't2_viewer',
+      lookupState: 'confirmed_present',
+      error: null,
+    });
+    assert.equal(snapshotContext.usernameLookupCallCount, 2);
+    assert.equal(snapshotContext.flairLookupCallCount, 2);
+    assert.equal(consoleLogCallCount, 0);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
 test('getViewerFlairSnapshot returns unavailable when the current viewer flair lookup is forbidden', async () => {
   const snapshotContext = createViewerFlairSnapshotContext({
     currentUserResponses: [
