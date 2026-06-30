@@ -699,7 +699,7 @@ export async function submitVerification(
       );
       if (autoDenyResult) {
         // Auto-denied: skip the pending-submission mod note so it does not contradict the denial.
-        return { pendingModmail };
+        return { username, pendingModmail };
       }
     } catch (error) {
       console.log(
@@ -715,7 +715,7 @@ export async function submitVerification(
       `Pending submission mod note write failed for r/${sanitizeSubredditName(subredditName)} u/${maskUsernameForLog(username)}: ${errorText(error)}`
     );
   }
-  return { pendingModmail };
+  return { username, pendingModmail };
 }
 
 export async function enrichPendingAccountDetailsFromModmail(

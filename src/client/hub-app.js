@@ -1058,6 +1058,7 @@ export function mountHub(options = {}) {
   let realtimeLiveChannel = '';
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
+  let realtimeRefreshPromise = null;
   let realtimeRefreshQueued = false;
   let flairPropagationRefreshTimerId = 0;
   let flairPropagationRefreshAttempts = 0;
@@ -1288,7 +1289,21 @@ export function mountHub(options = {}) {
     }
     if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
-      void refreshFromRealtimeSignal();
+      void runHubStateRefresh();
+    }
+  }
+
+  // Realtime delivery and a mutation response can request the same state load.
+  // Keep one queued bit so both paths collapse into a single refresh while an
+  // action or another refresh is already in progress.
+  function requestHubStateRefresh() {
+    if (!realtimeChannel) {
+      return;
+    }
+    realtimeRefreshQueued = true;
+    if (!isBusy && !realtimeRefreshInFlight) {
+      realtimeRefreshQueued = false;
+      void runHubStateRefresh();
     }
   }
 
@@ -1353,7 +1368,7 @@ export function mountHub(options = {}) {
           ) {
             return;
           }
-          void refreshFromRealtimeSignal();
+          requestHubStateRefresh();
         },
       });
       realtimeConnectedChannel = channel;
@@ -1440,37 +1455,57 @@ export function mountHub(options = {}) {
     }, FLAIR_PROPAGATION_REFRESH_INTERVAL_MS);
   }
 
-  async function refreshFromRealtimeSignal() {
+  async function runHubStateRefresh(options = {}) {
+    const { allowWhileBusy = false } = options;
     if (!realtimeChannel) {
       return;
     }
-    if (isBusy) {
+    if (isBusy && !allowWhileBusy) {
       realtimeRefreshQueued = true;
       return;
     }
     if (realtimeRefreshInFlight) {
       realtimeRefreshQueued = true;
-      return;
+      return realtimeRefreshPromise;
     }
     realtimeRefreshInFlight = true;
-    try {
-      applyPayload(await requestJson('/api/hub/state'));
-    } catch (error) {
-      console.log(`Realtime refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      realtimeRefreshInFlight = false;
-      if (realtimeRefreshQueued && !isBusy) {
-        realtimeRefreshQueued = false;
-        void refreshFromRealtimeSignal();
+    const refreshPromise = (async () => {
+      try {
+        applyPayload(await requestJson('/api/hub/state'));
+      } catch (error) {
+        console.log(`Realtime refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        realtimeRefreshInFlight = false;
+        if (realtimeRefreshPromise === refreshPromise) {
+          realtimeRefreshPromise = null;
+        }
+        if (realtimeRefreshQueued && !isBusy) {
+          realtimeRefreshQueued = false;
+          void runHubStateRefresh();
+        }
       }
-    }
+    })();
+    realtimeRefreshPromise = refreshPromise;
+    return await refreshPromise;
   }
 
   async function performAction(path, body = {}, options = {}) {
     const { refreshOnError = null } = options;
     setBusy(true);
     try {
-      applyPayload(await requestJson(path, body));
+      const payload = await requestJson(path, body);
+      applyPayload(payload);
+      if (payload && payload.refreshRequested === true) {
+        // Any signal queued before the mutation response is covered by this
+        // post-mutation state load. Keep controls disabled until it finishes.
+        if (realtimeRefreshPromise) {
+          await realtimeRefreshPromise;
+        }
+        do {
+          realtimeRefreshQueued = false;
+          await runHubStateRefresh({ allowWhileBusy: true });
+        } while (realtimeRefreshQueued);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       showToast(message, 'error');
@@ -2946,7 +2981,7 @@ export function mountHub(options = {}) {
     }
     if (realtimeRefreshQueued && !realtimeRefreshInFlight) {
       realtimeRefreshQueued = false;
-      void refreshFromRealtimeSignal();
+      void runHubStateRefresh();
       return;
     }
     if (!(realtimeChannel && realtimeLiveChannel === realtimeChannel)) {

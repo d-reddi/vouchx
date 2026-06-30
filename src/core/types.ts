@@ -586,6 +586,14 @@ export type DeleteDataResult = {
   flairRemovalFailedFor: string[];
 };
 
+export type DeleteCurrentUserDataResult = DeleteDataResult & {
+  username: string;
+};
+
+export type WithdrawPendingVerificationResult = {
+  username: string;
+};
+
 export type PurgeUserDataResult = DeleteDataResult & {
   purgedAuditCount: number;
   removedBlockCount: number;
@@ -881,6 +889,7 @@ export type ReleaseMetadata = {
 };
 
 export type SubmitVerificationResult = {
+  username: string;
   pendingModmail: ModmailStepResult;
 };
 

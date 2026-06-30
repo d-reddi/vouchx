@@ -159,18 +159,20 @@ Full changelog:
 [https://www.reddit.com/r/vouchx/wiki/changelog/](https://www.reddit.com/r/vouchx/wiki/changelog/)
 
 
-### v1.5.9
+### v1.5.10
 
-**Critical Fix**: Fixes rare issue where some approved records could get deleted during nightly validation
+Critical Fix: Resolved a rare issue that could cause some approved verification records to be deleted during nightly validation.
 
-- Photo pop-up in queue card no longer scrolls the queue behind it
-- Reordered install settings for better grouping
-- Modmail Developer Notifications: op-out for non-critical announcements in install settings.
-- Improved History Search
-- Updated Readme instructions
-- Hub post deletion fix
-- Purge button limited to 30 days for proper auditing.
-- Backend / Developer changes
+#### Improvements 
+
+- Updated the queue photo viewer so the queue no longer scrolls behind the pop-up
+- Added double-tap zoom support to verification photos
+- Reorganized installation settings for clearer grouping
+- Added an opt-out setting for non-critical Modmail Developer Notifications
+- Improved History search accuracy and usability
+- Fixed an issue involving deleted Verification Hub posts
+- Limited manual purge actions to records older than 30 days to preserve proper audit history
+- Additional backend and developer improvements
 
 ---
 
@@ -192,17 +194,3 @@ Full changelog:
 - Improved audit-record search performance for communities with larger histories.
 - Renamed **Approved Records** to **Verified Users**.
 - Fixed photo-instruction scrolling on iOS 27.
-
----
-
-### v1.5.3
-
-#### Critical Fix:
-- Fixes a Cron job name mismatch that prevented the nightly user validation reconcile job from running.
-
-#### Other Changes:
-
-- Fixes an issue where the auto flair repair could silently skip approved users verified before VouchX v1.3.0
-- TTL for newly approved records extended to 180 days to better support members who browse infrequently. Records for previously approved users are unaffected.
-- New Setup and Moderator onboarding wizard. 
-

@@ -3948,7 +3948,11 @@ test('getViewerFlairSnapshot treats Reddit HTTP 429 responses as transient witho
   };
 
   try {
-    const snapshot = await getViewerFlairSnapshot(snapshotContext.context as never, 'Bulges');
+    const snapshot = await getViewerFlairSnapshot(
+      snapshotContext.context as never,
+      'Bulges',
+      { forceFreshUserLookup: true }
+    );
 
     assert.deepEqual(snapshot, {
       flairText: 'Verified',
@@ -4712,7 +4716,8 @@ test('withdrawCurrentUserPendingVerification writes a dated mod note and removes
   const reviewContext = createReviewActionContext({ moderatorName: 'example_user' });
 
   await withFixedNow(withdrawIso, async () => {
-    await withdrawCurrentUserPendingVerification(reviewContext.context as never);
+    const result = await withdrawCurrentUserPendingVerification(reviewContext.context as never);
+    assert.deepEqual(result, { username: 'example_user' });
   });
 
   assert.equal(reviewContext.addModNoteCalls.length, 1);
@@ -4746,8 +4751,9 @@ test('withdrawCurrentUserPendingVerification still removes pending data when mod
     addModNoteResponses: [new Error('mod notes unavailable')],
   });
 
-  await withdrawCurrentUserPendingVerification(reviewContext.context as never);
+  const result = await withdrawCurrentUserPendingVerification(reviewContext.context as never);
 
+  assert.deepEqual(result, { username: 'example_user' });
   assert.equal(reviewContext.addModNoteCalls.length, 1);
   assert.equal(reviewContext.redisStore.get(verificationRecordTestKey(reviewContext.subredditId, reviewContext.record.id)), undefined);
   assert.equal(

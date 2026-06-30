@@ -1,11 +1,12 @@
 import type { Devvit, FormOnSubmitEvent } from '@devvit/public-api';
 import type {
-  DeleteDataResult,
+  DeleteCurrentUserDataResult,
   PurgeUserDataFormValues,
   PurgeUserDataResult,
   RedditRedisContext,
   RedisContext,
   VerificationRecord,
+  WithdrawPendingVerificationResult,
 } from './types.ts';
 import { SELF_DELETE_INDEX_SCAN_LIMIT, VIEWER_FLAIR_REMOVAL_SUPPRESSION_TTL_MS } from './constants.ts';
 import { extractTemplateId, normalizeTemplateId } from './flair.ts';
@@ -110,7 +111,9 @@ export async function onModeratorPurgeUserData(
   }
 }
 
-export async function withdrawCurrentUserPendingVerification(context: Devvit.Context): Promise<void> {
+export async function withdrawCurrentUserPendingVerification(
+  context: Devvit.Context
+): Promise<WithdrawPendingVerificationResult> {
   const username = await context.reddit.getCurrentUsername();
   if (!username) {
     throw new Error('You must be logged in to withdraw a pending request.');
@@ -151,9 +154,13 @@ export async function withdrawCurrentUserPendingVerification(context: Devvit.Con
       `Pending withdrawal mod note write failed for r/${sanitizeSubredditName(record.subredditName)} u/${maskUsernameForLog(record.username)}: ${errorText(error)}`
     );
   }
+
+  return { username: record.username };
 }
 
-export async function deleteCurrentUserVerificationData(context: Devvit.Context): Promise<DeleteDataResult> {
+export async function deleteCurrentUserVerificationData(
+  context: Devvit.Context
+): Promise<DeleteCurrentUserDataResult> {
   const username = await context.reddit.getCurrentUsername();
   if (!username) {
     throw new Error('You must be logged in to delete your data.');
@@ -180,6 +187,7 @@ export async function deleteCurrentUserVerificationData(context: Devvit.Context)
   await suppressViewerVerifiedStateAfterSelfRemoval(context, subredditId, username);
 
   return {
+    username,
     deletedCount: result.deletedCount,
     flairRemovedFrom: result.flairRemovedFrom,
     flairRemovalFailedFor: result.flairRemovalFailedFor,

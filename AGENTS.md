@@ -168,7 +168,7 @@ panel's photo-instructions helpers.
 
 ```
 npm run check     # tsc --noEmit
-npm test          # node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js src/client/realtime-filter.test.js
+npm test          # node --test --experimental-strip-types src/core.test.ts src/client/wizard-state.test.js src/client/realtime-filter.test.js src/client/image-lightbox.test.js
 npm run build     # vite build (client + server bundles)
 ```
 

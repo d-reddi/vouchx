@@ -37,6 +37,7 @@ export function createImageLightbox({
     translateX: 0,
     translateY: 0,
     gesture: null,
+    mouseGesture: null,
     lastTap: null,
     suppressNextClick: false,
   };
@@ -86,7 +87,22 @@ export function createImageLightbox({
     modal.classList.toggle('image-modal-zoomed', state.scale > MIN_SCALE);
   }
 
+  function clearMouseGesture() {
+    const gesture = state.mouseGesture;
+    state.mouseGesture = null;
+    modal?.classList.remove('image-modal-panning');
+    if (
+      gesture &&
+      preview &&
+      typeof preview.hasPointerCapture === 'function' &&
+      preview.hasPointerCapture(gesture.pointerId)
+    ) {
+      preview.releasePointerCapture(gesture.pointerId);
+    }
+  }
+
   function resetTransform() {
+    clearMouseGesture();
     state.scale = MIN_SCALE;
     state.translateX = 0;
     state.translateY = 0;
@@ -407,6 +423,82 @@ export function createImageLightbox({
     state.gesture = null;
   }
 
+  function handlePreviewPointerDown(event) {
+    if (
+      modal.classList.contains('hidden') ||
+      state.scale <= MIN_SCALE ||
+      event.pointerType !== 'mouse' ||
+      event.button !== 0
+    ) {
+      return;
+    }
+    state.mouseGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startTranslateX: state.translateX,
+      startTranslateY: state.translateY,
+      moved: false,
+    };
+    if (typeof preview.setPointerCapture === 'function') {
+      preview.setPointerCapture(event.pointerId);
+    }
+    modal.classList.add('image-modal-panning');
+    event.preventDefault();
+  }
+
+  function handlePreviewPointerMove(event) {
+    const gesture = state.mouseGesture;
+    if (!gesture || gesture.pointerId !== event.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    if (!gesture.moved && Math.hypot(deltaX, deltaY) <= TAP_MOVE_THRESHOLD) {
+      return;
+    }
+    gesture.moved = true;
+    state.translateX = gesture.startTranslateX + deltaX;
+    state.translateY = gesture.startTranslateY + deltaY;
+    applyTransform();
+    event.preventDefault();
+  }
+
+  function handlePreviewPointerUp(event) {
+    if (
+      modal.classList.contains('hidden') ||
+      event.pointerType !== 'mouse' ||
+      event.button !== 0
+    ) {
+      return;
+    }
+    const gesture = state.mouseGesture;
+    if (gesture && gesture.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    if (gesture) {
+      const moved = gesture.moved;
+      clearMouseGesture();
+      if (moved) {
+        applyTransform();
+        return;
+      }
+    }
+    if (state.scale <= MIN_SCALE) {
+      zoomAtPoint(event.clientX, event.clientY, DOUBLE_TAP_SCALE);
+      return;
+    }
+    resetTransform();
+  }
+
+  function handlePreviewPointerCancel(event) {
+    if (state.mouseGesture && state.mouseGesture.pointerId === event.pointerId) {
+      clearMouseGesture();
+      applyTransform();
+    }
+  }
+
   closeButton?.addEventListener('click', close);
   modal?.addEventListener('click', (event) => {
     if (state.suppressNextClick) {
@@ -428,6 +520,12 @@ export function createImageLightbox({
   modal?.addEventListener('touchmove', handleTouchMove, { passive: false });
   modal?.addEventListener('touchend', handleTouchEnd, { passive: false });
   modal?.addEventListener('touchcancel', handleTouchCancel);
+  preview?.addEventListener('pointerdown', handlePreviewPointerDown);
+  preview?.addEventListener('pointermove', handlePreviewPointerMove);
+  preview?.addEventListener('pointerup', handlePreviewPointerUp);
+  preview?.addEventListener('pointercancel', handlePreviewPointerCancel);
+  preview?.addEventListener('lostpointercapture', handlePreviewPointerCancel);
+  preview?.addEventListener('dragstart', (event) => event.preventDefault());
   preview?.addEventListener('load', applyTransform);
   document.addEventListener('keydown', (event) => {
     if (!modal || modal.classList.contains('hidden')) {

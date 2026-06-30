@@ -525,18 +525,35 @@ async function sendRefreshSignals(
   ]);
 }
 
-function sendFastModRefreshResponse(
+async function sendFastModRefreshResponse(
   res: express.Response,
   appContext: Context,
   toast: ToastPayload,
   extras?: Record<string, unknown>,
   affectedUsernames?: Array<string | null | undefined>
-): void {
-  void sendRefreshSignals(appContext, affectedUsernames);
+): Promise<void> {
+  await sendRefreshSignals(appContext, affectedUsernames);
   res.json({
     realtimeChannel: modRealtimeChannel(appContext),
     refreshRequested: true,
     ...(extras ?? {}),
+    toast,
+  });
+}
+
+async function sendHubMutationRefreshResponse(
+  res: express.Response,
+  appContext: Context,
+  affectedUsername: string,
+  toast: ToastPayload
+): Promise<void> {
+  // The mutation already knows its affected username, so notify subscribers
+  // before responding without rebuilding the expensive hub state here. The
+  // initiating client coalesces this signal with refreshRequested below.
+  await sendRefreshSignals(appContext, [affectedUsername]);
+  res.json({
+    realtimeChannel: hubRealtimeChannel(appContext),
+    refreshRequested: true,
     toast,
   });
 }
@@ -804,12 +821,7 @@ app.post('/api/hub/submit', async (req, res) => {
   try {
     const appContext = currentContext();
     const result = await submitVerification(req.body as SubmitVerificationValues, appContext);
-    const payload = await buildHubPayload(appContext);
-    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
-    res.json({
-      ...payload,
-      toast: submitToast(result),
-    });
+    await sendHubMutationRefreshResponse(res, appContext, result.username, submitToast(result));
   } catch (error) {
     sendError(res, error);
   }
@@ -818,12 +830,10 @@ app.post('/api/hub/submit', async (req, res) => {
 app.post('/api/hub/withdraw', async (_req, res) => {
   try {
     const appContext = currentContext();
-    await withdrawCurrentUserPendingVerification(appContext);
-    const payload = await buildHubPayload(appContext);
-    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
-    res.json({
-      ...payload,
-      toast: { text: 'Pending verification withdrawn.', tone: 'success' },
+    const result = await withdrawCurrentUserPendingVerification(appContext);
+    await sendHubMutationRefreshResponse(res, appContext, result.username, {
+      text: 'Pending verification withdrawn.',
+      tone: 'success',
     });
   } catch (error) {
     sendError(res, error);
@@ -837,18 +847,13 @@ app.post('/api/hub/delete', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await deleteCurrentUserVerificationData(appContext);
-    const payload = await buildHubPayload(appContext);
-    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
     const text =
       result.flairRemovalFailedFor.length > 0
         ? `Data removed, but flair removal failed for: ${result.flairRemovalFailedFor.map((name: string) => `r/${name}`).join(', ')}`
         : 'Verification removed. Flair and stored verification data were removed.';
-    res.json({
-      ...payload,
-      toast: {
-        text,
-        tone: result.flairRemovalFailedFor.length > 0 ? 'error' : 'success',
-      },
+    await sendHubMutationRefreshResponse(res, appContext, result.username, {
+      text,
+      tone: result.flairRemovalFailedFor.length > 0 ? 'error' : 'success',
     });
   } catch (error) {
     sendError(res, error);
@@ -875,13 +880,9 @@ app.post('/api/mod/approve', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await approveVerification(appContext, verificationId, confirmBannedApproval, selectedFlairTemplateId);
-    if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
-      await sendRefreshSignals(appContext, [result.username]);
-    }
-    const payload = await buildModPayload(appContext);
     if (result.outcome === 'validation_retry') {
       res.json({
-        ...payload,
+        ...(await buildModPayload(appContext)),
         toast: {
           text: "Couldn't confirm the user account right now. Please retry.",
           tone: 'error',
@@ -891,7 +892,7 @@ app.post('/api/mod/approve', async (req, res) => {
     }
     if (result.outcome === 'banned_confirmation_required') {
       res.json({
-        ...payload,
+        ...(await buildModPayload(appContext)),
         approvalConfirm: {
           kind: 'banned-unban',
           verificationId,
@@ -902,13 +903,21 @@ app.post('/api/mod/approve', async (req, res) => {
       return;
     }
     if (result.outcome === 'invalid_account_removed') {
-      res.json({
-        ...payload,
-        toast: {
+      await sendFastModRefreshResponse(
+        res,
+        appContext,
+        {
           text: 'User no longer exists or is suspended. Verification removed from review.',
           tone: 'info',
         },
-      });
+        {
+          mutation: {
+            type: 'removePending',
+            verificationId,
+          },
+        },
+        [result.username]
+      );
       return;
     }
     const approvalFailed = result.flair.status === 'failed';
@@ -919,14 +928,35 @@ app.post('/api/mod/approve', async (req, res) => {
       `mod note ${result.modNote.status}${result.modNote.reason ? ` (${result.modNote.reason})` : ''}`,
     ];
     const approvalUsername = result.username ? `u/${result.username}` : 'request';
+    const approvalToast: ToastPayload = {
+      text: success
+        ? `Approved ${approvalUsername}.`
+        : `${approvalFailed ? 'Approval failed' : 'Approved with issues'}: ${details.join('; ')}`,
+      tone: success ? 'success' : 'error',
+    };
+    if (result.applied) {
+      await sendFastModRefreshResponse(
+        res,
+        appContext,
+        approvalToast,
+        {
+          mutation: {
+            type: 'removePending',
+            verificationId,
+          },
+        },
+        [result.username]
+      );
+      return;
+    }
+
+    // Non-applied outcomes leave the request in place (or reveal that another
+    // moderator already completed it), so return authoritative state instead
+    // of optimistically removing the card.
+    await sendRefreshSignals(appContext, [result.username]);
     res.json({
-      ...payload,
-      toast: {
-        text: success
-          ? `Approved ${approvalUsername}.`
-          : `${approvalFailed ? 'Approval failed' : 'Approved with issues'}: ${details.join('; ')}`,
-        tone: success ? 'success' : 'error',
-      },
+      ...(await buildModPayload(appContext)),
+      toast: approvalToast,
     });
   } catch (error) {
     sendError(res, error);
@@ -960,7 +990,7 @@ app.post('/api/mod/deny', async (req, res) => {
       return;
     }
     if (result.outcome === 'invalid_account_removed') {
-      sendFastModRefreshResponse(res, appContext, {
+      await sendFastModRefreshResponse(res, appContext, {
         text: 'User no longer exists or is suspended. Verification removed from review.',
         tone: 'info',
       }, {
@@ -999,7 +1029,7 @@ app.post('/api/mod/deny', async (req, res) => {
         : result.manualBlockOutcome?.status === 'already_blocked'
           ? '; user already blocked'
           : '';
-    sendFastModRefreshResponse(res, appContext, {
+    await sendFastModRefreshResponse(res, appContext, {
       text: success
         ? `Denied ${deniedUsername}${successBlockText}.`
         : `Denied with issues (${result.denyReasonLabel || reason.replace(/_/g, ' ')}): ${details.join('; ')}.${blockText}`,
@@ -1040,7 +1070,7 @@ app.post('/api/mod/batch-review', async (req, res) => {
             verificationIds: result.terminalVerificationIds,
           }
         : undefined;
-    sendFastModRefreshResponse(
+    await sendFastModRefreshResponse(
       res,
       appContext,
       buildBatchReviewToast(result),
@@ -1109,7 +1139,7 @@ app.post('/api/mod/flag', async (req, res) => {
     const note = String(req.body?.note ?? '').trim();
     const appContext = currentContext();
     const result = await setPendingFlagState(appContext, verificationId, flagged, note);
-    sendFastModRefreshResponse(
+    await sendFastModRefreshResponse(
       res,
       appContext,
       {
@@ -1403,7 +1433,7 @@ app.post('/api/mod/settings/flair', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveFlairTemplateValues(req.body ?? {}, appContext);
-    sendFastModRefreshResponse(res, appContext, {
+    await sendFastModRefreshResponse(res, appContext, {
       text: 'Saved verification settings.',
       tone: 'success',
     });
@@ -1416,7 +1446,7 @@ app.post('/api/mod/settings/templates', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveModmailTemplatesValues(req.body ?? {}, appContext);
-    sendFastModRefreshResponse(res, appContext, {
+    await sendFastModRefreshResponse(res, appContext, {
       text: 'Saved modmail templates.',
       tone: 'success',
     });
@@ -1429,7 +1459,7 @@ app.post('/api/mod/settings/theme', async (req, res) => {
   try {
     const appContext = currentContext();
     await onSaveThemeValues(req.body ?? {}, appContext);
-    sendFastModRefreshResponse(res, appContext, {
+    await sendFastModRefreshResponse(res, appContext, {
       text: 'Saved theme settings.',
       tone: 'success',
     });

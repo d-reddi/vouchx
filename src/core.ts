@@ -159,6 +159,7 @@ export type {
   AuditRetentionJobData,
   AuditSearchResponsePayload,
   CreatePostValues,
+  DeleteCurrentUserDataResult,
   DeleteDataConfirmValues,
   DeleteDataResult,
   DenyReason,
@@ -178,6 +179,7 @@ export type {
   ThemePalette,
   ThemePresetName,
   UpdateNoticeState,
+  WithdrawPendingVerificationResult,
 } from './core/types.ts';
 export {
   buildModeratorUpdateNotice,

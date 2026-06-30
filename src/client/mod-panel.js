@@ -508,8 +508,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
-  let ignoredRealtimeRefreshCount = 0;
-  let ignoreRealtimeRefreshUntil = 0;
   let flairTemplateValidationOverride = null;
   let approvalFlairOptions = [];
   let approvalFlairOptionsLoaded = false;
@@ -565,7 +563,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   const ACCOUNT_AGE_WARNING_DAYS = 14;
   const MAX_BATCH_REVIEW_ITEMS = 25;
   const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
-  const LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS = 2500;
   const STATS_AUTO_REFRESH_INTERVAL_MS = 20 * 1000;
   const moderatorQuickStartUrl = normalizeExternalUrl(MODERATOR_QUICK_START_URL);
 
@@ -1321,44 +1318,25 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     return payload;
   }
 
-  function markNextRealtimeRefreshAsSelfOriginated() {
-    ignoredRealtimeRefreshCount += 1;
-    ignoreRealtimeRefreshUntil = Date.now() + LOCAL_REALTIME_REFRESH_SUPPRESSION_WINDOW_MS;
-  }
-
-  function shouldIgnoreSelfOriginatedRealtimeRefresh() {
-    if (ignoredRealtimeRefreshCount <= 0) {
-      return false;
-    }
-    if (Date.now() > ignoreRealtimeRefreshUntil) {
-      ignoredRealtimeRefreshCount = 0;
-      ignoreRealtimeRefreshUntil = 0;
-      return false;
-    }
-    ignoredRealtimeRefreshCount = Math.max(0, ignoredRealtimeRefreshCount - 1);
-    if (ignoredRealtimeRefreshCount === 0) {
-      ignoreRealtimeRefreshUntil = 0;
-    }
-    return true;
-  }
-
   function applyApiState(payload) {
+    const refreshRequested = payload && payload.refreshRequested === true;
     syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
     if (payload && payload.state == null && payload.mutation) {
       applyLocalMutation(payload.mutation);
     }
     if (payload && payload.state) {
       handleMessage({ type: 'state', payload: payload.state });
-    } else {
+    } else if (!refreshRequested) {
       setBusy(false);
     }
     if (payload && payload.toast) {
       handleMessage({ type: 'toast', payload: payload.toast });
     }
-    if (payload && payload.refreshRequested === true) {
-      window.setTimeout(() => {
-        void refreshFromRealtimeSignal();
-      }, 0);
+    if (refreshRequested) {
+      // The mutation response and its realtime broadcast share this queue, so
+      // the initiating panel performs one post-mutation state load.
+      realtimeRefreshQueued = true;
+      setBusy(false);
     }
   }
 
@@ -1418,22 +1396,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     }
   }
 
-  function applyMutationApiState(payload, options) {
-    if (!options || options.suppressRealtimeBounce !== false) {
-      markNextRealtimeRefreshAsSelfOriginated();
-    }
-    applyApiState(payload);
-  }
-
-  function isValidationRetryToastPayload(payload) {
-    return Boolean(
-      payload &&
-        payload.toast &&
-        typeof payload.toast.text === 'string' &&
-        payload.toast.text === "Couldn't confirm the user account right now. Please retry."
-    );
-  }
-
   function scheduleRealtimeReconnect(channel) {
     if (!channel || channel !== realtimeChannel || realtimeReconnectTimerId) {
       return;
@@ -1479,9 +1441,6 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
         },
         onMessage(message) {
           if (!message || typeof message !== 'object' || message.type !== 'refresh') {
-            return;
-          }
-          if (shouldIgnoreSelfOriginatedRealtimeRefresh()) {
             return;
           }
           void refreshFromRealtimeSignal();
@@ -2236,7 +2195,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
         if (verificationsEnabledInput && Boolean(verificationsEnabledInput.checked) !== savedVerificationsEnabled) {
           requestBody.verificationsEnabled = Boolean(verificationsEnabledInput.checked);
         }
-        applyMutationApiState(
+        applyApiState(
           await requestJson('/api/mod/settings/flair', requestBody)
         );
       } catch (error) {
@@ -2651,9 +2610,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
           selectedFlairTemplateId: message.selectedFlairTemplateId,
           confirmBannedApproval: Boolean(message.confirmBannedApproval),
         });
-        applyMutationApiState(payload, {
-          suppressRealtimeBounce: !payload.approvalConfirm && !isValidationRetryToastPayload(payload),
-        });
+        applyApiState(payload);
         if (payload && payload.approvalConfirm && payload.approvalConfirm.kind === 'banned-unban') {
           openApproveBannedModal(payload.approvalConfirm);
         }
@@ -2667,9 +2624,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
           moderatorNotes: message.moderatorNotes,
           blockUser: Boolean(message.blockUser),
         });
-        applyMutationApiState(payload, {
-          suppressRealtimeBounce: !isValidationRetryToastPayload(payload),
-        });
+        applyApiState(payload);
         return;
       }
 
@@ -2681,22 +2636,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
           reason: message.reason,
           moderatorNotes: message.moderatorNotes,
         });
-        applyMutationApiState(payload);
+        applyApiState(payload);
         return;
       }
 
       if (message.type === 'claimPending') {
-        applyMutationApiState(await requestJson('/api/mod/claim', { verificationId: message.verificationId }));
+        applyApiState(await requestJson('/api/mod/claim', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'unclaimPending') {
-        applyMutationApiState(await requestJson('/api/mod/unclaim', { verificationId: message.verificationId }));
+        applyApiState(await requestJson('/api/mod/unclaim', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'flagPending') {
-        applyMutationApiState(
+        applyApiState(
           await requestJson('/api/mod/flag', {
             verificationId: message.verificationId,
             flagged: Boolean(message.flagged),
@@ -2713,22 +2668,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
         });
         // Drop the draft only once the note is saved so a failed request keeps the typed text.
         pendingFlagNoteDrafts.delete(message.verificationId);
-        applyMutationApiState(payload);
+        applyApiState(payload);
         return;
       }
 
       if (message.type === 'reopenDenied') {
-        applyMutationApiState(await requestJson('/api/mod/reopen', { verificationId: message.verificationId }));
+        applyApiState(await requestJson('/api/mod/reopen', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'cancelReopen') {
-        applyMutationApiState(await requestJson('/api/mod/cancel-reopen', { verificationId: message.verificationId }));
+        applyApiState(await requestJson('/api/mod/cancel-reopen', { verificationId: message.verificationId }));
         return;
       }
 
       if (message.type === 'removeVerification') {
-        applyMutationApiState(
+        applyApiState(
           await requestJson('/api/mod/remove', {
             verificationId: message.verificationId,
             reason: message.reason,
@@ -2738,22 +2693,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       }
 
       if (message.type === 'blockUser') {
-        applyMutationApiState(await requestJson('/api/mod/block', { username: message.username, reason: message.reason }));
+        applyApiState(await requestJson('/api/mod/block', { username: message.username, reason: message.reason }));
         return;
       }
 
       if (message.type === 'unblockUser') {
-        applyMutationApiState(await requestJson('/api/mod/unblock', { username: message.username }));
+        applyApiState(await requestJson('/api/mod/unblock', { username: message.username }));
         return;
       }
 
       if (message.type === 'saveTemplates') {
-        applyMutationApiState(await requestJson('/api/mod/settings/templates', message));
+        applyApiState(await requestJson('/api/mod/settings/templates', message));
         return;
       }
 
       if (message.type === 'saveTheme') {
-        applyMutationApiState(await requestJson('/api/mod/settings/theme', message));
+        applyApiState(await requestJson('/api/mod/settings/theme', message));
         return;
       }
 

@@ -3689,11 +3689,17 @@ button.pending-age-denied-before:focus-visible {
   cursor: zoom-in;
   transform-origin: center center;
   touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
   will-change: transform;
 }
 
 .image-modal.image-modal-zoomed img {
   cursor: grab;
+}
+
+.image-modal.image-modal-panning img {
+  cursor: grabbing;
 }
 
 .image-close {
