@@ -48,7 +48,8 @@ export function emptyViewerFlairSnapshot(
 
 export async function getViewerFlairSnapshot(
   context: Devvit.Context,
-  subredditName: string
+  subredditName: string,
+  options: { forceFreshUserLookup?: boolean } = {}
 ): Promise<ViewerFlairSnapshot> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
   const viewerIdentity = await getViewerIdentitySnapshot(context);
@@ -74,7 +75,15 @@ export async function getViewerFlairSnapshot(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const lookupUser = await context.reddit.getUserByUsername(lookupUsername);
+      // Reuse the viewer object already fetched by getViewerIdentitySnapshot
+      // (getCurrentUser) instead of issuing a redundant getUserByUsername on every
+      // hub load — the extra lookup doubled the Reddit Data API calls per viewer and
+      // was a primary driver of HTTP 429s under realtime refresh fan-out. Pass
+      // forceFreshUserLookup when the snapshot must reflect a flair write made
+      // earlier in the same request (e.g. the post-reconcile confirmation read).
+      const lookupUser = options.forceFreshUserLookup
+        ? await context.reddit.getUserByUsername(lookupUsername)
+        : viewerIdentity.user;
       if (!lookupUser) {
         return emptyViewerFlairSnapshot(
           viewerIdentity.userId || context.userId,

@@ -1,4 +1,5 @@
 import { connectRealtime, disconnectRealtime } from '@devvit/realtime/client';
+import { shouldApplyHubRefreshSignal } from './realtime-filter.js';
 import {
   exitExpandedMode,
   navigateTo,
@@ -1344,7 +1345,12 @@ export function mountHub(options = {}) {
           }
         },
         onMessage(message) {
-          if (!message || typeof message !== 'object' || message.type !== 'refresh') {
+          if (
+            !shouldApplyHubRefreshSignal(message, {
+              viewerUsername: hubState?.viewerUsername,
+              canReview: hubState?.canReview,
+            })
+          ) {
             return;
           }
           void refreshFromRealtimeSignal();

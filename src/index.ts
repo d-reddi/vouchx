@@ -46,6 +46,7 @@ import {
   removeApprovedVerificationByModerator,
   reopenDeniedVerification,
   sanitizeSubredditId,
+  normalizeUsernameStrict,
   getModeratorStats,
   getHubModeratorUiState,
   searchApprovedRecords,
@@ -483,29 +484,55 @@ function hubRealtimeChannel(appContext: Context): string {
   return realtimeChannelsForContext(appContext, 'vouchx_hub_refresh')[0];
 }
 
-async function sendRealtimeRefreshSignal(channel: string): Promise<void> {
+type RefreshSignal = { type: string; usernames?: string[] };
+
+async function sendRealtimeRefreshSignal(channel: string, signal: RefreshSignal): Promise<void> {
   try {
-    await realtime.send(channel, REFRESH_SIGNAL);
+    await realtime.send(channel, signal);
   } catch (error) {
     console.log(`Realtime refresh send failed: ${errorText(error)}`);
   }
 }
 
-async function sendRefreshSignals(appContext: Context): Promise<void> {
-  const channels = [
-    ...realtimeChannelsForContext(appContext, 'vouchx_mod_refresh'),
-    ...realtimeChannelsForContext(appContext, 'vouchx_hub_refresh'),
-  ];
-  await Promise.allSettled(channels.map((channel) => sendRealtimeRefreshSignal(channel)));
+// Send hub/mod refresh signals. When affectedUsernames is provided, the hub
+// signal is *targeted*: only the named viewers (plus reviewers, decided
+// client-side) refetch state, instead of every hub viewer fanning out at once
+// — the main driver of Reddit Data API 429s. Omit it (or pass only empty
+// names) for genuinely global changes (settings/theme) to refresh everyone.
+// The mod-panel channel always gets a bare broadcast (reviewers want every
+// queue change). Targeting is always a single send (even for batch, which
+// passes the whole affected-username array), so it stays well under the
+// realtime 100 msgs/sec/installation limit.
+async function sendRefreshSignals(
+  appContext: Context,
+  affectedUsernames?: Array<string | null | undefined>
+): Promise<void> {
+  const usernames = Array.isArray(affectedUsernames)
+    ? Array.from(
+        new Set(
+          affectedUsernames
+            .map((name) => normalizeUsernameStrict(String(name ?? '')))
+            .filter((name) => name.length > 0)
+        )
+      )
+    : [];
+  const hubSignal: RefreshSignal = usernames.length > 0 ? { type: 'refresh', usernames } : REFRESH_SIGNAL;
+  const modChannels = realtimeChannelsForContext(appContext, 'vouchx_mod_refresh');
+  const hubChannels = realtimeChannelsForContext(appContext, 'vouchx_hub_refresh');
+  await Promise.allSettled([
+    ...modChannels.map((channel) => sendRealtimeRefreshSignal(channel, REFRESH_SIGNAL)),
+    ...hubChannels.map((channel) => sendRealtimeRefreshSignal(channel, hubSignal)),
+  ]);
 }
 
 function sendFastModRefreshResponse(
   res: express.Response,
   appContext: Context,
   toast: ToastPayload,
-  extras?: Record<string, unknown>
+  extras?: Record<string, unknown>,
+  affectedUsernames?: Array<string | null | undefined>
 ): void {
-  void sendRefreshSignals(appContext);
+  void sendRefreshSignals(appContext, affectedUsernames);
   res.json({
     realtimeChannel: modRealtimeChannel(appContext),
     refreshRequested: true,
@@ -777,9 +804,10 @@ app.post('/api/hub/submit', async (req, res) => {
   try {
     const appContext = currentContext();
     const result = await submitVerification(req.body as SubmitVerificationValues, appContext);
-    await sendRefreshSignals(appContext);
+    const payload = await buildHubPayload(appContext);
+    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
     res.json({
-      ...(await buildHubPayload(appContext)),
+      ...payload,
       toast: submitToast(result),
     });
   } catch (error) {
@@ -791,9 +819,10 @@ app.post('/api/hub/withdraw', async (_req, res) => {
   try {
     const appContext = currentContext();
     await withdrawCurrentUserPendingVerification(appContext);
-    await sendRefreshSignals(appContext);
+    const payload = await buildHubPayload(appContext);
+    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
     res.json({
-      ...(await buildHubPayload(appContext)),
+      ...payload,
       toast: { text: 'Pending verification withdrawn.', tone: 'success' },
     });
   } catch (error) {
@@ -808,13 +837,14 @@ app.post('/api/hub/delete', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await deleteCurrentUserVerificationData(appContext);
-    await sendRefreshSignals(appContext);
+    const payload = await buildHubPayload(appContext);
+    await sendRefreshSignals(appContext, [payload.state.viewerUsername]);
     const text =
       result.flairRemovalFailedFor.length > 0
         ? `Data removed, but flair removal failed for: ${result.flairRemovalFailedFor.map((name: string) => `r/${name}`).join(', ')}`
         : 'Verification removed. Flair and stored verification data were removed.';
     res.json({
-      ...(await buildHubPayload(appContext)),
+      ...payload,
       toast: {
         text,
         tone: result.flairRemovalFailedFor.length > 0 ? 'error' : 'success',
@@ -846,7 +876,7 @@ app.post('/api/mod/approve', async (req, res) => {
     const appContext = currentContext();
     const result = await approveVerification(appContext, verificationId, confirmBannedApproval, selectedFlairTemplateId);
     if (result.outcome !== 'validation_retry' && result.outcome !== 'banned_confirmation_required') {
-      await sendRefreshSignals(appContext);
+      await sendRefreshSignals(appContext, [result.username]);
     }
     const payload = await buildModPayload(appContext);
     if (result.outcome === 'validation_retry') {
@@ -938,7 +968,7 @@ app.post('/api/mod/deny', async (req, res) => {
           type: 'removePending',
           verificationId,
         },
-      });
+      }, [result.username]);
       return;
     }
     let blockText = result.userBlocked ? ` User reached ${result.denialCount ?? 3} denials and is now blocked.` : '';
@@ -979,7 +1009,7 @@ app.post('/api/mod/deny', async (req, res) => {
         type: 'removePending',
         verificationId,
       },
-    });
+    }, [result.username]);
   } catch (error) {
     sendError(res, error);
   }
@@ -1010,10 +1040,18 @@ app.post('/api/mod/batch-review', async (req, res) => {
             verificationIds: result.terminalVerificationIds,
           }
         : undefined;
-    sendFastModRefreshResponse(res, appContext, buildBatchReviewToast(result), {
-      batchReview: result,
-      ...(mutation ? { mutation } : {}),
-    });
+    sendFastModRefreshResponse(
+      res,
+      appContext,
+      buildBatchReviewToast(result),
+      {
+        batchReview: result,
+        ...(mutation ? { mutation } : {}),
+      },
+      // One send carrying every affected username: targeted (no global fan-out)
+      // yet still a single message, so it stays under the realtime send-rate cap.
+      result.items.map((item) => item.username)
+    );
   } catch (error) {
     sendError(res, error);
   }
@@ -1027,7 +1065,7 @@ app.post('/api/mod/claim', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await setPendingClaimState(appContext, verificationId, true);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [result.item.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1048,7 +1086,7 @@ app.post('/api/mod/unclaim', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await setPendingClaimState(appContext, verificationId, false);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [result.item.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1089,7 +1127,8 @@ app.post('/api/mod/flag', async (req, res) => {
           type: 'updatePending',
           item: result.item,
         },
-      }
+      },
+      [result.username]
     );
   } catch (error) {
     sendError(res, error);
@@ -1108,7 +1147,7 @@ app.post('/api/mod/flag-note', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await addPendingFlagNote(appContext, verificationId, note);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [result.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1129,7 +1168,7 @@ app.post('/api/mod/reopen', async (req, res) => {
     }
     const appContext = currentContext();
     const reopened = await reopenDeniedVerification(appContext, verificationId);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [reopened.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1150,7 +1189,7 @@ app.post('/api/mod/cancel-reopen', async (req, res) => {
     }
     const appContext = currentContext();
     const canceled = await cancelReopenedVerification(appContext, verificationId);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [canceled.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1175,7 +1214,7 @@ app.post('/api/mod/remove', async (req, res) => {
     }
     const appContext = currentContext();
     const result = await removeApprovedVerificationByModerator(appContext, verificationId, reason);
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [result.username]);
     const tone = result.flair.status === 'failed' || result.modmail.status === 'failed' ? 'error' : 'success';
     res.json({
       ...(await buildModPayload(appContext)),
@@ -1217,7 +1256,7 @@ app.post('/api/mod/block', async (req, res) => {
       moderator,
       reason
     );
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [result.entry.username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
@@ -1247,7 +1286,7 @@ app.post('/api/mod/unblock', async (req, res) => {
       username,
       moderator
     );
-    await sendRefreshSignals(appContext);
+    await sendRefreshSignals(appContext, [username]);
     res.json({
       ...(await buildModPayload(appContext)),
       toast: {
