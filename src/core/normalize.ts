@@ -271,6 +271,36 @@ export function looksLikeTransientRedditTransportError(message: string): boolean
   );
 }
 
+export function looksLikeRedditPermissionOrRateLimitError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    /\b(?:401|403|429)\b/.test(normalized) ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('permission denied') ||
+    normalized.includes('insufficient permission') ||
+    normalized.includes('not permitted') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('ratelimit')
+  );
+}
+
+export function looksLikeRedditNameFormattingError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    /\b(?:invalid|malformed|missing)\b[^\n]*(?:user(?:name)?|subreddit|community|recipient|field ['"]?(?:to|username|subreddit))/.test(
+      normalized
+    ) ||
+    /(?:user(?:name)?|subreddit|community|recipient|field ['"]?(?:to|username|subreddit))[^\n]*\b(?:invalid|malformed|missing)\b/.test(
+      normalized
+    )
+  );
+}
+
 export async function getCurrentSubredditNameCompat(
   context: Pick<Devvit.Context, 'reddit'> & { subredditName?: string | null }
 ): Promise<string> {

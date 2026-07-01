@@ -239,8 +239,12 @@ export async function loadDashboardData(
   }
 ): Promise<DashboardData> {
   const subredditId = sanitizeSubredditId(context.subredditId);
-  const subredditName = await getCurrentSubredditNameCompat(context);
-  const viewerIdentity = await getViewerIdentitySnapshot(context);
+  const [subredditName, viewerIdentity, settingsTabRequiresConfigAccess, initialConfig] = await Promise.all([
+    getCurrentSubredditNameCompat(context),
+    getViewerIdentitySnapshot(context),
+    getSettingsTabRequiresConfigAccess(context),
+    getRuntimeConfig(context, subredditId),
+  ]);
   let moderatorAccess: ModeratorAccessSnapshot = {
     state: 'denied',
     permissionState: 'unknown',
@@ -254,12 +258,11 @@ export async function loadDashboardData(
   const isModeratorUser = options.includeModData ? moderatorAccess.isModerator : false;
   const moderatorPermissions = options.includeModData ? moderatorAccess.permissions : [];
   const canManageUsers = options.includeModData ? hasManageUsersPermissionInList(moderatorPermissions) : false;
-  const settingsTabRequiresConfigAccess = await getSettingsTabRequiresConfigAccess(context);
   const canOpenInstallSettings = options.includeModData ? hasAllModeratorPermissionInList(moderatorPermissions) : false;
   const hasConfigAccess = options.includeModData ? hasConfigAccessPermissionInList(moderatorPermissions) : false;
   const canReviewUser = options.includeModData ? isModeratorUser && canManageUsers : false;
   const canAccessSettingsTab = canReviewUser && (!settingsTabRequiresConfigAccess || hasConfigAccess);
-  let config = await getRuntimeConfig(context, subredditId);
+  let config = initialConfig;
   let flairTemplateValidation = validateFlairTemplateId(config.flairTemplateId);
   if (options.includeModData && viewerIdentity.state === 'confirmed' && config.flairTemplateId.trim()) {
     config = await refreshConfiguredFlairTemplateCache(context, subredditId, subredditName, config);
@@ -270,20 +273,30 @@ export async function loadDashboardData(
   const requiresInitialSetup = !config.flairTemplateId.trim();
   // Once setup is done, reviewers who haven't been through the panel walkthrough get a
   // one-time onboarding tour. Tracked per-moderator server-side (see onboarding.ts).
-  let needsOnboarding = false;
-  let newFeaturePacks: DashboardData['newFeaturePacks'] = [];
-  if (options.includeModData && canReviewUser && !requiresInitialSetup && viewerIdentity.username) {
-    needsOnboarding = !(await hasCompletedModeratorOnboarding(context, viewerIdentity.username));
-    if (!needsOnboarding) {
-      newFeaturePacks = await getPendingModeratorFeatureEducationPacks(context, viewerIdentity.username);
+  const onboardingStateTask = (async (): Promise<{
+    needsOnboarding: boolean;
+    newFeaturePacks: DashboardData['newFeaturePacks'];
+  }> => {
+    if (!options.includeModData || !canReviewUser || requiresInitialSetup || !viewerIdentity.username) {
+      return { needsOnboarding: false, newFeaturePacks: [] };
     }
-  }
-  const [globalBlockedUsernames, developerUiUsernames] = await Promise.all([
+    const needsOnboarding = !(await hasCompletedModeratorOnboarding(context, viewerIdentity.username));
+    return {
+      needsOnboarding,
+      newFeaturePacks: needsOnboarding
+        ? []
+        : await getPendingModeratorFeatureEducationPacks(context, viewerIdentity.username),
+    };
+  })();
+  const [globalBlockedUsernames, developerUiUsernames, initialUserLatest, onboardingState] = await Promise.all([
     readMergedGlobalUsernameSettings(context, GLOBAL_BLOCKED_USERNAME_SETTING_NAMES),
     readGlobalUsernameSetting(context, GLOBAL_SETTING_DEVELOPER_UI_USERNAMES),
+    getLatestRecordForCurrentViewer(context, subredditId, viewerIdentity),
+    onboardingStateTask,
   ]);
+  const { needsOnboarding, newFeaturePacks } = onboardingState;
 
-  let userLatest = await getLatestRecordForCurrentViewer(context, subredditId, viewerIdentity);
+  let userLatest = initialUserLatest;
   const viewerLookupUsername = viewerIdentity.username ?? userLatest?.username ?? null;
   if (viewerLookupUsername && userLatest) {
     userLatest = await bumpViewerVerifiedRecordRetention(context, subredditId, viewerLookupUsername, userLatest);
@@ -303,58 +316,73 @@ export async function loadDashboardData(
       ? createGlobalBlockedUserEntry(globalBlockedUsernames, viewerLookupUsername) ??
         (await repairMissingAutoBlockForUser(context, subredditId, viewerLookupUsername, config))
       : null;
-  const pending = canReviewUser && options.includeModData ? await listPendingVerifications(context, subredditId) : [];
-  const pendingCount = canReviewUser ? await context.redis.zCard(pendingIndexKey(subredditId)) : 0;
   const defaultSearchFromAt = new Date(Date.now() - HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const defaultSearchToAt = new Date().toISOString();
-  const approvedSearch = canReviewUser && options.includeModData
-    ? await searchApprovedRecords(context, subredditId, {
-        fromDate: defaultSearchFromAt,
-        toDate: defaultSearchToAt,
-        offset: 0,
-        limit: 25,
-      })
-    : { items: [], hasMore: false };
+  const includeReviewerData = canReviewUser && options.includeModData;
+  const [pending, pendingCount, approvedSearch, blocked, auditSearch, viewerSnapshot, initialViewerFlairSnapshot] =
+    await Promise.all([
+      includeReviewerData ? listPendingVerifications(context, subredditId) : Promise.resolve([]),
+      canReviewUser ? context.redis.zCard(pendingIndexKey(subredditId)) : Promise.resolve(0),
+      includeReviewerData
+        ? searchApprovedRecords(context, subredditId, {
+            fromDate: defaultSearchFromAt,
+            toDate: defaultSearchToAt,
+            offset: 0,
+            limit: 25,
+          })
+        : Promise.resolve({ items: [], hasMore: false }),
+      includeReviewerData ? listBlockedUsers(context, subredditId, config) : Promise.resolve([]),
+      includeReviewerData
+        ? searchAuditEntries(context, subredditId, {
+            fromDate: defaultSearchFromAt,
+            toDate: defaultSearchToAt,
+            offset: 0,
+            limit: 25,
+          })
+        : Promise.resolve({ items: [], hasMore: false }),
+      viewerIdentity.state === 'confirmed'
+        ? getViewerSnapshot(context)
+        : Promise.resolve({ accountAgeDays: null, totalKarma: null }),
+      viewerIdentity.state === 'confirmed'
+        ? getViewerFlairSnapshot(context, subredditName)
+        : Promise.resolve(
+            emptyViewerFlairSnapshot(
+              viewerIdentity.userId || context.userId,
+              viewerIdentity.state === 'unavailable' ? 'unavailable' : 'confirmed_absent',
+              viewerIdentity.state === 'unavailable' ? viewerIdentity.error : null
+            )
+          ),
+    ]);
   const approved = approvedSearch.items;
-  const blocked = canReviewUser && options.includeModData ? await listBlockedUsers(context, subredditId) : [];
-  const auditSearch = canReviewUser && options.includeModData
-    ? await searchAuditEntries(context, subredditId, {
-        fromDate: defaultSearchFromAt,
-        toDate: defaultSearchToAt,
-        offset: 0,
-        limit: 25,
-      })
-    : { items: [], hasMore: false };
   const auditLog = auditSearch.items;
-  const storage = canReviewUser && options.includeModData ? await estimateSubredditStorageUsage(context, subredditId) : emptyStorageUsage();
-  const viewerSnapshot =
-    viewerIdentity.state === 'confirmed' ? await getViewerSnapshot(context) : { accountAgeDays: null, totalKarma: null };
-  let viewerFlairSnapshot =
+  // Storage maintenance touches the same indexes as the searches above, so keep
+  // it ordered after the parallel read group even though the count reads are cheap.
+  let viewerFlairSnapshot = initialViewerFlairSnapshot;
+  const [storage, initialFlairCheck] = await Promise.all([
+    includeReviewerData
+      ? estimateSubredditStorageUsage(context, subredditId)
+      : Promise.resolve(emptyStorageUsage()),
     viewerIdentity.state === 'confirmed'
-      ? await getViewerFlairSnapshot(context, subredditName)
-      : emptyViewerFlairSnapshot(
-          viewerIdentity.userId || context.userId,
-          viewerIdentity.state === 'unavailable' ? 'unavailable' : 'confirmed_absent',
-          viewerIdentity.state === 'unavailable' ? viewerIdentity.error : null
-        );
-  let flairCheck =
-    viewerIdentity.state === 'confirmed'
-      ? await checkVerificationFlair(context, subredditName, config, viewerFlairSnapshot)
-      : viewerIdentity.state === 'unavailable'
-        ? {
-            verified: false,
-            configuredTemplateId: normalizeTemplateId(config.flairTemplateId),
-            detectedTemplateId: '',
-            source: 'viewer-snapshot:unavailable',
-            error: viewerIdentity.error ?? 'Viewer identity unavailable.',
-          }
-        : {
-            verified: false,
-            configuredTemplateId: '',
-            detectedTemplateId: '',
-            source: 'no-viewer',
-            error: null,
-          };
+      ? checkVerificationFlair(context, subredditName, config, viewerFlairSnapshot)
+      : Promise.resolve(
+          viewerIdentity.state === 'unavailable'
+            ? {
+                verified: false,
+                configuredTemplateId: normalizeTemplateId(config.flairTemplateId),
+                detectedTemplateId: '',
+                source: 'viewer-snapshot:unavailable' as const,
+                error: viewerIdentity.error ?? 'Viewer identity unavailable.',
+              }
+            : {
+                verified: false,
+                configuredTemplateId: '',
+                detectedTemplateId: '',
+                source: 'no-viewer' as const,
+                error: null,
+              }
+        ),
+  ]);
+  let flairCheck = initialFlairCheck;
 
   if (
     config.autoFlairReconcileEnabled &&

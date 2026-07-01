@@ -137,10 +137,10 @@ export async function addShadowbanAutoDenyModNote(context: Devvit.Context, recor
 export async function sendApprovalModmail(
   context: Devvit.Context,
   subredditId: string,
-  record: VerificationRecord
+  record: VerificationRecord,
+  config: RuntimeConfig
 ): Promise<ModmailStepResult> {
   const subredditName = sanitizeSubredditName(record.subredditName);
-  const config = await getRuntimeConfig(context, subredditId);
   const values = {
     username: record.username,
     mod: record.moderator ?? '',
@@ -250,10 +250,10 @@ export async function sendModeratorRemovalModmail(
   context: Devvit.Context,
   subredditId: string,
   record: VerificationRecord,
-  removalReason: string
+  removalReason: string,
+  config: RuntimeConfig
 ): Promise<ModmailStepResult> {
   const subredditName = sanitizeSubredditName(record.subredditName);
-  const config = await getRuntimeConfig(context, subredditId);
   const values = {
     username: record.username,
     mod: record.removedBy ?? record.moderator ?? '',

@@ -36,6 +36,9 @@ import { addPendingWithdrawalModNote, addSelfRemovalModNote } from './modmail.ts
 import {
   errorText,
   getCurrentSubredditNameCompat,
+  looksLikeRedditNameFormattingError,
+  looksLikeRedditPermissionOrRateLimitError,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUsername,
   normalizeUsernameKey,
@@ -510,15 +513,48 @@ export async function removeUserFlairWithFallbacks(
   ).filter((value) => value.trim());
   const errors: string[] = [];
   const verificationUsername = strictUsername || normalizedUsername || rawUsernameNoPrefix;
+  const maxFallbackAttempts = 8;
+  const maxRedditApiAttempts = 16;
+  const fallbackDeadlineMs = Date.now() + 4_000;
+  let fallbackAttempts = 0;
+  let redditApiAttempts = 0;
+  const consumeRedditApiAttempt = (): boolean => {
+    if (redditApiAttempts >= maxRedditApiAttempts || Date.now() >= fallbackDeadlineMs) {
+      return false;
+    }
+    redditApiAttempts += 1;
+    return true;
+  };
+  const shouldAbortFallbacks = (message: string): boolean =>
+    looksLikeRedditPermissionOrRateLimitError(message) || looksLikeTransientRedditTransportError(message);
 
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
+      if (fallbackAttempts >= maxFallbackAttempts || Date.now() >= fallbackDeadlineMs) {
+        break;
+      }
+      fallbackAttempts += 1;
+      let shouldTryNextVariant = false;
+      if (!consumeRedditApiAttempt()) {
+        return false;
+      }
       try {
         await context.reddit.removeUserFlair(subredditAttempt, usernameAttempt);
-        if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+        if (
+          await isUserFlairCleared(context, subredditAttempt, verificationUsername, consumeRedditApiAttempt)
+        ) {
           return true;
         }
+        return false;
       } catch (removeError) {
+        const removeErrorMessage = errorText(removeError);
+        if (shouldAbortFallbacks(removeErrorMessage)) {
+          return false;
+        }
+        shouldTryNextVariant = looksLikeRedditNameFormattingError(removeErrorMessage);
+        if (!consumeRedditApiAttempt()) {
+          return false;
+        }
         try {
           await context.reddit.setUserFlair({
             subredditName: subredditAttempt,
@@ -527,22 +563,47 @@ export async function removeUserFlairWithFallbacks(
             text: '',
             cssClass: '',
           });
-          if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+          if (
+            await isUserFlairCleared(context, subredditAttempt, verificationUsername, consumeRedditApiAttempt)
+          ) {
             return true;
           }
+          return false;
         } catch (setError) {
+          const setErrorMessage = errorText(setError);
+          if (shouldAbortFallbacks(setErrorMessage)) {
+            return false;
+          }
+          shouldTryNextVariant ||= looksLikeRedditNameFormattingError(setErrorMessage);
+          if (!consumeRedditApiAttempt()) {
+            return false;
+          }
           try {
             await context.reddit.setUserFlairBatch(subredditAttempt, [{ username: usernameAttempt, text: '', cssClass: '' }]);
-            if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
+            if (
+              await isUserFlairCleared(context, subredditAttempt, verificationUsername, consumeRedditApiAttempt)
+            ) {
               return true;
             }
+            return false;
           } catch (batchError) {
+            const batchErrorMessage = errorText(batchError);
+            if (shouldAbortFallbacks(batchErrorMessage)) {
+              return false;
+            }
+            shouldTryNextVariant ||= looksLikeRedditNameFormattingError(batchErrorMessage);
             errors.push(
-              `${subredditAttempt}/${usernameAttempt}: remove=${errorText(removeError)} set=${errorText(setError)} batch=${errorText(batchError)}`
+              `${subredditAttempt}/${usernameAttempt}: remove=${removeErrorMessage} set=${setErrorMessage} batch=${batchErrorMessage}`
             );
           }
         }
       }
+      if (!shouldTryNextVariant) {
+        return false;
+      }
+    }
+    if (fallbackAttempts >= maxFallbackAttempts || Date.now() >= fallbackDeadlineMs) {
+      break;
     }
   }
 
@@ -553,7 +614,8 @@ export async function removeUserFlairWithFallbacks(
 export async function isUserFlairCleared(
   context: Pick<Devvit.Context, 'reddit'>,
   subredditName: string,
-  username: string
+  username: string,
+  consumeRedditApiAttempt: () => boolean = () => true
 ): Promise<boolean> {
   const sanitizedSubreddit = sanitizeSubredditName(subredditName);
   const normalizedUsername = normalizeUsernameStrict(username);
@@ -563,8 +625,14 @@ export async function isUserFlairCleared(
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      if (!consumeRedditApiAttempt()) {
+        return false;
+      }
       const user = await context.reddit.getUserByUsername(normalizedUsername);
       if (!user) {
+        return false;
+      }
+      if (!consumeRedditApiAttempt()) {
         return false;
       }
       const flair = await user.getUserFlairBySubreddit(sanitizedSubreddit);

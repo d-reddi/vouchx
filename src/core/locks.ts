@@ -132,49 +132,51 @@ export async function setPendingClaimState(
   const subredditName = await getCurrentSubredditNameCompat(context);
   await assertCanReview(context, subredditName, moderator);
 
-  const storedRecord = await getRecord(context, subredditId, verificationId);
-  if (!storedRecord) {
-    throw new Error('Verification not found.');
-  }
-  let record = clearExpiredPendingClaim(storedRecord);
-  if (pendingClaimChanged(storedRecord, record)) {
-    await setRecord(context, subredditId, record);
-  }
-  if (record.status !== 'pending') {
-    throw new Error('Verification is no longer pending.');
-  }
-
-  const claimedByNormalized = normalizeUsernameForLookup(record.claimedBy ?? '');
-  const moderatorNormalized = normalizeUsernameForLookup(moderator);
-  let updatedRecord = record;
-  let changed = false;
-
-  if (shouldClaim) {
-    if (claimedByNormalized && claimedByNormalized !== moderatorNormalized) {
-      throw new Error(`This request is currently claimed by u/${record.claimedBy}.`);
+  return await withVerificationActionLock(context, subredditId, verificationId, async () => {
+    const storedRecord = await getRecord(context, subredditId, verificationId);
+    if (!storedRecord) {
+      throw new Error('Verification not found.');
     }
-    if (claimedByNormalized !== moderatorNormalized) {
+    let record = clearExpiredPendingClaim(storedRecord);
+    if (pendingClaimChanged(storedRecord, record)) {
+      await setRecord(context, subredditId, record);
+    }
+    if (record.status !== 'pending') {
+      throw new Error('Verification is no longer pending.');
+    }
+
+    const claimedByNormalized = normalizeUsernameForLookup(record.claimedBy ?? '');
+    const moderatorNormalized = normalizeUsernameForLookup(moderator);
+    let updatedRecord = record;
+    let changed = false;
+
+    if (shouldClaim) {
+      if (claimedByNormalized && claimedByNormalized !== moderatorNormalized) {
+        throw new Error(`This request is currently claimed by u/${record.claimedBy}.`);
+      }
+      if (claimedByNormalized !== moderatorNormalized) {
+        changed = true;
+        updatedRecord = {
+          ...record,
+          claimedBy: moderator,
+          claimedAt: new Date().toISOString(),
+        };
+      }
+    } else if (record.claimedBy || record.claimedAt) {
       changed = true;
       updatedRecord = {
         ...record,
-        claimedBy: moderator,
-        claimedAt: new Date().toISOString(),
+        claimedBy: null,
+        claimedAt: null,
       };
     }
-  } else if (record.claimedBy || record.claimedAt) {
-    changed = true;
-    updatedRecord = {
-      ...record,
-      claimedBy: null,
-      claimedAt: null,
-    };
-  }
 
-  if (changed) {
-    await setRecord(context, subredditId, updatedRecord);
-  }
+    if (changed) {
+      await setRecord(context, subredditId, updatedRecord);
+    }
 
-  const pendingCount = await context.redis.zCard(pendingIndexKey(subredditId));
-  const config = await getRuntimeConfig(context, subredditId);
-  return { item: toPendingPanelItem(updatedRecord, config), changed, pendingCount };
+    const pendingCount = await context.redis.zCard(pendingIndexKey(subredditId));
+    const config = await getRuntimeConfig(context, subredditId);
+    return { item: toPendingPanelItem(updatedRecord, config), changed, pendingCount };
+  });
 }

@@ -31,6 +31,8 @@ export const NON_APPROVED_VALIDATION_SCAN_MULTIPLIER = 4;
 
 export const STALE_RECORD_INDEX_SWEEP_BATCH_SIZE = 200;
 
+export const STORAGE_MAINTENANCE_COOLDOWN_MS = 30 * 60 * 1000;
+
 export const UPDATE_NOTICE_DISMISS_TTL_DAYS = 7;
 
 // Devvit requires moderator menu-form workflows to finish within 10 minutes.
