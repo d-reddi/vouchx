@@ -66,6 +66,9 @@ import {
   errorText,
   getCurrentSubredditNameCompat,
   looksLikeDeletedOrSuspendedError,
+  looksLikeRedditNameFormattingError,
+  looksLikeRedditPermissionOrRateLimitError,
+  looksLikeTransientRedditTransportError,
   maskUsernameForLog,
   normalizeUsername,
   normalizeUsernameForLookup,
@@ -517,36 +520,38 @@ export async function applyApprovalFlairWithFallbacks(
     return { applied: false, error: 'Configured flair template ID format is invalid.' };
   }
 
-  const attempts: Array<{ flairTemplateId: string }> = [{ flairTemplateId: configuredTemplateId }];
   const maxFallbackAttempts = 8;
+  const fallbackDeadlineMs = Date.now() + 4_000;
 
   let lastError: string | undefined;
   const errorLines: string[] = [];
   let fallbackAttempts = 0;
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
-      for (const attempt of attempts) {
-        if (fallbackAttempts >= maxFallbackAttempts) {
-          break;
-        }
-        fallbackAttempts += 1;
-        try {
-          await context.reddit.setUserFlair({
-            subredditName: subredditAttempt,
-            username: usernameAttempt,
-            flairTemplateId: attempt.flairTemplateId,
-          });
-          return { applied: true, appliedTemplateId: normalizeTemplateId(attempt.flairTemplateId) };
-        } catch (error) {
-          lastError = errorText(error);
-          errorLines.push(`${subredditAttempt}/${usernameAttempt}/template-only=${lastError}`);
-        }
-      }
-      if (fallbackAttempts >= maxFallbackAttempts) {
+      if (fallbackAttempts >= maxFallbackAttempts || Date.now() >= fallbackDeadlineMs) {
         break;
       }
+      fallbackAttempts += 1;
+      try {
+        await context.reddit.setUserFlair({
+          subredditName: subredditAttempt,
+          username: usernameAttempt,
+          flairTemplateId: configuredTemplateId,
+        });
+        return { applied: true, appliedTemplateId: configuredTemplateId };
+      } catch (error) {
+        lastError = errorText(error);
+        errorLines.push(`${subredditAttempt}/${usernameAttempt}/template-only=${lastError}`);
+        if (
+          looksLikeRedditPermissionOrRateLimitError(lastError) ||
+          looksLikeTransientRedditTransportError(lastError) ||
+          !looksLikeRedditNameFormattingError(lastError)
+        ) {
+          return { applied: false, error: lastError };
+        }
+      }
     }
-    if (fallbackAttempts >= maxFallbackAttempts) {
+    if (fallbackAttempts >= maxFallbackAttempts || Date.now() >= fallbackDeadlineMs) {
       break;
     }
   }
@@ -1274,6 +1279,7 @@ export async function removeApprovedVerificationByModerator(
       throw new Error('Removal reason is required.');
     }
 
+    const config = await getRuntimeConfig(context, subredditId);
     const flairRemoved = await removeUserFlairWithFallbacks(context, sanitizeSubredditName(record.subredditName), record.username);
     const flair: FlairStepResult = flairRemoved
       ? { status: 'success' }
@@ -1300,7 +1306,7 @@ export async function removeApprovedVerificationByModerator(
     await removeValidationTrackingForRecordIds(context, subredditId, [verificationId]);
 
     const [modmail, modNote] = await Promise.all([
-      sendModeratorRemovalModmail(context, subredditId, updatedRecord, normalizedReason),
+      sendModeratorRemovalModmail(context, subredditId, updatedRecord, normalizedReason, config),
       (async (): Promise<ModNoteStepResult> => {
         try {
           await addModeratorRemovalModNote(context, updatedRecord, moderator, normalizedReason);

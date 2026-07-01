@@ -250,10 +250,10 @@ export async function sendModeratorRemovalModmail(
   context: Devvit.Context,
   subredditId: string,
   record: VerificationRecord,
-  removalReason: string
+  removalReason: string,
+  config: RuntimeConfig
 ): Promise<ModmailStepResult> {
   const subredditName = sanitizeSubredditName(record.subredditName);
-  const config = await getRuntimeConfig(context, subredditId);
   const values = {
     username: record.username,
     mod: record.removedBy ?? record.moderator ?? '',
@@ -431,8 +431,6 @@ export async function sendUserModmailWithFallback(
     new Set(usernameLookupFields(username).map((field) => modmailThreadByUserEntryKey(subredditId, field)))
   );
   const recipients = Array.from(new Set([normalizedUser, `u/${normalizedUser}`]));
-  const maxSendAttempts = 3;
-  let sendAttempts = 0;
   let lockAcquired = false;
 
   if (lockKey) {
@@ -492,7 +490,6 @@ export async function sendUserModmailWithFallback(
         } catch {
           // Ignore if unarchive fails.
         }
-        sendAttempts += 1;
         const replyResponse = await context.reddit.modMail.reply({
           conversationId: existingConversationId,
           body,
@@ -526,10 +523,6 @@ export async function sendUserModmailWithFallback(
 
     let lastError: string | undefined;
     for (const to of recipients) {
-      if (sendAttempts >= maxSendAttempts) {
-        break;
-      }
-      sendAttempts += 1;
       try {
         const response = await context.reddit.modMail.createConversation({
           subredditName,

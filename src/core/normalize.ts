@@ -267,7 +267,37 @@ export function looksLikeTransientRedditTransportError(message: string): boolean
     normalized.includes('graceful shutdown') ||
     normalized.includes('call cancelled') ||
     /^1 cancelled\b/.test(normalized) ||
-    /\bfailed to get (?:429|5\d\d) response after \d+ attempts?\b/.test(normalized)
+    /\bfailed to get \d{3} response after \d+ attempts?\b/.test(normalized)
+  );
+}
+
+export function looksLikeRedditPermissionOrRateLimitError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    /\b(?:401|403|429)\b/.test(normalized) ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('permission denied') ||
+    normalized.includes('insufficient permission') ||
+    normalized.includes('not permitted') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('ratelimit')
+  );
+}
+
+export function looksLikeRedditNameFormattingError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    /\b(?:invalid|malformed|missing)\b[^\n]*(?:user(?:name)?|subreddit|community|recipient|field ['"]?(?:to|username|subreddit))/.test(
+      normalized
+    ) ||
+    /(?:user(?:name)?|subreddit|community|recipient|field ['"]?(?:to|username|subreddit))[^\n]*\b(?:invalid|malformed|missing)\b/.test(
+      normalized
+    )
   );
 }
 
