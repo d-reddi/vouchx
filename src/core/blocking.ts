@@ -61,14 +61,18 @@ export async function getStoredDenialCount(context: RedisContext, subredditId: s
   return 0;
 }
 
-export async function listBlockedUsers(context: Devvit.Context, subredditId: string): Promise<BlockedUserEntry[]> {
+export async function listBlockedUsers(
+  context: Devvit.Context,
+  subredditId: string,
+  config?: RuntimeConfig
+): Promise<BlockedUserEntry[]> {
   const blockedMap = await context.redis.hGetAll(blockedUsersKey(subredditId));
-  const config = await getRuntimeConfig(context, subredditId);
+  const resolvedConfig = config ?? (await getRuntimeConfig(context, subredditId));
   const blockedUsers: BlockedUserEntry[] = [];
   const staleUsers: string[] = [];
 
   for (const [normalizedUsername, payload] of Object.entries(blockedMap)) {
-    const parsed = parseBlockedUserEntry(normalizedUsername, payload, config.maxDenialsBeforeBlock);
+    const parsed = parseBlockedUserEntry(normalizedUsername, payload, resolvedConfig.maxDenialsBeforeBlock);
     if (!parsed) {
       staleUsers.push(normalizedUsername);
       continue;
@@ -92,9 +96,10 @@ export async function listBlockedUsers(context: Devvit.Context, subredditId: str
 export async function getBlockedUser(
   context: Devvit.Context,
   subredditId: string,
-  username: string
+  username: string,
+  config?: RuntimeConfig
 ): Promise<BlockedUserEntry | null> {
-  const config = await getRuntimeConfig(context, subredditId);
+  const resolvedConfig = config ?? (await getRuntimeConfig(context, subredditId));
   const normalizedUsername = normalizeUsername(username);
   const key = blockedUsersKey(subredditId);
   const lookupFields = usernameLookupFields(username);
@@ -111,7 +116,7 @@ export async function getBlockedUser(
   if (!payload) {
     return null;
   }
-  const parsed = parseBlockedUserEntry(matchedField || normalizedUsername, payload, config.maxDenialsBeforeBlock);
+  const parsed = parseBlockedUserEntry(matchedField || normalizedUsername, payload, resolvedConfig.maxDenialsBeforeBlock);
   if (!parsed) {
     if (lookupFields.length > 0) {
       await context.redis.hDel(key, lookupFields);
@@ -128,8 +133,13 @@ export async function getBlockedUser(
   return parsed;
 }
 
-export async function isUserBlocked(context: Devvit.Context, subredditId: string, username: string): Promise<boolean> {
-  return (await getBlockedUser(context, subredditId, username)) !== null;
+export async function isUserBlocked(
+  context: Devvit.Context,
+  subredditId: string,
+  username: string,
+  config?: RuntimeConfig
+): Promise<boolean> {
+  return (await getBlockedUser(context, subredditId, username, config)) !== null;
 }
 
 export async function repairMissingAutoBlockForUser(
@@ -138,7 +148,7 @@ export async function repairMissingAutoBlockForUser(
   username: string,
   config: RuntimeConfig
 ): Promise<BlockedUserEntry | null> {
-  const existingBlocked = await getBlockedUser(context, subredditId, username);
+  const existingBlocked = await getBlockedUser(context, subredditId, username, config);
   if (existingBlocked) {
     return existingBlocked;
   }
@@ -170,10 +180,39 @@ export async function repairMissingAutoBlockForUser(
 
 export async function incrementDenialCount(context: Devvit.Context, subredditId: string, username: string): Promise<number> {
   const key = denialCountKey(subredditId);
-  const normalizedUsername = normalizeUsername(username);
-  const next = (await getStoredDenialCount(context, subredditId, normalizedUsername)) + 1;
-  await context.redis.hSet(key, { [normalizedUsername]: `${next}` });
-  return next;
+  const lookupFields = usernameLookupFields(username);
+  const primaryField = primaryUsernameLookupField(username);
+  if (!primaryField || lookupFields.length === 0) {
+    return 0;
+  }
+
+  let primaryRaw: string | undefined;
+  let legacyCount = 0;
+  for (const field of lookupFields) {
+    const currentRaw = await context.redis.hGet(key, field);
+    if (field === primaryField) {
+      primaryRaw = currentRaw ?? undefined;
+    }
+    const current = Number.parseInt(currentRaw ?? '0', 10);
+    if (Number.isFinite(current) && current > 0) {
+      if (field === primaryField) {
+        return await context.redis.hIncrBy(key, primaryField, 1);
+      }
+      legacyCount = current;
+      break;
+    }
+  }
+
+  if (legacyCount > 0) {
+    if (primaryRaw === undefined) {
+      await context.redis.hSetNX(key, primaryField, `${legacyCount}`);
+    } else {
+      // Preserve recovery from a corrupt/zero primary field while migrating a
+      // valid legacy alias. This is a one-time compatibility path.
+      await context.redis.hSet(key, { [primaryField]: `${legacyCount}` });
+    }
+  }
+  return await context.redis.hIncrBy(key, primaryField, 1);
 }
 
 export async function setBlockedUser(context: Devvit.Context, subredditId: string, entry: BlockedUserEntry): Promise<void> {

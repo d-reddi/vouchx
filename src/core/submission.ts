@@ -352,12 +352,19 @@ export function normalizeSubredditKarmaValue(value: unknown): number | null {
   return (commentKarma ?? 0) + (postKarma ?? 0);
 }
 
-export async function withSingleRetry<T>(label: string, fallbackValue: T, fn: () => Promise<T>): Promise<T> {
+export async function withSingleRetry<T>(
+  label: string,
+  fallbackValue: T,
+  fn: () => Promise<T>,
+  shouldRetry: (error: unknown) => boolean = () => true
+): Promise<T> {
   try {
     return await fn();
   } catch (error) {
-    if (!looksLikeTransientRedditTransportError(errorText(error))) {
-      console.log(`${label} failed on first attempt: ${errorText(error)}`);
+    const message = errorText(error);
+    if (!shouldRetry(error)) {
+      console.log(`${label} failed without retry: ${message}`);
+      return fallbackValue;
     }
   }
 
@@ -507,13 +514,15 @@ export async function collectPendingAccountDetailsSnapshot(
         isContentCreator: creatorDetection.isContentCreator,
         creatorLinkTypes: creatorDetection.creatorLinkTypes,
       };
-    }
+    },
+    (error) => looksLikeTransientRedditTransportError(errorText(error))
   );
 
   const banStatusTask = withSingleRetry(
     `Pending account details ban lookup failed for r/${sanitizedSubreddit} u/${maskUsernameForLog(username)}`,
     'unknown' as const,
-    async () => await lookupCurrentSubredditBanStatus(context, sanitizedSubreddit, username)
+    async () => await lookupCurrentSubredditBanStatus(context, sanitizedSubreddit, username),
+    (error) => looksLikeTransientRedditTransportError(errorText(error))
   );
 
   const lastDenialTask = withSingleRetry(

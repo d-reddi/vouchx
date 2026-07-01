@@ -729,6 +729,9 @@ function createFlairSettingsSaveContext(options?: {
   const configKey = 'subreddit:t5_example:config';
   const storedConfig = options?.storedConfig ?? {};
   let flairTemplateFetchCount = 0;
+  let settingsGetAllCount = 0;
+  let settingsGetCount = 0;
+  let configReadCount = 0;
   hashStore.set(configKey, new Map(Object.entries(storedConfig)));
 
   const ensureHash = (key: string) => {
@@ -745,7 +748,20 @@ function createFlairSettingsSaveContext(options?: {
     context: {
       subredditId: 't5_example',
       settings: {
+        async getAll() {
+          settingsGetAllCount += 1;
+          return {
+            auto_flair_reconcile_enabled: true,
+            show_photo_instructions_before_submit: true,
+            max_denials_before_block: 3,
+            multiple_approval_flairs_enabled: options?.multipleApprovalFlairsEnabled ?? false,
+            user_advisory_score_badge_enabled: options?.userAdvisoryScoreBadgeEnabled,
+            content_creator_badge_enabled: options?.contentCreatorBadgeEnabled,
+            verifications_disabled_message: 'Disabled',
+          };
+        },
         async get(key: string) {
+          settingsGetCount += 1;
           if (key === 'settings_tab_requires_config_access') {
             return options?.settingsTabRequiresConfigAccess ?? false;
           }
@@ -806,6 +822,7 @@ function createFlairSettingsSaveContext(options?: {
       },
       redis: {
         async hGetAll(key: string) {
+          configReadCount += 1;
           return Object.fromEntries(ensureHash(key).entries());
         },
         async hSet(key: string, entries: Record<string, string>) {
@@ -823,6 +840,15 @@ function createFlairSettingsSaveContext(options?: {
     configKey,
     get flairTemplateFetchCount() {
       return flairTemplateFetchCount;
+    },
+    get settingsGetAllCount() {
+      return settingsGetAllCount;
+    },
+    get settingsGetCount() {
+      return settingsGetCount;
+    },
+    get configReadCount() {
+      return configReadCount;
     },
   };
 }
@@ -997,6 +1023,7 @@ function createHubDashboardContext(options?: {
   const zsetStore = new Map<string, Map<string, number>>();
   const setCalls: Array<[string, string, unknown?]> = [];
   const strLenCalls: string[] = [];
+  const zRangeCalls: string[] = [];
   let currentUserCallCount = 0;
   let currentUsernameCallCount = 0;
 
@@ -1095,6 +1122,9 @@ function createHubDashboardContext(options?: {
         },
       },
       settings: {
+        async getAll() {
+          return { ...(options?.settingsValues ?? {}) };
+        },
         async get(key: string) {
           return options?.settingsValues?.[key];
         },
@@ -1108,6 +1138,9 @@ function createHubDashboardContext(options?: {
         },
         async set(key: string, value: string, setOptions?: unknown) {
           setCalls.push([key, value, setOptions]);
+          if ((setOptions as { nx?: boolean } | undefined)?.nx && redisStore.has(key)) {
+            return null;
+          }
           redisStore.set(key, value);
           return 'OK';
         },
@@ -1155,6 +1188,7 @@ function createHubDashboardContext(options?: {
           stop: number,
           options?: { by?: 'score' | 'rank'; reverse?: boolean }
         ) {
+          zRangeCalls.push(key);
           const zset = ensureTestZSet(zsetStore, key);
           let entries = Array.from(zset.entries()).map(([member, score]) => ({ member, score }));
           if (options?.by === 'score') {
@@ -1195,6 +1229,7 @@ function createHubDashboardContext(options?: {
     zsetStore,
     setCalls,
     strLenCalls,
+    zRangeCalls,
     get currentUserCallCount() {
       return currentUserCallCount;
     },
@@ -1578,6 +1613,7 @@ function createReviewActionContext(options?: {
   const archiveCalls: string[] = [];
   const replyCalls: Array<Record<string, unknown>> = [];
   const unbanUserCalls: Array<{ username: string; subredditName: string }> = [];
+  const hIncrByCalls: Array<{ key: string; field: string; increment: number }> = [];
   const validationResponses = options?.validationResponses ?? [{ username: normalizedUsername, id: 't2_target' }];
   const bannedResponses = options?.bannedResponses ?? [[]];
   const unbanResponses = options?.unbanResponses ?? [true];
@@ -1604,6 +1640,7 @@ function createReviewActionContext(options?: {
   let createConversationResponseIndex = 0;
   let archiveConversationResponseIndex = 0;
   let getConversationResponseIndex = 0;
+  let settingsGetAllCount = 0;
 
   const ensureHash = (key: string) => {
     let hash = hashStore.get(key);
@@ -1766,6 +1803,13 @@ function createReviewActionContext(options?: {
         },
       },
       settings: {
+        async getAll() {
+          settingsGetAllCount += 1;
+          return {
+            max_denials_before_block: options?.maxDenialsBeforeBlock,
+            multiple_approval_flairs_enabled: options?.multipleApprovalFlairsEnabled,
+          };
+        },
         async get(key: string) {
           if (key === 'max_denials_before_block') {
             return options?.maxDenialsBeforeBlock;
@@ -1855,6 +1899,21 @@ function createReviewActionContext(options?: {
           }
           return Object.keys(entries).length;
         },
+        async hSetNX(key: string, field: string, value: string) {
+          const hash = ensureHash(key);
+          if (hash.has(field)) {
+            return 0;
+          }
+          hash.set(field, value);
+          return 1;
+        },
+        async hIncrBy(key: string, field: string, increment: number) {
+          hIncrByCalls.push({ key, field, increment });
+          const hash = ensureHash(key);
+          const next = Number.parseInt(hash.get(field) ?? '0', 10) + increment;
+          hash.set(field, `${next}`);
+          return next;
+        },
         async hDel(key: string, fields: string[]) {
           const hash = ensureHash(key);
           let removed = 0;
@@ -1876,12 +1935,16 @@ function createReviewActionContext(options?: {
     archiveCalls,
     replyCalls,
     unbanUserCalls,
+    hIncrByCalls,
     redisStore,
     hashStore,
     zsetStore,
     getParsedRecord(recordId = record.id) {
       const payload = redisStore.get(verificationRecordTestKey(subredditId, recordId));
       return payload ? parseRecord(payload) : null;
+    },
+    get settingsGetAllCount() {
+      return settingsGetAllCount;
     },
   };
 }
@@ -2322,6 +2385,25 @@ test('getRuntimeConfig reads translated photo instructions from stored settings'
   assert.equal(runtimeConfig.photoInstructionsFr, 'Suivez les instructions.');
   assert.equal(runtimeConfig.photoInstructionsPtBr, 'Siga as instruções.');
   assert.equal(runtimeConfig.photoInstructionsDefaultLanguage, 'pt-br');
+});
+
+test('getRuntimeConfig uses one settings snapshot and one memoized load per request context', async () => {
+  const saveContext = createFlairSettingsSaveContext({
+    multipleApprovalFlairsEnabled: true,
+    userAdvisoryScoreBadgeEnabled: false,
+  });
+
+  const [first, second] = await Promise.all([
+    getRuntimeConfig(saveContext.context as never, 't5_example'),
+    getRuntimeConfig(saveContext.context as never, 'T5_EXAMPLE'),
+  ]);
+
+  assert.strictEqual(first, second);
+  assert.equal(first.multipleApprovalFlairsEnabled, true);
+  assert.equal(first.userAdvisoryScoreBadgeEnabled, false);
+  assert.equal(saveContext.settingsGetAllCount, 1);
+  assert.equal(saveContext.settingsGetCount, 0);
+  assert.equal(saveContext.configReadCount, 1);
 });
 
 test('getRuntimeConfig defaults translated photo instructions to empty strings and english default language when unset', async () => {
@@ -3025,6 +3107,28 @@ test('loadModDashboard reuses fresh high-water calibration without resampling', 
   });
 });
 
+test('loadModDashboard cooldown-gates storage maintenance across repeated refreshes', async () => {
+  const modContext = createHubDashboardContext({
+    userId: 't2_mod',
+    currentUsername: 'mod_one',
+    currentUserResponses: [{ username: 'mod_one', id: 't2_mod' }],
+    permissions: ['access'],
+    hashValues: { flair_template_id: '' },
+  });
+
+  await loadModDashboard(modContext.context as never);
+  const firstMaintenanceScanCount = modContext.zRangeCalls.filter(
+    (key) => key === historyDateIndexTestKey('t5_example')
+  ).length;
+  await loadModDashboard(modContext.context as never);
+
+  assert.equal(
+    modContext.zRangeCalls.filter((key) => key === historyDateIndexTestKey('t5_example')).length,
+    firstMaintenanceScanCount
+  );
+  assert.ok(firstMaintenanceScanCount > 0);
+});
+
 test('loadModDashboard prioritizes peer-reviewed records by oldest request time', async () => {
   const modContext = createHubDashboardContext({
     userId: 't2_mod',
@@ -3191,6 +3295,9 @@ test('submitVerification rejects globally blocked usernames', async () => {
           },
         },
         settings: {
+          async getAll() {
+            return {};
+          },
           async get(key: string) {
             if (key === GLOBAL_BLOCKED_USERNAME_CHUNK_COUNT_SETTING_NAME) {
               return '1';
@@ -3385,11 +3492,11 @@ test('toModPanelState omits content creator badge fields from pending items when
 test('collectPendingAccountDetailsSnapshot retries transient lookup failures and stores pending snapshot values', async () => {
   const snapshotContext = createPendingAccountDetailsContext({
     userResponses: [
-      new Error('temporary user lookup failure'),
+      new Error('HTTP request failed with HTTP status 503'),
       { createdAt: new Date('2026-03-01T12:00:00.000Z'), commentKarma: 100, linkKarma: 50 },
     ],
     karmaResponses: [{ fromComments: 4, fromPosts: 5 }],
-    bannedResponses: [new Error('temporary ban lookup failure'), []],
+    bannedResponses: [new Error('upstream request missing or timed out'), []],
     denialCount: '2',
   });
   const originalConsoleLog = console.log;
@@ -3445,8 +3552,8 @@ test('collectPendingAccountDetailsSnapshot stores banned status when the user is
 
 test('collectPendingAccountDetailsSnapshot falls back to partial values after retry exhaustion', async () => {
   const snapshotContext = createPendingAccountDetailsContext({
-    userResponses: [new Error('lookup failure'), new Error('lookup failure')],
-    bannedResponses: [new Error('ban failure'), new Error('ban failure')],
+    userResponses: [new Error('HTTP request failed with HTTP status 503'), new Error('HTTP request failed with HTTP status 503')],
+    bannedResponses: [new Error('upstream request missing or timed out'), new Error('upstream request missing or timed out')],
     denialCount: '3',
   });
   const originalConsoleLog = console.log;
@@ -3468,6 +3575,32 @@ test('collectPendingAccountDetailsSnapshot falls back to partial values after re
     assert.equal(snapshot.previousDeniedAttempts, 3);
     assert.equal(snapshotContext.userCallCount, 2);
     assert.equal(snapshotContext.bannedCallCount, 2);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+});
+
+test('collectPendingAccountDetailsSnapshot does not retry permanent Reddit API failures', async () => {
+  const snapshotContext = createPendingAccountDetailsContext({
+    userResponses: [new Error('HTTP 403 Forbidden'), { createdAt: new Date('2026-03-01T12:00:00.000Z') }],
+    bannedResponses: [new Error('HTTP 404 Not Found'), []],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const snapshot = await collectPendingAccountDetailsSnapshot(
+      snapshotContext.context as never,
+      't5_example',
+      'example',
+      'example_user',
+      '2026-03-11T12:00:00.000Z'
+    );
+
+    assert.equal(snapshot.accountCreatedAt, null);
+    assert.equal(snapshot.banStatus, 'unknown');
+    assert.equal(snapshotContext.userCallCount, 1);
+    assert.equal(snapshotContext.bannedCallCount, 1);
   } finally {
     console.log = originalConsoleLog;
   }
@@ -5178,6 +5311,30 @@ test('sendUserModmailWithFallback retries createConversation with u-prefixed rec
   }
 });
 
+test('sendUserModmailWithFallback caps reply and recipient fallback sends at three attempts', async () => {
+  const threadKey = modmailThreadKey('t5_example', 'Example_User');
+  const modmailContext = createModmailContext({
+    initialRedis: { [threadKey]: '39to20' },
+    replyError: new Error('proto: invalid value for int64 field value: ""'),
+    createConversationResponses: [
+      new Error('HTTP 400 Bad Request: invalid recipient variant'),
+      new Error('HTTP 400 Bad Request: invalid recipient variant'),
+    ],
+  });
+
+  const result = await sendUserModmailWithFallback(modmailContext.context as never, {
+    subredditId: 't5_example',
+    subredditName: 'ExampleSub',
+    subject: 'Approved',
+    body: 'Body',
+    username: 'Example_User',
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(modmailContext.replyCalls.length, 1);
+  assert.equal(modmailContext.createConversationCalls.length, 2);
+});
+
 test('archivePendingVerificationModmailReply archives participant replies while the verification is pending', async () => {
   const reviewContext = createReviewActionContext({
     initialRedis: {
@@ -5653,6 +5810,7 @@ test('approveVerification keeps valid approvals working', async () => {
 
   assert.equal(result.outcome, 'completed');
   assert.equal(result.applied, true);
+  assert.equal(reviewContext.settingsGetAllCount, 1);
   assert.deepEqual(
     {
       flair: result.flair.status,
@@ -5678,6 +5836,28 @@ test('approveVerification keeps valid approvals working', async () => {
     reviewContext.redisStore.get(userLatestTestKey(reviewContext.subredditId, reviewContext.record.username)),
     reviewContext.record.id
   );
+});
+
+test('approveVerification caps legacy flair fallback attempts', async () => {
+  const reviewContext = createReviewActionContext({
+    recordOverrides: {
+      username: 'https://www.reddit.com/user/Example_User/about/',
+      subredditName: 'r/ExampleSub',
+    },
+    setUserFlairResponses: [new Error('HTTP 400 Bad Request: invalid flair target')],
+  });
+  const originalConsoleLog = console.log;
+  console.log = () => {};
+
+  try {
+    const result = await approveVerification(reviewContext.context as never, reviewContext.record.id);
+
+    assert.equal(result.applied, false);
+    assert.equal(result.flair.status, 'failed');
+    assert.equal(reviewContext.setUserFlairCalls.length, 8);
+  } finally {
+    console.log = originalConsoleLog;
+  }
 });
 
 test('approveVerification applies the selected additional approval flair when multi-flair is enabled', async () => {
@@ -5836,6 +6016,28 @@ test('denyVerification keeps valid denials working and exposes the denied userna
   assert.equal(reviewContext.addModNoteCalls.length, 1);
   assert.equal(reviewContext.createConversationCalls.length, 1);
   assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '1');
+  assert.deepEqual(reviewContext.hIncrByCalls, [
+    { key: denialCountTestKey(reviewContext.subredditId), field: 'example_user', increment: 1 },
+  ]);
+});
+
+test('denyVerification migrates a legacy denial-count field before atomically incrementing the canonical field', async () => {
+  const reviewContext = createReviewActionContext({
+    maxDenialsBeforeBlock: 10,
+    initialHashes: {
+      [denialCountTestKey('t5_example')]: {
+        '/user/example_user/': '2',
+      },
+    },
+  });
+
+  const result = await denyVerification(reviewContext.context as never, reviewContext.record.id, 'reason_1', 'Denied');
+
+  assert.equal(result.denialCount, 3);
+  assert.equal(reviewContext.hashStore.get(denialCountTestKey(reviewContext.subredditId))?.get('example_user'), '3');
+  assert.deepEqual(reviewContext.hIncrByCalls, [
+    { key: denialCountTestKey(reviewContext.subredditId), field: 'example_user', increment: 1 },
+  ]);
 });
 
 test('approval and denial templates render caps and today placeholders like photo instructions', async () => {

@@ -137,6 +137,10 @@ export function storageCalibrationKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:storage:calibration`;
 }
 
+export function storageMaintenanceCooldownKey(subredditId: string): string {
+  return `${subredditScopePrefix(subredditId)}:storage:maintenance-cooldown`;
+}
+
 export function modmailThreadByUserKey(subredditId: string): string {
   return `${subredditScopePrefix(subredditId)}:modmail:thread-by-user`;
 }

@@ -12,6 +12,7 @@ import {
   HISTORY_RETENTION_DAYS,
   MILLIS_PER_DAY,
   STALE_RECORD_INDEX_SWEEP_BATCH_SIZE,
+  STORAGE_MAINTENANCE_COOLDOWN_MS,
   STORAGE_METER_CAP_BYTES,
   LEGACY_VERIFIED_RECORD_RETENTION_DAYS,
   VERIFIED_RECORD_RETENTION_DAYS,
@@ -30,6 +31,7 @@ import {
   pendingIndexKey,
   staleRecordIndexSweepCursorKey,
   storageCalibrationKey,
+  storageMaintenanceCooldownKey,
   subredditConfigKey,
   userLatestKey,
   userLatestKeyById,
@@ -444,8 +446,20 @@ export async function estimateSubredditStorageUsage(
   context: Devvit.Context,
   subredditId: string
 ): Promise<StorageUsage> {
-  await sweepStaleRecordIndexEntries(context, subredditId);
-  await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
+  let shouldRunMaintenance = true;
+  try {
+    shouldRunMaintenance =
+      (await context.redis.set(storageMaintenanceCooldownKey(subredditId), '1', {
+        nx: true,
+        expiration: new Date(Date.now() + STORAGE_MAINTENANCE_COOLDOWN_MS),
+      })) === 'OK';
+  } catch {
+    // Preserve the previous best-effort behavior if the cooldown claim itself fails.
+  }
+  if (shouldRunMaintenance) {
+    await sweepStaleRecordIndexEntries(context, subredditId);
+    await purgeAuditLogOlderThanDays(context, subredditId, AUDIT_RETENTION_DAYS);
+  }
   const recordCount = await context.redis.zCard(historyDateIndexKey(subredditId));
   const pendingCount = await context.redis.zCard(pendingIndexKey(subredditId));
   const approvedCount = await context.redis.zCard(approvedIndexKey(subredditId));

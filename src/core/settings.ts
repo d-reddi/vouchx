@@ -75,25 +75,25 @@ export function normalizeDenyReasonLabel(value: string | undefined | null): stri
   return normalized.slice(0, MAX_DENY_REASON_LABEL_LENGTH);
 }
 
-export async function getConfiguredDenyReasons(
-  context: Pick<Devvit.Context, 'settings'>,
+type InstallSettingsSnapshot = Record<string, string | number | boolean | undefined>;
+
+export function getConfiguredDenyReasons(
+  settingsSnapshot: InstallSettingsSnapshot,
   stored: Record<string, string>
-): Promise<DenyReasonConfig[]> {
-  return await Promise.all(
-    DENY_REASON_INSTALL_SETTINGS.map(async (setting) => {
-      const rawLabel = await context.settings.get<string>(setting.labelSettingName);
-      const label = normalizeDenyReasonLabel(
-        rawLabel === undefined || rawLabel === null ? setting.defaultLabel : String(rawLabel)
-      );
-      const templateSource = firstNonEmpty(stored[setting.templateConfigFieldName]) ?? setting.defaultTemplate;
-      return {
-        id: setting.id,
-        label,
-        template: templateSource.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE,
-        enabled: label.length > 0,
-      };
-    })
-  );
+): DenyReasonConfig[] {
+  return DENY_REASON_INSTALL_SETTINGS.map((setting) => {
+    const rawLabel = settingsSnapshot[setting.labelSettingName];
+    const label = normalizeDenyReasonLabel(
+      rawLabel === undefined || rawLabel === null ? setting.defaultLabel : String(rawLabel)
+    );
+    const templateSource = firstNonEmpty(stored[setting.templateConfigFieldName]) ?? setting.defaultTemplate;
+    return {
+      id: setting.id,
+      label,
+      template: templateSource.trim() || DEFAULT_GENERIC_DENY_REASON_TEMPLATE,
+      enabled: label.length > 0,
+    };
+  });
 }
 
 export function getConfiguredDenyReason(
@@ -348,27 +348,60 @@ export async function onSaveThemeValues(values: ThemeSettingsValues, context: De
   });
 }
 
+const runtimeConfigRequestMemoSymbol = Symbol('vouchx.runtimeConfigRequestMemo');
+
+function getRuntimeConfigRequestMemo(context: Devvit.Context): Map<string, Promise<RuntimeConfig>> {
+  const memoOwner = context as Devvit.Context & {
+    [runtimeConfigRequestMemoSymbol]?: Map<string, Promise<RuntimeConfig>>;
+  };
+  if (!memoOwner[runtimeConfigRequestMemoSymbol]) {
+    memoOwner[runtimeConfigRequestMemoSymbol] = new Map<string, Promise<RuntimeConfig>>();
+  }
+  return memoOwner[runtimeConfigRequestMemoSymbol]!;
+}
+
 export async function getRuntimeConfig(context: Devvit.Context, subredditId: string): Promise<RuntimeConfig> {
+  const normalizedSubredditId = sanitizeSubredditId(subredditId);
+  const memo = getRuntimeConfigRequestMemo(context);
+  const existing = memo.get(normalizedSubredditId);
+  if (existing) {
+    return await existing;
+  }
+
+  const loadPromise = loadRuntimeConfig(context, normalizedSubredditId);
+  memo.set(normalizedSubredditId, loadPromise);
+  try {
+    return await loadPromise;
+  } catch (error) {
+    memo.delete(normalizedSubredditId);
+    throw error;
+  }
+}
+
+async function loadRuntimeConfig(context: Devvit.Context, subredditId: string): Promise<RuntimeConfig> {
   const key = subredditConfigKey(subredditId);
-  const stored = await context.redis.hGetAll(key);
-  const rawVerificationsDisabledMessage = await context.settings.get<string>(INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE);
-  const rawAutoFlairReconcileEnabled = await context.settings.get<boolean | string>(
-    INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED
-  );
-  const rawAutoDenyShadowbannedEnabled = await context.settings.get<boolean | string>(
-    INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED
-  );
-  const rawMultipleApprovalFlairsEnabled = await context.settings.get<boolean | string>(
-    INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED
-  );
-  const rawUserAdvisoryScoreBadgeEnabled = await context.settings.get<boolean | string>(
-    INSTALL_SETTING_USER_ADVISORY_SCORE_BADGE_ENABLED
-  );
-  const rawContentCreatorBadgeEnabled = await context.settings.get<boolean | string>(
-    INSTALL_SETTING_CONTENT_CREATOR_BADGE_ENABLED
-  );
-  const rawMaxDenialsBeforeBlock = await context.settings.get<number | string>(INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK);
-  const rawShowPhotoInstructionsBeforeSubmit = await context.settings.get<boolean | string>(
+  const [stored, settingsSnapshot] = await Promise.all([
+    context.redis.hGetAll(key),
+    context.settings.getAll<InstallSettingsSnapshot>(),
+  ]);
+  const stringOrBooleanSetting = (name: string): string | boolean | undefined => {
+    const value = settingsSnapshot[name];
+    return typeof value === 'string' || typeof value === 'boolean' ? value : undefined;
+  };
+  const rawVerificationsDisabledMessageValue = settingsSnapshot[INSTALL_SETTING_VERIFICATIONS_DISABLED_MESSAGE];
+  const rawVerificationsDisabledMessage =
+    typeof rawVerificationsDisabledMessageValue === 'string' ? rawVerificationsDisabledMessageValue : undefined;
+  const rawAutoFlairReconcileEnabled = stringOrBooleanSetting(INSTALL_SETTING_AUTO_FLAIR_RECONCILE_ENABLED);
+  const rawAutoDenyShadowbannedEnabled = stringOrBooleanSetting(INSTALL_SETTING_AUTO_DENY_SHADOWBANNED_ENABLED);
+  const rawMultipleApprovalFlairsEnabled = stringOrBooleanSetting(INSTALL_SETTING_MULTIPLE_APPROVAL_FLAIRS_ENABLED);
+  const rawUserAdvisoryScoreBadgeEnabled = stringOrBooleanSetting(INSTALL_SETTING_USER_ADVISORY_SCORE_BADGE_ENABLED);
+  const rawContentCreatorBadgeEnabled = stringOrBooleanSetting(INSTALL_SETTING_CONTENT_CREATOR_BADGE_ENABLED);
+  const rawMaxDenialsBeforeBlockValue = settingsSnapshot[INSTALL_SETTING_MAX_DENIALS_BEFORE_BLOCK];
+  const rawMaxDenialsBeforeBlock =
+    typeof rawMaxDenialsBeforeBlockValue === 'string' || typeof rawMaxDenialsBeforeBlockValue === 'number'
+      ? rawMaxDenialsBeforeBlockValue
+      : undefined;
+  const rawShowPhotoInstructionsBeforeSubmit = stringOrBooleanSetting(
     INSTALL_SETTING_SHOW_PHOTO_INSTRUCTIONS_BEFORE_SUBMIT
   );
   const verificationsDisabledMessage = normalizeInstallSettingMessage(
@@ -420,7 +453,7 @@ export async function getRuntimeConfig(context: Devvit.Context, subredditId: str
   const flairTemplateCacheText = (stored[CONFIG_FIELD.flairTemplateCacheText] ?? '').trim();
   const flairTemplateCacheCheckedAt = parseNonNegativeInt(stored[CONFIG_FIELD.flairTemplateCacheCheckedAt], 0) ?? 0;
   const useCustomColors = parseBooleanString(stored[CONFIG_FIELD.useCustomColors], false);
-  const denyReasons = await getConfiguredDenyReasons(context, stored);
+  const denyReasons = getConfiguredDenyReasons(settingsSnapshot, stored);
   const additionalApprovalFlairs = parseAdditionalApprovalFlairs(stored[CONFIG_FIELD.additionalApprovalFlairs]);
 
   return {

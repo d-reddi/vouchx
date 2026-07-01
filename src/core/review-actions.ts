@@ -400,7 +400,7 @@ export async function approveVerification(
     await pruneHistoryOlderThanDays(context, subredditId, HISTORY_RETENTION_DAYS);
 
     const [modmail, modNote] = await Promise.all([
-      sendApprovalModmail(context, subredditId, validationScheduledRecord),
+      sendApprovalModmail(context, subredditId, validationScheduledRecord, config),
       (async (): Promise<ModNoteStepResult> => {
         try {
           await addApprovalModNote(context, validationScheduledRecord, moderator);
@@ -518,12 +518,18 @@ export async function applyApprovalFlairWithFallbacks(
   }
 
   const attempts: Array<{ flairTemplateId: string }> = [{ flairTemplateId: configuredTemplateId }];
+  const maxFallbackAttempts = 8;
 
   let lastError: string | undefined;
   const errorLines: string[] = [];
+  let fallbackAttempts = 0;
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
       for (const attempt of attempts) {
+        if (fallbackAttempts >= maxFallbackAttempts) {
+          break;
+        }
+        fallbackAttempts += 1;
         try {
           await context.reddit.setUserFlair({
             subredditName: subredditAttempt,
@@ -536,6 +542,12 @@ export async function applyApprovalFlairWithFallbacks(
           errorLines.push(`${subredditAttempt}/${usernameAttempt}/template-only=${lastError}`);
         }
       }
+      if (fallbackAttempts >= maxFallbackAttempts) {
+        break;
+      }
+    }
+    if (fallbackAttempts >= maxFallbackAttempts) {
+      break;
     }
   }
 
@@ -706,7 +718,7 @@ export async function finalizeDeniedVerification(
       reason: `Reached ${denialCount} denials`,
       scope: 'subreddit',
     };
-    const wasAlreadyBlocked = await isUserBlocked(context, subredditId, reviewedRecord.username);
+    const wasAlreadyBlocked = await isUserBlocked(context, subredditId, reviewedRecord.username, config);
     await setBlockedUser(context, subredditId, blockedEntry);
     userBlocked = true;
     if (!wasAlreadyBlocked) {

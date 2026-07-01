@@ -510,9 +510,15 @@ export async function removeUserFlairWithFallbacks(
   ).filter((value) => value.trim());
   const errors: string[] = [];
   const verificationUsername = strictUsername || normalizedUsername || rawUsernameNoPrefix;
+  const maxFallbackAttempts = 8;
+  let fallbackAttempts = 0;
 
   for (const subredditAttempt of subredditAttempts) {
     for (const usernameAttempt of usernameAttempts) {
+      if (fallbackAttempts >= maxFallbackAttempts) {
+        break;
+      }
+      fallbackAttempts += 1;
       try {
         await context.reddit.removeUserFlair(subredditAttempt, usernameAttempt);
         if (await isUserFlairCleared(context, subredditAttempt, verificationUsername)) {
@@ -543,6 +549,9 @@ export async function removeUserFlairWithFallbacks(
           }
         }
       }
+    }
+    if (fallbackAttempts >= maxFallbackAttempts) {
+      break;
     }
   }
 
