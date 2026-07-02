@@ -3,6 +3,17 @@ import { exitExpandedMode, getWebViewMode, navigateTo } from '@devvit/web/client
 import { BUG_REPORT_URL, FORCE_APP_DATA_USAGE_WARNING_VISIBLE, MODERATOR_GUIDE_URL, MODERATOR_QUICK_START_URL } from './app-config.js';
 import brandVxUrl from './brand-vx.png';
 import { createImageLightbox } from './image-lightbox.js';
+import {
+  canStartQueuedRefresh,
+  createViewStaleness,
+  isMatchingRequestGeneration,
+  isViewStale,
+  markViewFresh,
+  markViewsStale,
+  queuedRefreshAfterMutationResponse,
+  removePendingItemsById,
+  shouldFetchCachedView,
+} from './moderator-cache-state.js';
 import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-state.js';
 
 (function () {
@@ -500,6 +511,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   let historySearchSignature = '';
   let approvedSearchSignature = '';
   let auditSearchSignature = '';
+  const searchViewStaleness = createViewStaleness(['records', 'approved', 'audit']);
   let statsRequestId = 0;
   let selectedAuditActionFilter = 'all';
   let realtimeChannel = '';
@@ -508,6 +520,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   let realtimeReconnectTimerId = 0;
   let realtimeRefreshInFlight = false;
   let realtimeRefreshQueued = false;
+  let mutationRequestsInFlight = 0;
   let flairTemplateValidationOverride = null;
   let approvalFlairOptions = [];
   let approvalFlairOptionsLoaded = false;
@@ -1321,10 +1334,18 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   function applyApiState(payload) {
     const refreshRequested = payload && payload.refreshRequested === true;
     syncRealtimeSubscription(payload && typeof payload.realtimeChannel === 'string' ? payload.realtimeChannel : '');
+    if (mutationRequestsInFlight > 0) {
+      realtimeRefreshQueued = queuedRefreshAfterMutationResponse({
+        queued: realtimeRefreshQueued,
+        refreshRequested,
+      });
+    }
     if (payload && payload.state == null && payload.mutation) {
       applyLocalMutation(payload.mutation);
     }
     if (payload && payload.state) {
+      // Apply the response first. Any signal queued during the mutation stays
+      // queued and drains once after the mutation window closes.
       handleMessage({ type: 'state', payload: payload.state });
     } else if (!refreshRequested) {
       setBusy(false);
@@ -1361,6 +1382,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
         ...state,
         pending: nextPending,
       };
+      invalidateMutationRelatedCaches();
       lastStateUpdatedAt = Date.now();
       renderAll();
       return;
@@ -1373,24 +1395,20 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
             ? mutation.verificationIds.map((id) => String(id || '').trim()).filter(Boolean)
             : []
           : [String(mutation.verificationId || '').trim()].filter(Boolean);
-      const idsToRemove = new Set(verificationIds);
-      if (idsToRemove.size === 0 || !Array.isArray(state.pending)) {
+      const removal = removePendingItemsById(state.pending, verificationIds);
+      if (removal.removedCount <= 0) {
         return;
       }
-      const nextPending = state.pending.filter((item) => !idsToRemove.has(String(item && item.id || '')));
-      const removedCount = state.pending.length - nextPending.length;
-      if (removedCount <= 0) {
-        return;
-      }
-      for (const id of idsToRemove) {
+      for (const id of removal.removedIds) {
         selectedPendingIds.delete(id);
       }
       const currentPendingCount = Number.isFinite(Number(state.pendingCount)) ? Number(state.pendingCount) : state.pending.length;
       state = {
         ...state,
-        pending: nextPending,
-        pendingCount: Math.max(0, currentPendingCount - removedCount),
+        pending: removal.items,
+        pendingCount: Math.max(0, currentPendingCount - removal.removedCount),
       };
+      invalidateMutationRelatedCaches();
       lastStateUpdatedAt = Date.now();
       renderAll();
     }
@@ -1479,7 +1497,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     if (!realtimeChannel) {
       return;
     }
-    if (isBusy) {
+    if (isBusy || mutationRequestsInFlight > 0) {
       realtimeRefreshQueued = true;
       return;
     }
@@ -1494,10 +1512,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       console.log(`Realtime refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       realtimeRefreshInFlight = false;
-      if (realtimeRefreshQueued && !isBusy) {
-        realtimeRefreshQueued = false;
-        void refreshFromRealtimeSignal();
-      }
+      flushQueuedRealtimeRefresh();
     }
   }
 
@@ -2775,10 +2790,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       }
     }
     syncSaveFlairButtonState();
-    if (!isBusy && realtimeRefreshQueued && !realtimeRefreshInFlight) {
-      realtimeRefreshQueued = false;
-      void refreshFromRealtimeSignal();
+    flushQueuedRealtimeRefresh();
+  }
+
+  function flushQueuedRealtimeRefresh() {
+    if (
+      !canStartQueuedRefresh({
+        queued: realtimeRefreshQueued,
+        refreshInFlight: realtimeRefreshInFlight,
+        busy: isBusy,
+        mutationInFlight: mutationRequestsInFlight > 0,
+      })
+    ) {
+      return;
     }
+    realtimeRefreshQueued = false;
+    void refreshFromRealtimeSignal();
   }
 
   function syncSaveFlairButtonState() {
@@ -2838,10 +2865,22 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   }
 
   function postWithBusy(message) {
+    const tracksMutation = Boolean(message && message.type && message.type !== 'refresh');
+    if (tracksMutation) {
+      mutationRequestsInFlight += 1;
+    }
+    const finishMutation = () => {
+      if (!tracksMutation) {
+        return;
+      }
+      mutationRequestsInFlight = Math.max(0, mutationRequestsInFlight - 1);
+      flushQueuedRealtimeRefresh();
+    };
     const pendingActionIdsForMessage = getPendingActionIdsForMessage(message);
     if (pendingActionIdsForMessage.length > 0) {
       if (pendingActionIdsForMessage.some((id) => pendingActionIds.has(id))) {
         showToast('That request is already being processed.', 'error');
+        finishMutation();
         return;
       }
       const isBatchReview = message && message.type === 'batchReview';
@@ -2854,11 +2893,12 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
           batchReviewInFlight = false;
         }
         setPendingActionBusy(pendingActionIdsForMessage, false);
+        finishMutation();
       });
       return;
     }
     setBusy(true);
-    void post(message);
+    void post(message).finally(finishMutation);
   }
 
   function showToast(text, tone) {
@@ -2904,6 +2944,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     approvedSearchItems = state.approved.slice();
     approvedSearchOffset = approvedSearchItems.length;
     approvedSearchHasMore = Boolean(state.approvedHasMore);
+    markViewFresh(searchViewStaleness, 'approved');
   }
 
   function syncSeededAuditResultsFromState() {
@@ -2913,10 +2954,12 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     auditSearchItems = state.auditLog.slice();
     auditSearchOffset = auditSearchItems.length;
     auditSearchHasMore = Boolean(state.auditHasMore);
+    markViewFresh(searchViewStaleness, 'audit');
   }
 
   function invalidateHistoryCaches(options) {
     const preserveData = Boolean(options && options.preserveData);
+    markViewsStale(searchViewStaleness, ['records', 'approved', 'audit']);
     historySearchRequestId += 1;
     if (!preserveData) {
       historySearchItems = [];
@@ -2949,6 +2992,11 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       auditSearchOffset = 0;
       auditSearchHasMore = false;
     }
+  }
+
+  function invalidateMutationRelatedCaches() {
+    invalidateHistoryCaches({ preserveData: true });
+    invalidateStatsCache({ preserveData: true });
   }
 
   function handleMessage(message) {
@@ -3022,37 +3070,40 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     }
 
     if (message.type === 'historySearchResults' && message.payload) {
-      if (Number(message.payload.requestId || 0) !== historySearchRequestId) {
+      if (!isMatchingRequestGeneration(message.payload.requestId, historySearchRequestId)) {
         return;
       }
       const payloadItems = Array.isArray(message.payload.items) ? message.payload.items : [];
       historySearchItems = historySearchItems.concat(payloadItems);
       historySearchOffset = Number(message.payload.offset || historySearchItems.length);
       historySearchHasMore = Boolean(message.payload.hasMore);
+      markViewFresh(searchViewStaleness, 'records');
       renderHistorySearchResults();
       return;
     }
 
     if (message.type === 'approvedSearchResults' && message.payload) {
-      if (Number(message.payload.requestId || 0) !== approvedSearchRequestId) {
+      if (!isMatchingRequestGeneration(message.payload.requestId, approvedSearchRequestId)) {
         return;
       }
       const payloadItems = Array.isArray(message.payload.items) ? message.payload.items : [];
       approvedSearchItems = approvedSearchItems.concat(payloadItems);
       approvedSearchOffset = Number(message.payload.offset || approvedSearchItems.length);
       approvedSearchHasMore = Boolean(message.payload.hasMore);
+      markViewFresh(searchViewStaleness, 'approved');
       renderApprovedSearchResults();
       return;
     }
 
     if (message.type === 'auditSearchResults' && message.payload) {
-      if (Number(message.payload.requestId || 0) !== auditSearchRequestId) {
+      if (!isMatchingRequestGeneration(message.payload.requestId, auditSearchRequestId)) {
         return;
       }
       const payloadItems = Array.isArray(message.payload.items) ? message.payload.items : [];
       auditSearchItems = auditSearchItems.concat(payloadItems);
       auditSearchOffset = Number(message.payload.offset || auditSearchItems.length);
       auditSearchHasMore = Boolean(message.payload.hasMore);
+      markViewFresh(searchViewStaleness, 'audit');
       renderAuditSearchResults();
     }
   }
@@ -7732,7 +7783,13 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     }
     if (reset) {
       const nextSignature = currentHistorySearchSignature();
-      if ((!options || options.force !== true) && historySearchRequestId > 0 && nextSignature === historySearchSignature) {
+      if (!shouldFetchCachedView({
+        force: Boolean(options && options.force === true),
+        stale: isViewStale(searchViewStaleness, 'records'),
+        requestId: historySearchRequestId,
+        nextSignature,
+        previousSignature: historySearchSignature,
+      })) {
         return;
       }
       historySearchSignature = nextSignature;
@@ -7767,7 +7824,13 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
       setApprovedSearchHintVisible(false);
       if (reset) {
         const nextSignature = currentApprovedSearchSignature();
-        if ((!options || options.force !== true) && approvedSearchRequestId > 0 && nextSignature === approvedSearchSignature) {
+        if (!shouldFetchCachedView({
+          force: Boolean(options && options.force === true),
+          stale: isViewStale(searchViewStaleness, 'approved'),
+          requestId: approvedSearchRequestId,
+          nextSignature,
+          previousSignature: approvedSearchSignature,
+        })) {
           return;
         }
         approvedSearchSignature = nextSignature;
@@ -7782,7 +7845,13 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     }
     if (reset) {
       const nextSignature = currentApprovedSearchSignature();
-      if ((!options || options.force !== true) && approvedSearchRequestId > 0 && nextSignature === approvedSearchSignature) {
+      if (!shouldFetchCachedView({
+        force: Boolean(options && options.force === true),
+        stale: isViewStale(searchViewStaleness, 'approved'),
+        requestId: approvedSearchRequestId,
+        nextSignature,
+        previousSignature: approvedSearchSignature,
+      })) {
         return;
       }
       approvedSearchSignature = nextSignature;
@@ -7814,7 +7883,13 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
     }
     if (reset) {
       const nextSignature = currentAuditSearchSignature();
-      if ((!options || options.force !== true) && auditSearchRequestId > 0 && nextSignature === auditSearchSignature) {
+      if (!shouldFetchCachedView({
+        force: Boolean(options && options.force === true),
+        stale: isViewStale(searchViewStaleness, 'audit'),
+        requestId: auditSearchRequestId,
+        nextSignature,
+        previousSignature: auditSearchSignature,
+      })) {
         return;
       }
       auditSearchSignature = nextSignature;
@@ -7823,11 +7898,11 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
   }
 
   function shouldUseSeededApprovedResults() {
-    return approvedSearchRequestId === 0 && approvedSearchItems.length > 0;
+    return approvedSearchRequestId === 0 && approvedSearchItems.length > 0 && !isViewStale(searchViewStaleness, 'approved');
   }
 
   function shouldUseSeededAuditResults() {
-    return auditSearchRequestId === 0 && auditSearchItems.length > 0;
+    return auditSearchRequestId === 0 && auditSearchItems.length > 0 && !isViewStale(searchViewStaleness, 'audit');
   }
 
   if (backToHubBtn) {
@@ -8249,6 +8324,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
 
   if (historyClearBtn) {
     historyClearBtn.addEventListener('click', () => {
+      markViewsStale(searchViewStaleness, ['records']);
       historySearchItems = [];
       historySearchOffset = 0;
       historySearchHasMore = false;
@@ -8277,6 +8353,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
 
   if (approvedClearBtn) {
     approvedClearBtn.addEventListener('click', () => {
+      markViewsStale(searchViewStaleness, ['approved']);
       approvedSearchItems = [];
       approvedSearchOffset = 0;
       approvedSearchHasMore = false;
@@ -8304,6 +8381,7 @@ import { isWizardRunActive, resolveReconciledWizardStepIndex } from './wizard-st
 
   if (auditClearBtn) {
     auditClearBtn.addEventListener('click', () => {
+      markViewsStale(searchViewStaleness, ['audit']);
       auditSearchItems = [];
       auditSearchOffset = 0;
       auditSearchHasMore = false;
